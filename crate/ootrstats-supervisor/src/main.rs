@@ -398,11 +398,11 @@ async fn main(args: Args) -> Result<(), Error> {
                 }
             }
             crossterm::execute!(stderr,
-                MoveToColumn(0),
                 MoveUp(workers.len() as u16),
             ).at_unknown()?;
         }
         crossterm::execute!(stderr,
+            MoveToColumn(0),
             Print(if completed_readers == available_parallelism {
                 // list of pending seeds fully initialized
                 match args.subcommand {
