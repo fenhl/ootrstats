@@ -11,6 +11,7 @@ use {
     },
     crossterm::{
         cursor::{
+            MoveDown,
             MoveToColumn,
             MoveUp,
         },
@@ -362,6 +363,17 @@ async fn main(args: Args) -> Result<(), Error> {
             },
             else => break,
         }
+        while let Ok(res) = cli_rx.try_recv() {
+            if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), modifiers, kind: KeyEventKind::Release, .. }) = res.at_unknown()? {
+                if modifiers.contains(KeyModifiers::CONTROL) {
+                    // finish rolling seeds that are already in progress but don't start any more
+                    readers.clear();
+                    completed_readers = available_parallelism;
+                    reader_rx = mpsc::channel(1).1;
+                    pending_seeds.clear();
+                }
+            }
+        }
         if let Ok(ref workers) = workers {
             for worker in workers {
                 if let Some(ref msg) = worker.msg {
@@ -430,17 +442,6 @@ async fn main(args: Args) -> Result<(), Error> {
             }),
             Clear(ClearType::UntilNewLine),
         ).at_unknown()?;
-        while let Ok(res) = cli_rx.try_recv() {
-            if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), modifiers, kind: KeyEventKind::Release, .. }) = res.at_unknown()? {
-                if modifiers.contains(KeyModifiers::CONTROL) {
-                    // finish rolling seeds that are already in progress but don't start any more
-                    readers.clear();
-                    completed_readers = available_parallelism;
-                    reader_rx = mpsc::channel(1).1;
-                    pending_seeds.clear();
-                }
-            }
-        }
         if pending_seeds.is_empty() && completed_readers == available_parallelism {
             if let Ok(ref mut workers) = workers {
                 for worker in workers {
@@ -454,6 +455,11 @@ async fn main(args: Args) -> Result<(), Error> {
         }
     }
     drop(cli_rx);
+    if let Ok(ref workers) = workers {
+        crossterm::execute!(stderr,
+            MoveDown(workers.len() as u16),
+        ).at_unknown()?;
+    }
     crossterm::execute!(stderr,
         Print("\r\n"),
     ).at_unknown()?;
