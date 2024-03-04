@@ -44,6 +44,7 @@ use {
         process::Command,
         select,
         sync::mpsc,
+        task::JoinError,
         time::Instant,
     },
     wheel::{
@@ -112,7 +113,7 @@ enum Error {
     #[error(transparent)] Config(#[from] config::Error),
     #[error(transparent)] Git(#[from] git2::Error),
     #[error(transparent)] Json(#[from] serde_json::Error),
-    #[error(transparent)] Task(#[from] tokio::task::JoinError),
+    #[error(transparent)] Task(#[from] JoinError),
     #[error(transparent)] ReaderSend(#[from] mpsc::error::SendError<ReaderMessage>),
     #[error(transparent)] Worker(#[from] worker::Error),
     #[error(transparent)] WorkerSend(#[from] mpsc::error::SendError<worker::SupervisorMessage>),
@@ -248,123 +249,139 @@ async fn main(args: Args) -> Result<(), Error> {
     let mut workers = Err(worker_tx);
     let mut pending_seeds = VecDeque::default();
     loop {
+        enum Event {
+            ReaderDone(Result<Result<(), Error>, JoinError>),
+            ReaderMessage(ReaderMessage),
+            WorkerDone(Result<Result<(), worker::Error>, JoinError>),
+            WorkerMessage(String, worker::Message),
+            End,
+        }
+
         select! {
-            Some(res) = readers.next() => { let () = res??; }
-            Some(msg) = reader_rx.recv() => {
-                let seed_idx = match msg {
-                    ReaderMessage::Pending(seed_idx) => Some(seed_idx),
-                    ReaderMessage::Success { seed_idx, instructions } => match args.subcommand {
-                        Subcommand::Bench => if let Some(instructions) = instructions {
-                            skipped += 1;
-                            instructions_success.push(instructions);
-                            None
-                        } else {
-                            // seed was already rolled but not benchmarked, roll a new seed instead
-                            fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
-                            Some(seed_idx)
+            event = async {
+                select! {
+                    Some(res) = readers.next() => Event::ReaderDone(res),
+                    Some(msg) = reader_rx.recv() => Event::ReaderMessage(msg),
+                    Some(res) = worker_tasks.next() => Event::WorkerDone(res),
+                    Some((name, msg)) = worker_rx.recv() => Event::WorkerMessage(name, msg),
+                    else => Event::End,
+                }
+            } => match event {
+                Event::ReaderDone(res) => { let () = res??; }
+                Event::ReaderMessage(msg) => {
+                    let seed_idx = match msg {
+                        ReaderMessage::Pending(seed_idx) => Some(seed_idx),
+                        ReaderMessage::Success { seed_idx, instructions } => match args.subcommand {
+                            Subcommand::Bench => if let Some(instructions) = instructions {
+                                skipped += 1;
+                                instructions_success.push(instructions);
+                                None
+                            } else {
+                                // seed was already rolled but not benchmarked, roll a new seed instead
+                                fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                                Some(seed_idx)
+                            },
                         },
-                    },
-                    ReaderMessage::Failure { seed_idx, instructions } => match args.subcommand {
-                        Subcommand::Bench => if let Some(instructions) = instructions {
-                            skipped += 1;
-                            instructions_failure.push(instructions);
-                            None
-                        } else {
-                            // seed was already rolled but not benchmarked, roll a new seed instead
-                            fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
-                            Some(seed_idx)
+                        ReaderMessage::Failure { seed_idx, instructions } => match args.subcommand {
+                            Subcommand::Bench => if let Some(instructions) = instructions {
+                                skipped += 1;
+                                instructions_failure.push(instructions);
+                                None
+                            } else {
+                                // seed was already rolled but not benchmarked, roll a new seed instead
+                                fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                                Some(seed_idx)
+                            },
                         },
-                    },
-                    ReaderMessage::Done => {
-                        completed_readers += 1;
-                        None
-                    }
-                };
-                if let Some(seed_idx) = seed_idx {
-                    let workers = match workers {
-                        Ok(ref mut workers) => workers,
-                        Err(worker_tx) => {
-                            let (new_worker_tasks, new_workers) = mem::take(&mut config.workers).into_iter()
-                                .map(|worker::Config { name, kind }| worker::State::new(worker_tx.clone(), name, kind, rando_rev, &settings, bench))
-                                .unzip::<_, _, _, Vec<_>>();
-                            worker_tasks = new_worker_tasks;
-                            workers = Ok(new_workers);
-                            workers.as_mut().ok().expect("just inserted")
+                        ReaderMessage::Done => {
+                            completed_readers += 1;
+                            None
                         }
                     };
-                    if let Some(worker) = workers.iter_mut().find(|worker| worker.ready > 0) {
-                        worker.roll(seed_idx).await?;
+                    if let Some(seed_idx) = seed_idx {
+                        let workers = match workers {
+                            Ok(ref mut workers) => workers,
+                            Err(worker_tx) => {
+                                let (new_worker_tasks, new_workers) = mem::take(&mut config.workers).into_iter()
+                                    .map(|worker::Config { name, kind }| worker::State::new(worker_tx.clone(), name, kind, rando_rev, &settings, bench))
+                                    .unzip::<_, _, _, Vec<_>>();
+                                worker_tasks = new_worker_tasks;
+                                workers = Ok(new_workers);
+                                workers.as_mut().ok().expect("just inserted")
+                            }
+                        };
+                        if let Some(worker) = workers.iter_mut().find(|worker| worker.ready > 0) {
+                            worker.roll(seed_idx).await?;
+                        } else {
+                            pending_seeds.push_back(seed_idx);
+                        }
+                    }
+                }
+                Event::WorkerDone(res) => { let () = res??; }
+                Event::WorkerMessage(name, msg) => if_chain! {
+                    if let Ok(ref mut workers) = workers;
+                    if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name);
+                    then {
+                        match msg {
+                            worker::Message::Init(msg) => worker.msg = Some(msg),
+                            worker::Message::Ready(ready) => {
+                                worker.ready = ready;
+                                while worker.ready > 0 {
+                                    worker.msg = None;
+                                    let Some(seed_idx) = pending_seeds.pop_front() else { break };
+                                    worker.roll(seed_idx).await?;
+                                }
+                            }
+                            worker::Message::LocalSuccess { seed_idx, instructions, spoiler_log_path, ready } => {
+                                worker.running -= 1;
+                                worker.completed += 1;
+                                if ready {
+                                    worker.ready += 1;
+                                    worker.msg = None;
+                                    if let Some(seed_idx) = pending_seeds.pop_front() {
+                                        worker.roll(seed_idx).await?;
+                                    }
+                                }
+                                let seed_dir = stats_dir.join(seed_idx.to_string());
+                                fs::create_dir_all(&seed_dir).await?;
+                                let stats_spoiler_log_path = seed_dir.join("spoiler.json");
+                                fs::rename(spoiler_log_path, &stats_spoiler_log_path).await?;
+                                fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
+                                    instructions,
+                                })?).await?;
+                                match args.subcommand {
+                                    Subcommand::Bench => instructions_success.push(instructions.ok_or(Error::MissingInstructions)?),
+                                }
+                            }
+                            worker::Message::Failure { seed_idx, instructions, error_log, ready } => {
+                                worker.running -= 1;
+                                worker.completed += 1;
+                                if ready {
+                                    worker.ready += 1;
+                                    worker.msg = None;
+                                    if let Some(seed_idx) = pending_seeds.pop_front() {
+                                        worker.roll(seed_idx).await?;
+                                    }
+                                }
+                                let seed_dir = stats_dir.join(seed_idx.to_string());
+                                fs::create_dir_all(&seed_dir).await?;
+                                let stats_error_log_path = seed_dir.join("error.log");
+                                fs::write(stats_error_log_path, &error_log).await?;
+                                fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
+                                    instructions,
+                                })?).await?;
+                                match args.subcommand {
+                                    Subcommand::Bench => instructions_failure.push(instructions.ok_or(Error::MissingInstructions)?),
+                                }
+                            }
+                        }
                     } else {
-                        pending_seeds.push_back(seed_idx);
+                        return Err(Error::WorkerNotFound)
                     }
-                }
-            }
-            Some(res) = worker_tasks.next() => { let () = res??; }
-            Some((name, msg)) = worker_rx.recv() => if_chain! {
-                if let Ok(ref mut workers) = workers;
-                if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name);
-                then {
-                    match msg {
-                        worker::Message::Init(msg) => worker.msg = Some(msg),
-                        worker::Message::Ready(ready) => {
-                            worker.ready = ready;
-                            while worker.ready > 0 {
-                                worker.msg = None;
-                                let Some(seed_idx) = pending_seeds.pop_front() else { break };
-                                worker.roll(seed_idx).await?;
-                            }
-                        }
-                        worker::Message::LocalSuccess { seed_idx, instructions, spoiler_log_path, ready } => {
-                            worker.running -= 1;
-                            worker.completed += 1;
-                            if ready {
-                                worker.ready += 1;
-                                worker.msg = None;
-                                if let Some(seed_idx) = pending_seeds.pop_front() {
-                                    worker.roll(seed_idx).await?;
-                                }
-                            }
-                            let seed_dir = stats_dir.join(seed_idx.to_string());
-                            fs::create_dir_all(&seed_dir).await?;
-                            let stats_spoiler_log_path = seed_dir.join("spoiler.json");
-                            fs::rename(spoiler_log_path, &stats_spoiler_log_path).await?;
-                            fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
-                                instructions,
-                            })?).await?;
-                            match args.subcommand {
-                                Subcommand::Bench => instructions_success.push(instructions.ok_or(Error::MissingInstructions)?),
-                            }
-                        }
-                        worker::Message::Failure { seed_idx, instructions, error_log, ready } => {
-                            worker.running -= 1;
-                            worker.completed += 1;
-                            if ready {
-                                worker.ready += 1;
-                                worker.msg = None;
-                                if let Some(seed_idx) = pending_seeds.pop_front() {
-                                    worker.roll(seed_idx).await?;
-                                }
-                            }
-                            let seed_dir = stats_dir.join(seed_idx.to_string());
-                            fs::create_dir_all(&seed_dir).await?;
-                            let stats_error_log_path = seed_dir.join("error.log");
-                            fs::write(stats_error_log_path, &error_log).await?;
-                            fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
-                                instructions,
-                            })?).await?;
-                            match args.subcommand {
-                                Subcommand::Bench => instructions_failure.push(instructions.ok_or(Error::MissingInstructions)?),
-                            }
-                        }
-                    }
-                } else {
-                    return Err(Error::WorkerNotFound)
-                }
+                },
+                Event::End => break,
             },
-            else => break,
-        }
-        while let Ok(res) = cli_rx.try_recv() {
-            if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), modifiers, kind: KeyEventKind::Release, .. }) = res.at_unknown()? {
+            Some(res) = cli_rx.recv() => if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), modifiers, kind: KeyEventKind::Release, .. }) = res.at_unknown()? {
                 if modifiers.contains(KeyModifiers::CONTROL) {
                     // finish rolling seeds that are already in progress but don't start any more
                     readers.clear();
@@ -372,7 +389,7 @@ async fn main(args: Args) -> Result<(), Error> {
                     reader_rx = mpsc::channel(1).1;
                     pending_seeds.clear();
                 }
-            }
+            },
         }
         if let Ok(ref workers) = workers {
             for worker in workers {
