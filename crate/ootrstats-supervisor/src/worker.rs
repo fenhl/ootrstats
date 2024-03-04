@@ -22,7 +22,10 @@ use {
         fs,
         traits::AsyncCommandOutputExt as _,
     },
-    ootrstats::RollOutput,
+    ootrstats::{
+        RandoSettings,
+        RollOutput,
+    },
     crate::SeedIdx,
 };
 #[cfg(windows)] use directories::UserDirs;
@@ -84,7 +87,7 @@ pub(crate) enum Error {
 }
 
 impl Kind {
-    async fn run(self, name: String, tx: mpsc::Sender<(String, Message)>, mut rx: mpsc::Receiver<SupervisorMessage>, rando_rev: git2::Oid, bench: bool) -> Result<(), Error> {
+    async fn run(self, name: String, tx: mpsc::Sender<(String, Message)>, mut rx: mpsc::Receiver<SupervisorMessage>, rando_rev: git2::Oid, settings: RandoSettings, bench: bool) -> Result<(), Error> {
         match self {
             Self::Local { base_rom_path, wsl_base_rom_path, cores } => {
                 tx.send((name.clone(), Message::Init(format!("cloning randomizer: determining repo path")))).await?;
@@ -136,8 +139,9 @@ impl Kind {
                                     }
                                 };
                                 let repo_path = repo_path.clone();
+                                let settings = settings.clone();
                                 rando_tasks.push(tokio::spawn(async move {
-                                    tx.send((name, match ootrstats::run_rando(&base_rom_path, &repo_path, bench).await? {
+                                    tx.send((name, match ootrstats::run_rando(&base_rom_path, &repo_path, &settings, bench).await? {
                                         RollOutput { instructions, log: Ok(spoiler_log_path) } => Message::LocalSuccess {
                                             ready: first_seed_rolled,
                                             seed_idx, instructions, spoiler_log_path,
@@ -171,10 +175,10 @@ pub(crate) struct State {
 }
 
 impl State {
-    pub(crate) fn new(worker_tx: mpsc::Sender<(String, Message)>, name: String, kind: Kind, rando_rev: git2::Oid, bench: bool) -> (JoinHandle<Result<(), Error>>, Self) {
+    pub(crate) fn new(worker_tx: mpsc::Sender<(String, Message)>, name: String, kind: Kind, rando_rev: git2::Oid, settings: &RandoSettings, bench: bool) -> (JoinHandle<Result<(), Error>>, Self) {
         let (supervisor_tx, supervisor_rx) = mpsc::channel(256);
         (
-            tokio::spawn(kind.run(name.clone(), worker_tx, supervisor_rx, rando_rev, bench)),
+            tokio::spawn(kind.run(name.clone(), worker_tx, supervisor_rx, rando_rev, settings.clone(), bench)),
             Self {
                 msg: None,
                 ready: 0,

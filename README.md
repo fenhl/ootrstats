@@ -50,6 +50,7 @@ The supervisor can be interrupted cleanly using <kbd>Ctrl</kbd><kbd>D</kbd>. If 
 ## Options
 
 * `--num-seeds`: Specifies the sample size, i.e. how many seeds to roll. Any existing seeds will be reused. Defaults to 16384.
+* `--preset`: The name of the settings preset to use. Defaults to the Default/Beginner preset.
 
 ## Subcommands
 

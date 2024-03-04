@@ -30,6 +30,21 @@ use {
 /// install using `wsl --update --pre-release` to get support for the CPU instruction counter and SSH access
 const WSL: &str = "C:\\Program Files\\WSL\\wsl.exe";
 
+#[derive(Clone)]
+pub enum RandoSettings {
+    Default,
+    Preset(String),
+}
+
+impl RandoSettings {
+    pub fn stats_dir(&self) -> Cow<'static, Path> {
+        match self {
+            Self::Default => Path::new("default").into(),
+            Self::Preset(preset) => Path::new("preset").join(preset).into(),
+        }
+    }
+}
+
 pub struct RollOutput {
     /// present iff the `bench` parameter was set.
     pub instructions: Option<u64>,
@@ -60,7 +75,7 @@ fn python() -> Result<PathBuf, RollError> {
     })
 }
 
-pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, bench: bool) -> Result<RollOutput, RollError> {
+pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoSettings, bench: bool) -> Result<RollOutput, RollError> {
     let resolved_settings = collect![as HashMap<_, _>:
         Cow::Borrowed("rom") => json!(base_rom_path),
         Cow::Borrowed("create_spoiler") => json!(true),
@@ -91,7 +106,10 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, bench: bool) -> R
     };
     cmd.arg("OoTRandomizer.py");
     cmd.arg("--no_log");
-    //TODO process settings
+    match settings {
+        RandoSettings::Default => {}
+        RandoSettings::Preset(preset) => { cmd.arg(format!("--settings_preset={preset}")); }
+    }
     cmd.arg("--settings=-");
     cmd.stdin(Stdio::piped());
     cmd.stderr(Stdio::piped());

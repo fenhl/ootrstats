@@ -52,6 +52,7 @@ use {
             IoResultExt as _,
         },
     },
+    ootrstats::RandoSettings,
     crate::config::Config,
 };
 #[cfg(windows)] use directories::{
@@ -93,6 +94,8 @@ struct Args {
     /// Sample size — how many seeds to roll.
     #[clap(short, long, default_value_t = 16384)]
     num_seeds: SeedIdx,
+    #[clap(short, long)]
+    preset: Option<String>,
     #[clap(subcommand)]
     subcommand: Subcommand,
 }
@@ -177,11 +180,16 @@ async fn main(args: Args) -> Result<(), Error> {
         }
         Repository::open(dir)?.head()?.peel_to_commit()?.id()
     };
+    let settings = if let Some(preset) = args.preset {
+        RandoSettings::Preset(preset)
+    } else {
+        RandoSettings::Default
+    };
     let stats_dir = {
         #[cfg(windows)] let project_dirs = ProjectDirs::from("net", "Fenhl", "ootrstats").ok_or(Error::MissingHomeDir)?;
         #[cfg(windows)] let stats_root = project_dirs.data_dir();
         #[cfg(unix)] let stats_root = BaseDirectories::new()?.place_config_file("ootrstats").at_unknown()?;
-        stats_root.join(rando_rev.to_string()).join("default")
+        stats_root.join(rando_rev.to_string()).join(settings.stats_dir())
     };
     let available_parallelism = std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN).get().try_into().unwrap_or(SeedIdx::MAX).min(args.num_seeds);
     let bench = matches!(args.subcommand, Subcommand::Bench);
@@ -239,17 +247,6 @@ async fn main(args: Args) -> Result<(), Error> {
     let mut workers = Err(worker_tx);
     let mut pending_seeds = VecDeque::default();
     loop {
-        while let Ok(res) = cli_rx.try_recv() {
-            if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), modifiers, kind: KeyEventKind::Press, .. }) = res.at_unknown()? {
-                if modifiers.contains(KeyModifiers::CONTROL) {
-                    // finish rolling seeds that are already in progress but don't start any more
-                    readers.clear();
-                    completed_readers = available_parallelism;
-                    reader_rx = mpsc::channel(1).1;
-                    pending_seeds.clear();
-                }
-            }
-        }
         select! {
             Some(res) = readers.next() => { let () = res??; }
             Some(msg) = reader_rx.recv() => {
@@ -287,7 +284,7 @@ async fn main(args: Args) -> Result<(), Error> {
                         Ok(ref mut workers) => workers,
                         Err(worker_tx) => {
                             let (new_worker_tasks, new_workers) = mem::take(&mut config.workers).into_iter()
-                                .map(|worker::Config { name, kind }| worker::State::new(worker_tx.clone(), name, kind, rando_rev, bench))
+                                .map(|worker::Config { name, kind }| worker::State::new(worker_tx.clone(), name, kind, rando_rev, &settings, bench))
                                 .unzip::<_, _, _, Vec<_>>();
                             worker_tasks = new_worker_tasks;
                             workers = Ok(new_workers);
@@ -433,6 +430,17 @@ async fn main(args: Args) -> Result<(), Error> {
             }),
             Clear(ClearType::UntilNewLine),
         ).at_unknown()?;
+        while let Ok(res) = cli_rx.try_recv() {
+            if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), modifiers, kind: KeyEventKind::Release, .. }) = res.at_unknown()? {
+                if modifiers.contains(KeyModifiers::CONTROL) {
+                    // finish rolling seeds that are already in progress but don't start any more
+                    readers.clear();
+                    completed_readers = available_parallelism;
+                    reader_rx = mpsc::channel(1).1;
+                    pending_seeds.clear();
+                }
+            }
+        }
         if pending_seeds.is_empty() && completed_readers == available_parallelism {
             if let Ok(ref mut workers) = workers {
                 for worker in workers {
