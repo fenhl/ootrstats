@@ -1,0 +1,22 @@
+[workspace]
+members = ["crate/*"]
+default-members = ["crate/ootrstats-supervisor"]
+resolver = "2"
+
+[workspace.package]
+version = "0.4.0"
+edition = "2021"
+
+[workspace.lints.rust]
+rust_2018_idioms = "deny"
+unsafe_code = "forbid"
+unused = "deny"
+unused_crate_dependencies = "deny"
+unused_import_braces = "deny"
+unused_lifetimes = "deny"
+unused_qualifications = "deny"
+warnings = "deny"
+
+[profile.release]
+lto = true
+strip = true
