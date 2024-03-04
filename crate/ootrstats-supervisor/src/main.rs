@@ -440,7 +440,7 @@ async fn main(args: Args) -> Result<(), Error> {
                             "{started}/{total} seeds started, {rolled} rolled, {} failures ({}%), ETA {}",
                             instructions_failure.len(),
                             if !instructions_success.is_empty() || !instructions_failure.is_empty() { 100 * instructions_failure.len() / (instructions_success.len() + instructions_failure.len()) } else { 100 },
-                            if instructions_success.len() + instructions_failure.len() > skipped.into() { (start_local + TimeDelta::from_std(start.elapsed().mul_f64((args.num_seeds - skipped) as f64 / (instructions_success.len() + instructions_failure.len() - usize::from(skipped)) as f64)).expect("ETA too long")).format("%Y-%m-%d %H:%M:%S").to_string() } else { format!("unknown") },
+                            if instructions_success.len() + instructions_failure.len() > skipped.into() { (start_local + TimeDelta::from_std(start.elapsed().mul_f64((total - usize::from(skipped)) as f64 / (instructions_success.len() + instructions_failure.len() - usize::from(skipped)) as f64)).expect("ETA too long")).format("%Y-%m-%d %H:%M:%S").to_string() } else { format!("unknown") },
                         )
                     }
                 }
