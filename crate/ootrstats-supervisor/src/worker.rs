@@ -50,6 +50,7 @@ pub(crate) enum Kind {
         #[serde(default = "make_neg_one")] // default to keeping one core free to avoid slowing down the supervisor too much
         cores: i8,
     },
+    #[serde(rename_all = "camelCase")]
     WebSocket {
         hostname: String,
         password: String,
