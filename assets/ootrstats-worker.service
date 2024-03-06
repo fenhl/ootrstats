@@ -1,0 +1,13 @@
+[Unit]
+Description=Ocarina of Time Randomizer stats worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Restart=always
+ExecStart=/home/fenhl/.cargo/bin/ootrstats-worker-daemon
+User=fenhl
+Group=fenhl
+
+[Install]
+WantedBy=multi-user.target

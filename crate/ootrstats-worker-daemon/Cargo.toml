@@ -1,0 +1,25 @@
+[package]
+name = "ootrstats-worker-daemon"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-proto = { version = "0.19.0", features = ["tokio-tungstenite"] }
+either = "1.10.0"
+futures = "0.3.30"
+if_chain = "1.0.2"
+ootrstats = { path = "../ootrstats" }
+rocket = "0.5.0"
+rocket_ws = "0.1.0"
+thiserror = "1.0.57"
+tokio = { version = "1.36.0", features = ["macros", "sync"] }
+wheel = { git = "https://github.com/fenhl/wheel", branch = "main", features = ["rocket"] }
+
+[target."cfg(windows)".dependencies]
+directories = "5.0.1"
+
+[target."cfg(unix)".dependencies]
+xdg = "2.5.2"

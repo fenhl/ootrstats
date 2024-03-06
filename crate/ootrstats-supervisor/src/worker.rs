@@ -1,58 +1,35 @@
 use {
     std::{
-        num::{
-            NonZeroU8,
-            NonZeroUsize,
-        },
         path::PathBuf,
+        pin::pin,
     },
-    futures::stream::{
-        FuturesUnordered,
-        StreamExt as _,
+    either::Either,
+    futures::{
+        SinkExt as _,
+        stream::{
+            StreamExt as _,
+            TryStreamExt as _,
+        },
     },
     if_chain::if_chain,
+    semver::Version,
     serde::Deserialize,
     tokio::{
-        process::Command,
         select,
         sync::mpsc,
         task::JoinHandle,
     },
-    wheel::{
-        fs,
-        traits::AsyncCommandOutputExt as _,
-    },
+    tokio_tungstenite::tungstenite,
     ootrstats::{
         RandoSettings,
-        RollOutput,
+        SeedIdx,
+        websocket,
+        worker::{
+            Message,
+            SupervisorMessage,
+        },
     },
-    crate::SeedIdx,
 };
-#[cfg(windows)] use directories::UserDirs;
-#[cfg(unix)] use std::path::Path;
-
-pub(crate) enum Message {
-    Init(String),
-    Ready(u8),
-    LocalSuccess {
-        seed_idx: SeedIdx,
-        /// present iff the `bench` parameter was set.
-        instructions: Option<u64>,
-        spoiler_log_path: PathBuf,
-        ready: bool,
-    },
-    Failure {
-        seed_idx: SeedIdx,
-        /// present iff the `bench` parameter was set.
-        instructions: Option<u64>,
-        error_log: Vec<u8>,
-        ready: bool,
-    },
-}
-
-pub(crate) enum SupervisorMessage {
-    Roll(SeedIdx),
-}
 
 #[derive(Deserialize)]
 pub(crate) struct Config {
@@ -73,92 +50,94 @@ pub(crate) enum Kind {
         #[serde(default = "make_neg_one")] // default to keeping one core free to avoid slowing down the supervisor too much
         cores: i8,
     },
+    WebSocket {
+        hostname: String,
+        password: String,
+        base_rom_path: String,
+        wsl_base_rom_path: Option<String>,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
-    #[error(transparent)] Wheel(#[from] wheel::Error),
-    #[error(transparent)] Roll(#[from] ootrstats::RollError),
+    #[error(transparent)] Local(#[from] ootrstats::worker::Error),
+    #[error(transparent)] Read(#[from] async_proto::ReadError),
+    #[error(transparent)] Semver(#[from] semver::Error),
     #[error(transparent)] Send(#[from] mpsc::error::SendError<(String, Message)>),
-    #[error(transparent)] Task(#[from] tokio::task::JoinError),
-    #[cfg(windows)]
-    #[error("user folder not found")]
-    MissingHomeDir,
+    #[error(transparent)] WebSocket(#[from] tungstenite::Error),
+    #[error(transparent)] Write(#[from] async_proto::WriteError),
 }
 
 impl Kind {
     async fn run(self, name: String, tx: mpsc::Sender<(String, Message)>, mut rx: mpsc::Receiver<SupervisorMessage>, rando_rev: git2::Oid, settings: RandoSettings, bench: bool) -> Result<(), Error> {
         match self {
             Self::Local { base_rom_path, wsl_base_rom_path, cores } => {
-                tx.send((name.clone(), Message::Init(format!("cloning randomizer: determining repo path")))).await?;
-                #[cfg(windows)] let repo_parent = UserDirs::new().ok_or(Error::MissingHomeDir)?.home_dir().join("git").join("github.com").join("OoTRandomizer").join("OoT-Randomizer").join("rev");
-                #[cfg(unix)] let repo_parent = Path::new("/opt/git/github.com").join("OoTRandomizer").join("OoT-Randomizer").join("rev"); //TODO respect GITDIR envar and allow ~/git fallback
-                let repo_path = repo_parent.join(rando_rev.to_string());
-                tx.send((name.clone(), Message::Init(format!("checking if repo exists")))).await?;
-                if !fs::exists(&repo_path).await? {
-                    tx.send((name.clone(), Message::Init(format!("creating repo path")))).await?;
-                    fs::create_dir_all(&repo_path).await?;
-                    tx.send((name.clone(), Message::Init(format!("cloning randomizer: initializing repo")))).await?;
-                    Command::new("git").arg("init").current_dir(&repo_path).check("git init").await?;
-                    tx.send((name.clone(), Message::Init(format!("cloning randomizer: adding remote")))).await?;
-                    Command::new("git").arg("remote").arg("add").arg("origin").arg("https://github.com/OoTRandomizer/OoT-Randomizer.git").current_dir(&repo_path).check("git remote add").await?;
-                    tx.send((name.clone(), Message::Init(format!("cloning randomizer: fetching")))).await?;
-                    Command::new("git").arg("fetch").arg("origin").arg(rando_rev.to_string()).arg("--depth=1").current_dir(&repo_path).check("git fetch").await?;
-                    tx.send((name.clone(), Message::Init(format!("cloning randomizer: resetting")))).await?;
-                    Command::new("git").arg("reset").arg("--hard").arg("FETCH_HEAD").current_dir(&repo_path).check("git reset").await?;
-                }
-                let mut first_seed_rolled = false;
-                tx.send((name.clone(), Message::Ready(1))).await?; // on first roll, the randomizer decompresses the base rom, which is not reentrant
-                let mut rando_tasks = FuturesUnordered::default();
+                let base_rom_path = if_chain! {
+                    if cfg!(windows);
+                    if bench;
+                    if let Some(wsl_base_rom_path) = wsl_base_rom_path;
+                    then {
+                        wsl_base_rom_path
+                    } else {
+                        base_rom_path
+                    }
+                };
+                let (inner_tx, mut inner_rx) = mpsc::channel(256);
+                let mut work = pin!(ootrstats::worker::work(inner_tx, rx, base_rom_path, cores, rando_rev, settings, bench));
                 loop {
                     select! {
-                        Some(res) = rando_tasks.next() => {
-                            let () = res??;
-                            if !first_seed_rolled {
-                                let cores = NonZeroU8::try_from(u8::try_from(if cores <= 0 {
-                                    std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN).get().try_into().unwrap_or(i8::MAX) + cores
-                                } else {
-                                    cores
-                                }).unwrap_or(1)).unwrap_or(NonZeroU8::MIN).get();
-                                tx.send((name.clone(), Message::Ready(cores))).await?;
-                                first_seed_rolled = true;
-                            }
+                        res = &mut work => {
+                            let () = res?;
+                            break
                         }
-                        Some(msg) = rx.recv() => match msg {
-                            SupervisorMessage::Roll(seed_idx) => {
-                                let tx = tx.clone();
-                                let name = name.clone();
-                                let base_rom_path = if_chain! {
-                                    if cfg!(windows);
-                                    if bench;
-                                    if let Some(ref wsl_base_rom_path) = wsl_base_rom_path;
-                                    then {
-                                        wsl_base_rom_path.clone()
-                                    } else {
-                                        base_rom_path.clone()
-                                    }
-                                };
-                                let repo_path = repo_path.clone();
-                                let settings = settings.clone();
-                                rando_tasks.push(tokio::spawn(async move {
-                                    tx.send((name, match ootrstats::run_rando(&base_rom_path, &repo_path, &settings, bench).await? {
-                                        RollOutput { instructions, log: Ok(spoiler_log_path) } => Message::LocalSuccess {
-                                            ready: first_seed_rolled,
-                                            seed_idx, instructions, spoiler_log_path,
-                                        },
-                                        RollOutput { instructions, log: Err(error_log) } => Message::Failure {
-                                            ready: first_seed_rolled,
-                                            seed_idx, instructions, error_log,
-                                        },
-                                    })).await?;
-                                    Ok::<_, Error>(())
-                                }));
-                            }
+                        msg = inner_rx.recv() => if let Some(msg) = msg {
+                            tx.send((name.clone(), msg)).await?;
+                        } else {
+                            drop(tx);
+                            let () = work.await?;
+                            break
                         },
-                        else => break,
                     }
                 }
-                //TODO config option to automatically delete repo path (always/if it didn't already exist)
+            }
+            Self::WebSocket { hostname, password, base_rom_path, wsl_base_rom_path } => {
+                tx.send((name.clone(), Message::Init(format!("connecting WebSocket")))).await?;
+                let (sink, stream) = async_proto::websocket(format!("wss://{hostname}/v{}", Version::parse(env!("CARGO_PKG_VERSION"))?.major)).await?;
+                let mut sink = pin!(sink);
+                let mut stream = pin!(stream);
+                tx.send((name.clone(), Message::Init(format!("handshaking")))).await?;
+                sink.send(websocket::ClientMessage::Handshake { password, base_rom_path, wsl_base_rom_path, rando_rev, settings, bench }).await?;
+                tx.send((name.clone(), Message::Init(format!("waiting for reply from worker")))).await?;
+                loop {
+                    select! {
+                        Some(res) = stream.next() => match res? {
+                            websocket::ServerMessage::Init(msg) => tx.send((name.clone(), Message::Init(msg))).await?,
+                            websocket::ServerMessage::Ready(ready) => tx.send((name.clone(), Message::Ready(ready))).await?,
+                            websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, ready } => tx.send((name.clone(), Message::Success {
+                                spoiler_log: Either::Right(spoiler_log),
+                                seed_idx, instructions, ready,
+                            })).await?,
+                            websocket::ServerMessage::Failure { seed_idx, instructions, error_log, ready } => tx.send((name.clone(), Message::Failure { seed_idx, instructions, error_log, ready })).await?,
+                        },
+                        res = rx.recv() => if let Some(msg) = res {
+                            sink.send(websocket::ClientMessage::Supervisor(msg)).await?;
+                        } else {
+                            drop(sink);
+                            while let Some(msg) = stream.try_next().await? {
+                                match msg {
+                                    websocket::ServerMessage::Init(msg) => tx.send((name.clone(), Message::Init(msg))).await?,
+                                    websocket::ServerMessage::Ready(ready) => tx.send((name.clone(), Message::Ready(ready))).await?,
+                                    websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, ready } => tx.send((name.clone(), Message::Success {
+                                        spoiler_log: Either::Right(spoiler_log),
+                                        seed_idx, instructions, ready,
+                                    })).await?,
+                                    websocket::ServerMessage::Failure { seed_idx, instructions, error_log, ready } => tx.send((name.clone(), Message::Failure { seed_idx, instructions, error_log, ready })).await?,
+                                }
+                            }
+                            break
+                        },
+                    }
+                }
             }
         }
         Ok(())

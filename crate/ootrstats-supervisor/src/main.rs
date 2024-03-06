@@ -25,8 +25,11 @@ use {
         terminal::{
             Clear,
             ClearType,
+            disable_raw_mode,
+            enable_raw_mode,
         },
     },
+    either::Either,
     futures::stream::{
         FuturesUnordered,
         StreamExt as _,
@@ -54,7 +57,10 @@ use {
             IoResultExt as _,
         },
     },
-    ootrstats::RandoSettings,
+    ootrstats::{
+        RandoSettings,
+        SeedIdx,
+    },
     crate::config::Config,
 };
 #[cfg(windows)] use directories::{
@@ -68,8 +74,6 @@ use {
 
 mod config;
 mod worker;
-
-type SeedIdx = u16;
 
 enum ReaderMessage {
     Pending(SeedIdx),
@@ -116,7 +120,7 @@ enum Error {
     #[error(transparent)] Task(#[from] JoinError),
     #[error(transparent)] ReaderSend(#[from] mpsc::error::SendError<ReaderMessage>),
     #[error(transparent)] Worker(#[from] worker::Error),
-    #[error(transparent)] WorkerSend(#[from] mpsc::error::SendError<worker::SupervisorMessage>),
+    #[error(transparent)] WorkerSend(#[from] mpsc::error::SendError<ootrstats::worker::SupervisorMessage>),
     #[error(transparent)] Wheel(#[from] wheel::Error),
     #[cfg(unix)] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
     #[cfg(windows)]
@@ -134,7 +138,7 @@ impl wheel::CustomExit for Error {
     fn exit(self, cmd_name: &'static str) -> ! {
         eprintln!("\r");
         match self {
-            Self::Worker(worker::Error::Roll(ootrstats::RollError::PerfSyntax(stderr))) => {
+            Self::Worker(worker::Error::Local(ootrstats::worker::Error::Roll(ootrstats::RollError::PerfSyntax(stderr)))) => {
                 eprintln!("{cmd_name}: roll error: failed to parse `perf` output\r");
                 eprintln!("stderr:\r");
                 eprintln!("{}\r", String::from_utf8_lossy(&stderr).lines().filter(|line| !regex_is_match!("^[0-9]+ files remaining$", line)).format("\r\n"));
@@ -148,8 +152,7 @@ impl wheel::CustomExit for Error {
     }
 }
 
-#[wheel::main(custom_exit)]
-async fn main(args: Args) -> Result<(), Error> {
+async fn cli(args: Args) -> Result<(), Error> {
     let (cli_tx, mut cli_rx) = mpsc::channel(256);
     tokio::spawn(async move {
         let mut cli_events = crossterm::event::EventStream::default();
@@ -253,7 +256,7 @@ async fn main(args: Args) -> Result<(), Error> {
             ReaderDone(Result<Result<(), Error>, JoinError>),
             ReaderMessage(ReaderMessage),
             WorkerDone(Result<Result<(), worker::Error>, JoinError>),
-            WorkerMessage(String, worker::Message),
+            WorkerMessage(String, ootrstats::worker::Message),
             End,
         }
 
@@ -323,8 +326,8 @@ async fn main(args: Args) -> Result<(), Error> {
                     if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name);
                     then {
                         match msg {
-                            worker::Message::Init(msg) => worker.msg = Some(msg),
-                            worker::Message::Ready(ready) => {
+                            ootrstats::worker::Message::Init(msg) => worker.msg = Some(msg),
+                            ootrstats::worker::Message::Ready(ready) => {
                                 worker.ready = ready;
                                 while worker.ready > 0 {
                                     worker.msg = None;
@@ -332,7 +335,7 @@ async fn main(args: Args) -> Result<(), Error> {
                                     worker.roll(seed_idx).await?;
                                 }
                             }
-                            worker::Message::LocalSuccess { seed_idx, instructions, spoiler_log_path, ready } => {
+                            ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log, ready } => {
                                 worker.running -= 1;
                                 worker.completed += 1;
                                 if ready {
@@ -345,7 +348,10 @@ async fn main(args: Args) -> Result<(), Error> {
                                 let seed_dir = stats_dir.join(seed_idx.to_string());
                                 fs::create_dir_all(&seed_dir).await?;
                                 let stats_spoiler_log_path = seed_dir.join("spoiler.json");
-                                fs::rename(spoiler_log_path, &stats_spoiler_log_path).await?;
+                                match spoiler_log {
+                                    Either::Left(spoiler_log_path) => fs::rename(spoiler_log_path, stats_spoiler_log_path).await?,
+                                    Either::Right(spoiler_log) => fs::write(stats_spoiler_log_path, spoiler_log).await?,
+                                }
                                 fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
                                     instructions,
                                 })?).await?;
@@ -353,7 +359,7 @@ async fn main(args: Args) -> Result<(), Error> {
                                     Subcommand::Bench => instructions_success.push(instructions.ok_or(Error::MissingInstructions)?),
                                 }
                             }
-                            worker::Message::Failure { seed_idx, instructions, error_log, ready } => {
+                            ootrstats::worker::Message::Failure { seed_idx, instructions, error_log, ready } => {
                                 worker.running -= 1;
                                 worker.completed += 1;
                                 if ready {
@@ -440,7 +446,7 @@ async fn main(args: Args) -> Result<(), Error> {
                             "{started}/{total} seeds started, {rolled} rolled, {} failures ({}%), ETA {}",
                             instructions_failure.len(),
                             if !instructions_success.is_empty() || !instructions_failure.is_empty() { 100 * instructions_failure.len() / (instructions_success.len() + instructions_failure.len()) } else { 100 },
-                            if instructions_success.len() + instructions_failure.len() > skipped.into() { (start_local + TimeDelta::from_std(start.elapsed().mul_f64((total - usize::from(skipped)) as f64 / (instructions_success.len() + instructions_failure.len() - usize::from(skipped)) as f64)).expect("ETA too long")).format("%Y-%m-%d %H:%M:%S").to_string() } else { format!("unknown") },
+                            if instructions_success.len() + instructions_failure.len() > usize::from(skipped) { (start_local + TimeDelta::from_std(start.elapsed().mul_f64((total - usize::from(skipped)) as f64 / (instructions_success.len() + instructions_failure.len() - usize::from(skipped)) as f64)).expect("ETA too long")).format("%Y-%m-%d %H:%M:%S").to_string() } else { format!("unknown") },
                         )
                     }
                 }
@@ -500,4 +506,12 @@ async fn main(args: Args) -> Result<(), Error> {
         },
     }
     Ok(())
+}
+
+#[wheel::main(custom_exit)]
+async fn main(args: Args) -> Result<(), Error> {
+    enable_raw_mode().at_unknown()?;
+    let res = cli(args).await;
+    disable_raw_mode().at_unknown()?;
+    res
 }

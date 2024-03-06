@@ -41,11 +41,31 @@ And the following optional entries:
 * `wslBaseRomPath`: An absolute path to the vanilla OoT rom that will be used if the randomizer is run inside [WSL](https://learn.microsoft.com/windows/wsl/about), i.e. for the `bench` subcommand if this worker is running on Windows. Defaults to `baseRomPath` if not specified.
 * `cores`: The maximum number of instances of the randomizer to run in parallel. If this number is 0 or negative, it will be added to the number of available CPU cores, e.g. if 6 cores are detected and a number of `-2` is given, 4 cores will be used. Defaults to `-1`.
 
+### `webSocket`
+
+A worker that listens to WebSocket connections from the supervisor. To set up, do the following on the worker computer:
+
+1. Install Rust
+2. Run `cargo install --git=https://github.com/fenhl/ootrstats --branch=main ootrstats-worker-daemon`
+3. Create a text file at `$XDG_CONFIG_DIRS/ootrstats-worker-daemon-password.txt` on Unix or `%APPDATA%\Fenhl\ootrstats\config\worker-daemon-password.txt` on Windows, defining a password that the supervisor will use to connect to this worker. Leading and trailing whitespace in the text file will be ignored.
+4. Start the worker daemon, e.g. by editing `assets/ootrstats-worker.service` inside a clone of this repository to adjust the username, then running `sudo systemctl enable --now assets/ootrstats-worker.service` if the worker is on a Linux distro that uses systemd.
+5. Make the worker daemon reachable from the netowrk, e.g. by enabling (an edited copy of) `assets/ootrstats.fenhl.net.nginx` if nginx is installed on the worker.
+
+The worker configuration takes the following additional required entries:
+
+* `hostname`: The hostname or IP address of the worker, optionally with the port after a `:` separator (port defaults to 443).
+* `password`: The password from step 3 of the worker setup described above.
+* `baseRomPath`: An absolute path to the vanilla OoT rom on the worker computer. See [the randomizer's documentation](https://github.com/OoTRandomizer/OoT-Randomizer#installation) for details.
+
+And the following optional entry:
+
+* `wslBaseRomPath`: An absolute path to the vanilla OoT rom that will be used if the randomizer is run inside [WSL](https://learn.microsoft.com/windows/wsl/about), i.e. for the `bench` subcommand if this worker is running on Windows. Defaults to `baseRomPath` if not specified.
+
 # Usage
 
 Run the `ootrstats-supervisor` command, followed by any options you would like to change from their defaults, followed by a subcommand.
 
-The supervisor can be interrupted cleanly using <kbd>Ctrl</kbd><kbd>D</kbd>. If this is used, the supervisor will wait for seeds currently being rolled to finish before exiting, but will no longer start rolling any new seeds.
+The supervisor can be interrupted cleanly using <kbd>Ctrl</kbd><kbd>C</kbd>. If this is used, the supervisor will wait for seeds currently being rolled to finish before exiting, but will no longer start rolling any new seeds.
 
 ## Options
 

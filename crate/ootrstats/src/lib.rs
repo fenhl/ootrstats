@@ -9,6 +9,8 @@ use {
         },
         process::Stdio,
     },
+    async_proto::Protocol,
+    bytes::Bytes,
     collect_mac::collect,
     itertools::Itertools as _,
     lazy_regex::regex_captures,
@@ -27,10 +29,15 @@ use {
 };
 #[cfg(windows)] use directories::UserDirs;
 
+pub mod websocket;
+pub mod worker;
+
 /// install using `wsl --update --pre-release` to get support for the CPU instruction counter and SSH access
 const WSL: &str = "C:\\Program Files\\WSL\\wsl.exe";
 
-#[derive(Clone)]
+pub type SeedIdx = u16;
+
+#[derive(Clone, Protocol)]
 pub enum RandoSettings {
     Default,
     Preset(String),
@@ -49,7 +56,7 @@ pub struct RollOutput {
     /// present iff the `bench` parameter was set.
     pub instructions: Option<u64>,
     /// `Ok`: spoiler log, `Err`: stderr
-    pub log: Result<PathBuf, Vec<u8>>,
+    pub log: Result<PathBuf, Bytes>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -146,7 +153,7 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
             }
             Ok(repo_path.join("Output").join(stderr.iter().rev().find_map(|line| line.strip_prefix("Created spoiler log at: ")).ok_or(RollError::SpoilerLogPath)?))
         } else {
-            Err(output.stderr)
+            Err(output.stderr.into())
         },
     })
 }
