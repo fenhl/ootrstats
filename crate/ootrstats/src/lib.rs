@@ -128,6 +128,7 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
                 }
             };
             cmd.arg("stat");
+            cmd.arg("--event=instructions:u");
             cmd.arg("/usr/bin/python3");
             cmd
         }
@@ -198,6 +199,7 @@ pub async fn run_rsl(repo_path: &Path, bench: bool) -> Result<RollOutput, RollEr
                 }
             };
             cmd.arg("stat");
+            cmd.arg("--event=instructions:u");
             cmd.arg("/usr/bin/python3");
             cmd
         }
