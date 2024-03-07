@@ -31,9 +31,12 @@ use {
         },
     },
     either::Either,
-    futures::stream::{
-        FuturesUnordered,
-        StreamExt as _,
+    futures::{
+        future::FutureExt as _,
+        stream::{
+            FuturesUnordered,
+            StreamExt as _,
+        },
     },
     git2::Repository,
     if_chain::if_chain,
@@ -127,7 +130,6 @@ enum Error {
     #[error(transparent)] Json(#[from] serde_json::Error),
     #[error(transparent)] Task(#[from] JoinError),
     #[error(transparent)] ReaderSend(#[from] mpsc::error::SendError<ReaderMessage>),
-    #[error(transparent)] Worker(#[from] worker::Error),
     #[error(transparent)] WorkerSend(#[from] mpsc::error::SendError<ootrstats::worker::SupervisorMessage>),
     #[error(transparent)] Wheel(#[from] wheel::Error),
     #[cfg(unix)] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
@@ -138,6 +140,11 @@ enum Error {
     MissingInstructions,
     #[error("found both spoiler and error logs for a seed")]
     SuccessAndFailure,
+    #[error("error in worker {worker}: {source}")]
+    Worker {
+        worker: String,
+        source: worker::Error,
+    },
     #[error("received a message from an unknown worker")]
     WorkerNotFound,
 }
@@ -146,8 +153,8 @@ impl wheel::CustomExit for Error {
     fn exit(self, cmd_name: &'static str) -> ! {
         eprintln!("\r");
         match self {
-            Self::Worker(worker::Error::Local(ootrstats::worker::Error::Roll(ootrstats::RollError::PerfSyntax(stderr)))) => {
-                eprintln!("{cmd_name}: roll error: failed to parse `perf` output\r");
+            Self::Worker { worker, source: worker::Error::Local(ootrstats::worker::Error::Roll(ootrstats::RollError::PerfSyntax(stderr))) } => {
+                eprintln!("{cmd_name}: roll error in worker {worker}: failed to parse `perf` output\r");
                 eprintln!("stderr:\r");
                 eprintln!("{}\r", String::from_utf8_lossy(&stderr).lines().filter(|line| !regex_is_match!("^[0-9]+ files remaining$", line)).format("\r\n"));
             }
@@ -284,7 +291,7 @@ async fn cli(args: Args) -> Result<(), Error> {
         enum Event {
             ReaderDone(Result<Result<(), Error>, JoinError>),
             ReaderMessage(ReaderMessage),
-            WorkerDone(Result<Result<(), worker::Error>, JoinError>),
+            WorkerDone(String, Result<Result<(), worker::Error>, JoinError>),
             WorkerMessage(String, ootrstats::worker::Message),
             End,
         }
@@ -294,7 +301,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                 select! {
                     Some(res) = readers.next() => Event::ReaderDone(res),
                     Some(msg) = reader_rx.recv() => Event::ReaderMessage(msg),
-                    Some(res) = worker_tasks.next() => Event::WorkerDone(res),
+                    Some((name, res)) = worker_tasks.next() => Event::WorkerDone(name, res),
                     Some((name, msg)) = worker_rx.recv() => Event::WorkerMessage(name, msg),
                     else => Event::End,
                 }
@@ -335,7 +342,10 @@ async fn cli(args: Args) -> Result<(), Error> {
                             Ok(ref mut workers) => workers,
                             Err(worker_tx) => {
                                 let (new_worker_tasks, new_workers) = mem::take(&mut config.workers).into_iter()
-                                    .map(|worker::Config { name, kind }| worker::State::new(worker_tx.clone(), name, kind, rando_rev, &setup, bench))
+                                    .map(|worker::Config { name, kind }| {
+                                        let (task, state) = worker::State::new(worker_tx.clone(), name.clone(), kind, rando_rev, &setup, bench);
+                                        (task.map(move |res| (name, res)), state)
+                                    })
                                     .unzip::<_, _, _, Vec<_>>();
                                 worker_tasks = new_worker_tasks;
                                 workers = Ok(new_workers);
@@ -349,7 +359,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                         }
                     }
                 }
-                Event::WorkerDone(res) => { let () = res??; }
+                Event::WorkerDone(worker, result) => { let () = result?.map_err(|source| Error::Worker { worker, source })?; }
                 Event::WorkerMessage(name, msg) => if_chain! {
                     if let Ok(ref mut workers) = workers;
                     if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name);

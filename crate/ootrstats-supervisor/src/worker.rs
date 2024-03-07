@@ -1,14 +1,18 @@
 use {
     std::{
         path::PathBuf,
-        pin::pin,
+        pin::{
+            Pin,
+            pin,
+        },
     },
     either::Either,
     futures::{
         SinkExt as _,
         stream::{
+            self,
+            Stream,
             StreamExt as _,
-            TryStreamExt as _,
         },
     },
     if_chain::if_chain,
@@ -108,34 +112,38 @@ impl Kind {
                 tx.send((name.clone(), Message::Init(format!("connecting WebSocket")))).await?;
                 let (sink, stream) = async_proto::websocket(format!("{}://{hostname}/v{}", if tls { "wss" } else { "ws" }, Version::parse(env!("CARGO_PKG_VERSION"))?.major)).await?;
                 let mut sink = pin!(sink);
-                let mut stream = pin!(stream);
+                let mut stream = Box::pin(stream) as Pin<Box<dyn Stream<Item = _> + Send>>;
                 tx.send((name.clone(), Message::Init(format!("handshaking")))).await?;
                 sink.send(websocket::ClientMessage::Handshake { password, base_rom_path, wsl_base_rom_path, rando_rev, setup, bench }).await?;
                 tx.send((name.clone(), Message::Init(format!("waiting for reply from worker")))).await?;
                 loop {
                     select! {
-                        Some(res) = stream.next() => match res? {
-                            websocket::ServerMessage::Init(msg) => tx.send((name.clone(), Message::Init(msg))).await?,
-                            websocket::ServerMessage::Ready(ready) => tx.send((name.clone(), Message::Ready(ready))).await?,
-                            websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, ready } => tx.send((name.clone(), Message::Success {
+                        Some(res) = stream.next() => match res {
+                            Ok(websocket::ServerMessage::Init(msg)) => tx.send((name.clone(), Message::Init(msg))).await?,
+                            Ok(websocket::ServerMessage::Ready(ready)) => tx.send((name.clone(), Message::Ready(ready))).await?,
+                            Ok(websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, ready }) => tx.send((name.clone(), Message::Success {
                                 spoiler_log: Either::Right(spoiler_log),
                                 seed_idx, instructions, ready,
                             })).await?,
-                            websocket::ServerMessage::Failure { seed_idx, instructions, error_log, ready } => tx.send((name.clone(), Message::Failure { seed_idx, instructions, error_log, ready })).await?,
+                            Ok(websocket::ServerMessage::Failure { seed_idx, instructions, error_log, ready }) => tx.send((name.clone(), Message::Failure { seed_idx, instructions, error_log, ready })).await?,
+                            Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => stream = Box::pin(stream::empty()),
+                            Err(e) => return Err(e.into()),
                         },
                         res = rx.recv() => if let Some(msg) = res {
                             sink.send(websocket::ClientMessage::Supervisor(msg)).await?;
                         } else {
                             drop(sink);
-                            while let Some(msg) = stream.try_next().await? {
-                                match msg {
-                                    websocket::ServerMessage::Init(msg) => tx.send((name.clone(), Message::Init(msg))).await?,
-                                    websocket::ServerMessage::Ready(ready) => tx.send((name.clone(), Message::Ready(ready))).await?,
-                                    websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, ready } => tx.send((name.clone(), Message::Success {
+                            while let Some(res) = stream.next().await {
+                                match res {
+                                    Ok(websocket::ServerMessage::Init(msg)) => tx.send((name.clone(), Message::Init(msg))).await?,
+                                    Ok(websocket::ServerMessage::Ready(ready)) => tx.send((name.clone(), Message::Ready(ready))).await?,
+                                    Ok(websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, ready }) => tx.send((name.clone(), Message::Success {
                                         spoiler_log: Either::Right(spoiler_log),
                                         seed_idx, instructions, ready,
                                     })).await?,
-                                    websocket::ServerMessage::Failure { seed_idx, instructions, error_log, ready } => tx.send((name.clone(), Message::Failure { seed_idx, instructions, error_log, ready })).await?,
+                                    Ok(websocket::ServerMessage::Failure { seed_idx, instructions, error_log, ready }) => tx.send((name.clone(), Message::Failure { seed_idx, instructions, error_log, ready })).await?,
+                                    Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => break,
+                                    Err(e) => return Err(e.into()),
                                 }
                             }
                             break

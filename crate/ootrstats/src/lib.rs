@@ -99,7 +99,7 @@ pub enum RollError {
 
 fn python() -> Result<PathBuf, RollError> {
     Ok({
-        #[cfg(windows)] { UserDirs::new().ok_or(RollError::MissingHomeDir)?.home_dir().join("scoop").join("apps").join("python").join("current").join("py.exe") }
+        #[cfg(windows)] { UserDirs::new().ok_or(RollError::MissingHomeDir)?.home_dir().join("scoop").join("apps").join("python").join("current").join("python.exe") }
         #[cfg(target_os = "linux")] { PathBuf::from("/usr/bin/python3") }
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))] { PathBuf::from("/opt/homebrew/bin/python3") }
         #[cfg(all(target_os = "macos", target_arch = "x86_64"))] { PathBuf::from("/usr/local/bin/python3") }
