@@ -89,7 +89,7 @@ pub enum RollError {
     #[cfg(windows)]
     #[error("user folder not found")]
     MissingHomeDir,
-    #[error("failed to parse `perf` output")]
+    #[error("failed to parse `perf` output: {}", String::from_utf8_lossy(.0))]
     PerfSyntax(Vec<u8>),
     #[error("the RSL script errored")]
     RslScriptExit(std::process::Output),
