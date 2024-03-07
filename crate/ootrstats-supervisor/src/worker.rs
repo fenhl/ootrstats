@@ -74,6 +74,11 @@ pub(crate) enum Error {
     #[error(transparent)] Send(#[from] mpsc::error::SendError<(String, Message)>),
     #[error(transparent)] WebSocket(#[from] tungstenite::Error),
     #[error(transparent)] Write(#[from] async_proto::WriteError),
+    #[error("{debug}")]
+    Remote {
+        debug: String,
+        display: String,
+    },
 }
 
 impl Kind {
@@ -126,6 +131,7 @@ impl Kind {
                                 seed_idx, instructions, ready,
                             })).await?,
                             Ok(websocket::ServerMessage::Failure { seed_idx, instructions, error_log, ready }) => tx.send((name.clone(), Message::Failure { seed_idx, instructions, error_log, ready })).await?,
+                            Ok(websocket::ServerMessage::Error { display, debug }) => return Err(Error::Remote { debug, display }),
                             Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => stream = Box::pin(stream::empty()),
                             Err(e) => return Err(e.into()),
                         },
@@ -142,6 +148,7 @@ impl Kind {
                                         seed_idx, instructions, ready,
                                     })).await?,
                                     Ok(websocket::ServerMessage::Failure { seed_idx, instructions, error_log, ready }) => tx.send((name.clone(), Message::Failure { seed_idx, instructions, error_log, ready })).await?,
+                                    Ok(websocket::ServerMessage::Error { display, debug }) => return Err(Error::Remote { debug, display }),
                                     Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => break,
                                     Err(e) => return Err(e.into()),
                                 }

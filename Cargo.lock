@@ -1345,7 +1345,7 @@ checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
 
 [[package]]
 name = "ootrstats"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "async-proto",
  "bytes",
@@ -1364,7 +1364,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-supervisor"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "async-proto",
  "chrono",
@@ -1390,7 +1390,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-daemon"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "async-proto",
  "directories",

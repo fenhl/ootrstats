@@ -39,4 +39,8 @@ pub enum ServerMessage {
         error_log: Bytes,
         ready: bool,
     },
+    Error {
+        display: String,
+        debug: String,
+    },
 }

@@ -106,9 +106,10 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 tx.send(Message::Init(format!("cloning random settings script: resetting"))).await?;
                 Command::new("git").arg("reset").arg("--hard").arg("FETCH_HEAD").current_dir(&repo_path).check("git reset").await?;
             }
+            tx.send(Message::Init(format!("copying base rom to RSL repo"))).await?;
             let rsl_base_rom_path = repo_path.join("data").join("oot-ntscu-1.0.z64");
             if cfg!(target_os = "windows") && bench {
-                Command::new(crate::WSL).arg("cp").arg(&base_rom_path).arg(rsl_base_rom_path).check("wsl cp").await?;
+                Command::new(crate::WSL).arg("cp").arg(&base_rom_path).arg("data/oot-ntscu-1.0.z64").current_dir(&repo_path).check("wsl cp").await?;
             } else {
                 if !fs::exists(&rsl_base_rom_path).await? {
                     fs::copy(&base_rom_path, rsl_base_rom_path).await?;
