@@ -9,6 +9,7 @@ use {
         TimeDelta,
         prelude::*,
     },
+    clap::builder::ArgPredicate,
     crossterm::{
         cursor::{
             MoveDown,
@@ -59,6 +60,7 @@ use {
     },
     ootrstats::{
         RandoSettings,
+        RandoSetup,
         SeedIdx,
     },
     crate::config::Config,
@@ -100,7 +102,13 @@ struct Args {
     /// Sample size — how many seeds to roll.
     #[clap(short, long, default_value_t = 16384)]
     num_seeds: SeedIdx,
+    #[clap(long)]
+    rsl: bool,
+    #[clap(short = 'u', long, default_value = "OoTRandomizer", default_value_if("rsl", ArgPredicate::IsPresent, Some("matthewkirby")))]
+    github_user: String,
     #[clap(short, long)]
+    branch: Option<String>,
+    #[clap(short, long, conflicts_with("rsl"))]
     preset: Option<String>,
     #[clap(subcommand)]
     subcommand: Subcommand,
@@ -166,35 +174,56 @@ async fn cli(args: Args) -> Result<(), Error> {
     ).at_unknown()?;
     let mut config = Config::load().await?;
     let rando_rev = {
-        #[cfg(windows)] let dir_parent = UserDirs::new().ok_or(Error::MissingHomeDir)?.home_dir().join("git").join("github.com").join("OoTRandomizer").join("OoT-Randomizer");
-        #[cfg(unix)] let dir_parent = Path::new("/opt/git/github.com").join("OoTRandomizer").join("OoT-Randomizer"); //TODO respect GITDIR envar and allow ~/git fallback
-        let dir = dir_parent.join("main");
+        let repo_name = if args.rsl { "plando-random-settings" } else { "OoT-Randomizer" };
+        #[cfg(windows)] let mut dir_parent = UserDirs::new().ok_or(Error::MissingHomeDir)?.home_dir().join("git").join("github.com").join(&args.github_user).join(repo_name);
+        #[cfg(unix)] let mut dir_parent = Path::new("/opt/git/github.com").join(&args.github_user).join(repo_name); //TODO respect GITDIR envar and allow ~/git fallback
+        let dir_name = if let Some(ref branch) = args.branch {
+            dir_parent = dir_parent.join("branch");
+            branch
+        } else {
+            "main"
+        };
+        let dir = dir_parent.join(dir_name);
         if fs::exists(&dir).await? {
             Command::new("git")
                 .arg("pull")
                 .current_dir(&dir)
                 .check("git pull").await?;
         } else {
-            Command::new("git")
-                .arg("clone")
-                .arg("--depth=1")
-                .arg("https://github.com/OoTRandomizer/OoT-Randomizer.git")
-                .arg("main")
-                .current_dir(dir_parent)
-                .check("git clone").await?;
+            let mut cmd = Command::new("git");
+            cmd.arg("clone");
+            cmd.arg("--depth=1");
+            cmd.arg(format!("https://github.com/{}/{repo_name}.git", args.github_user));
+            if let Some(ref branch) = args.branch {
+                cmd.arg("--branch");
+                cmd.arg(branch);
+            }
+            cmd.arg(dir_name);
+            cmd.current_dir(dir_parent).check("git clone").await?;
         }
         Repository::open(dir)?.head()?.peel_to_commit()?.id()
     };
-    let settings = if let Some(preset) = args.preset {
-        RandoSettings::Preset(preset)
+    let setup = if args.rsl {
+        RandoSetup::Rsl {
+            github_user: args.github_user,
+            branch: args.branch,
+        }
     } else {
-        RandoSettings::Default
+        RandoSetup::Normal {
+            github_user: args.github_user,
+            branch: args.branch,
+            settings: if let Some(preset) = args.preset {
+                RandoSettings::Preset(preset)
+            } else {
+                RandoSettings::Default
+            },
+        }
     };
     let stats_dir = {
         #[cfg(windows)] let project_dirs = ProjectDirs::from("net", "Fenhl", "ootrstats").ok_or(Error::MissingHomeDir)?;
         #[cfg(windows)] let stats_root = project_dirs.data_dir();
         #[cfg(unix)] let stats_root = BaseDirectories::new()?.place_config_file("ootrstats").at_unknown()?;
-        stats_root.join(rando_rev.to_string()).join(settings.stats_dir())
+        stats_root.join(setup.stats_dir(rando_rev))
     };
     let available_parallelism = std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN).get().try_into().unwrap_or(SeedIdx::MAX).min(args.num_seeds);
     let bench = matches!(args.subcommand, Subcommand::Bench);
@@ -306,7 +335,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                             Ok(ref mut workers) => workers,
                             Err(worker_tx) => {
                                 let (new_worker_tasks, new_workers) = mem::take(&mut config.workers).into_iter()
-                                    .map(|worker::Config { name, kind }| worker::State::new(worker_tx.clone(), name, kind, rando_rev, &settings, bench))
+                                    .map(|worker::Config { name, kind }| worker::State::new(worker_tx.clone(), name, kind, rando_rev, &setup, bench))
                                     .unzip::<_, _, _, Vec<_>>();
                                 worker_tasks = new_worker_tasks;
                                 workers = Ok(new_workers);

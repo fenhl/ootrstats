@@ -38,6 +38,28 @@ const WSL: &str = "C:\\Program Files\\WSL\\wsl.exe";
 pub type SeedIdx = u16;
 
 #[derive(Clone, Protocol)]
+pub enum RandoSetup {
+    Normal {
+        github_user: String,
+        branch: Option<String>,
+        settings: RandoSettings,
+    },
+    Rsl {
+        github_user: String,
+        branch: Option<String>,
+    },
+}
+
+impl RandoSetup {
+    pub fn stats_dir(&self, rando_rev: git2::Oid) -> PathBuf {
+        match self {
+            Self::Normal { github_user, branch: _, settings } => Path::new("rando").join(github_user).join(rando_rev.to_string()).join(settings.stats_dir()),
+            Self::Rsl { github_user, branch: _ } => Path::new("rsl").join(github_user).join(rando_rev.to_string()),
+        }
+    }
+}
+
+#[derive(Clone, Protocol)]
 pub enum RandoSettings {
     Default,
     Preset(String),
@@ -69,6 +91,8 @@ pub enum RollError {
     MissingHomeDir,
     #[error("failed to parse `perf` output")]
     PerfSyntax(Vec<u8>),
+    #[error("the RSL script errored")]
+    RslScriptExit(std::process::Output),
     #[error("randomizer did not report spoiler log location")]
     SpoilerLogPath,
 }
@@ -156,4 +180,28 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
             Err(output.stderr.into())
         },
     })
+}
+
+pub async fn run_rsl(repo_path: &Path) -> Result<RollOutput, RollError> {
+    let python = python()?;
+    let mut cmd = Command::new(&python);
+    cmd.arg("RandomSettingsGenerator.py");
+    cmd.arg("--no_log_errors");
+    cmd.arg("--plando_retries=1");
+    cmd.arg("--rando_retries=1");
+    cmd.current_dir(repo_path);
+    let output = cmd.output().await.at_command(python.display().to_string())?;
+    if output.status.success() || output.status.code() == Some(3) {
+        let stdout = BufRead::lines(&*output.stdout).try_collect::<_, Vec<_>, _>().at_command(python.display().to_string())?;
+        Ok(RollOutput {
+            instructions: None, //TODO
+            log: if stdout.iter().rev().any(|line| line.starts_with("rsl_tools.RandomizerError")) {
+                Err(output.stdout.into())
+            } else {
+                Ok(repo_path.join("patches").join(stdout.iter().rev().find_map(|line| line.strip_prefix("Created spoiler log at: ")).ok_or(RollError::SpoilerLogPath)?))
+            },
+        })
+    } else {
+        Err(RollError::RslScriptExit(output))
+    }
 }

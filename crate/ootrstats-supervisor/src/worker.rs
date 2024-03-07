@@ -21,7 +21,7 @@ use {
     },
     tokio_tungstenite::tungstenite,
     ootrstats::{
-        RandoSettings,
+        RandoSetup,
         SeedIdx,
         websocket,
         worker::{
@@ -73,7 +73,7 @@ pub(crate) enum Error {
 }
 
 impl Kind {
-    async fn run(self, name: String, tx: mpsc::Sender<(String, Message)>, mut rx: mpsc::Receiver<SupervisorMessage>, rando_rev: git2::Oid, settings: RandoSettings, bench: bool) -> Result<(), Error> {
+    async fn run(self, name: String, tx: mpsc::Sender<(String, Message)>, mut rx: mpsc::Receiver<SupervisorMessage>, rando_rev: git2::Oid, setup: RandoSetup, bench: bool) -> Result<(), Error> {
         match self {
             Self::Local { base_rom_path, wsl_base_rom_path, cores } => {
                 let base_rom_path = if_chain! {
@@ -87,7 +87,7 @@ impl Kind {
                     }
                 };
                 let (inner_tx, mut inner_rx) = mpsc::channel(256);
-                let mut work = pin!(ootrstats::worker::work(inner_tx, rx, base_rom_path, cores, rando_rev, settings, bench));
+                let mut work = pin!(ootrstats::worker::work(inner_tx, rx, base_rom_path, cores, rando_rev, setup, bench));
                 loop {
                     select! {
                         res = &mut work => {
@@ -110,7 +110,7 @@ impl Kind {
                 let mut sink = pin!(sink);
                 let mut stream = pin!(stream);
                 tx.send((name.clone(), Message::Init(format!("handshaking")))).await?;
-                sink.send(websocket::ClientMessage::Handshake { password, base_rom_path, wsl_base_rom_path, rando_rev, settings, bench }).await?;
+                sink.send(websocket::ClientMessage::Handshake { password, base_rom_path, wsl_base_rom_path, rando_rev, setup, bench }).await?;
                 tx.send((name.clone(), Message::Init(format!("waiting for reply from worker")))).await?;
                 loop {
                     select! {
@@ -158,10 +158,10 @@ pub(crate) struct State {
 }
 
 impl State {
-    pub(crate) fn new(worker_tx: mpsc::Sender<(String, Message)>, name: String, kind: Kind, rando_rev: git2::Oid, settings: &RandoSettings, bench: bool) -> (JoinHandle<Result<(), Error>>, Self) {
+    pub(crate) fn new(worker_tx: mpsc::Sender<(String, Message)>, name: String, kind: Kind, rando_rev: git2::Oid, setup: &RandoSetup, bench: bool) -> (JoinHandle<Result<(), Error>>, Self) {
         let (supervisor_tx, supervisor_rx) = mpsc::channel(256);
         (
-            tokio::spawn(kind.run(name.clone(), worker_tx, supervisor_rx, rando_rev, settings.clone(), bench)),
+            tokio::spawn(kind.run(name.clone(), worker_tx, supervisor_rx, rando_rev, setup.clone(), bench)),
             Self {
                 msg: None,
                 ready: 0,

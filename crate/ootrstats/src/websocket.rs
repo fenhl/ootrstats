@@ -2,7 +2,7 @@ use {
     async_proto::Protocol,
     bytes::Bytes,
     crate::{
-        RandoSettings,
+        RandoSetup,
         SeedIdx,
         worker::SupervisorMessage,
     },
@@ -15,7 +15,7 @@ pub enum ClientMessage {
         base_rom_path: String,
         wsl_base_rom_path: Option<String>,
         rando_rev: git2::Oid,
-        settings: RandoSettings,
+        setup: RandoSetup,
         bench: bool,
     },
     Supervisor(SupervisorMessage),

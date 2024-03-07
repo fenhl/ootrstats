@@ -70,8 +70,11 @@ The supervisor can be interrupted cleanly using <kbd>Ctrl</kbd><kbd>C</kbd>. If 
 
 ## Options
 
+* `-b`, `--branch`: Specifies the git branch of the randomizer (or of the random settings script if combined with `--rsl`) to clone. Defaults to the repository's default branch.
+* `-u`, `--github-user`: Specifies the GitHub user or organization name from which to clone the randomizer (or the random settings script if combined with `--rsl`). Defaults to `OoTRandomizer` (or `matthewkirby` if combined with `--rsl`).
 * `--num-seeds`: Specifies the sample size, i.e. how many seeds to roll. Any existing seeds will be reused. Defaults to 16384.
-* `--preset`: The name of the settings preset to use. Defaults to the Default/Beginner preset.
+* `--preset`: The name of the settings preset to use. Defaults to the Default/Beginner preset. Cannot be combined with `--rsl`.
+* `--rsl`: Roll seeds using [the random settings script](https://github.com/matthewkirby/plando-random-settings).
 
 ## Subcommands
 

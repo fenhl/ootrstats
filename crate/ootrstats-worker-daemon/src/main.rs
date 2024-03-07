@@ -20,12 +20,12 @@ use {
 #[cfg(unix)] use xdg::BaseDirectories;
 #[cfg(windows)] use directories::ProjectDirs;
 
-#[rocket::get("/v1")] //TODO ensure this matches the major crate version
+#[rocket::get("/v2")] //TODO ensure this matches the major crate version
 fn index(correct_password: &State<String>, ws: WebSocket) -> rocket_ws::Channel<'static> {
     let correct_password = (*correct_password).clone();
     ws.channel(move |stream| Box::pin(async move {
         let (mut sink, mut stream) = stream.split();
-        let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_base_rom_path, rando_rev, settings, bench } = websocket::ClientMessage::read_ws(&mut stream).await.map_err(io::Error::from)? else { return Ok(()) };
+        let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_base_rom_path, rando_rev, setup, bench } = websocket::ClientMessage::read_ws(&mut stream).await.map_err(io::Error::from)? else { return Ok(()) };
         if received_password != correct_password { return Ok(()) }
         let (worker_tx, mut worker_rx) = mpsc::channel(256);
         let (supervisor_tx, supervisor_rx) = mpsc::channel(256);
@@ -39,7 +39,7 @@ fn index(correct_password: &State<String>, ws: WebSocket) -> rocket_ws::Channel<
                 base_rom_path
             }
         };
-        let mut work = pin!(ootrstats::worker::work(worker_tx, supervisor_rx, PathBuf::from(base_rom_path), 0, rando_rev, settings, bench));
+        let mut work = pin!(ootrstats::worker::work(worker_tx, supervisor_rx, PathBuf::from(base_rom_path), 0, rando_rev, setup, bench));
         loop {
             select! {
                 res = &mut work => {
