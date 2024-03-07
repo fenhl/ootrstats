@@ -24,7 +24,16 @@ use {
 #[cfg(unix)] use xdg::BaseDirectories;
 #[cfg(windows)] use directories::ProjectDirs;
 
-async fn work(correct_password: &str, sink: &mut SplitSink<rocket_ws::stream::DuplexStream, rocket_ws::Message>, stream: &mut SplitStream<rocket_ws::stream::DuplexStream>) -> io::Result<()> {
+#[derive(Debug, thiserror::Error)]
+enum Error {
+    #[error(transparent)] Read(#[from] async_proto::ReadError),
+    #[error(transparent)] Wheel(#[from] wheel::Error),
+    #[error(transparent)] Worker(#[from] ootrstats::worker::Error),
+    #[error(transparent)] WorkerSend(#[from] mpsc::error::SendError<ootrstats::worker::SupervisorMessage>),
+    #[error(transparent)] Write(#[from] async_proto::WriteError),
+}
+
+async fn work(correct_password: &str, sink: &mut SplitSink<rocket_ws::stream::DuplexStream, rocket_ws::Message>, stream: &mut SplitStream<rocket_ws::stream::DuplexStream>) -> Result<(), Error> {
     let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_base_rom_path, rando_rev, setup, bench } = websocket::ClientMessage::read_ws(stream).await? else { return Ok(()) };
     if received_password != correct_password { return Ok(()) }
     let (worker_tx, mut worker_rx) = mpsc::channel(256);
@@ -43,46 +52,46 @@ async fn work(correct_password: &str, sink: &mut SplitSink<rocket_ws::stream::Du
     loop {
         select! {
             res = &mut work => {
-                let () = res.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                let () = res?;
                 while let Some(msg) = worker_rx.recv().await {
                     match msg {
-                        ootrstats::worker::Message::Init(msg) => websocket::ServerMessage::Init(msg).write_ws(sink).await.map_err(io::Error::from)?,
-                        ootrstats::worker::Message::Ready(ready) => websocket::ServerMessage::Ready(ready).write_ws(sink).await.map_err(io::Error::from)?,
+                        ootrstats::worker::Message::Init(msg) => websocket::ServerMessage::Init(msg).write_ws(sink).await?,
+                        ootrstats::worker::Message::Ready(ready) => websocket::ServerMessage::Ready(ready).write_ws(sink).await?,
                         ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log, ready } => {
                             let spoiler_log = match spoiler_log {
                                 Either::Left(spoiler_log_path) => {
-                                    let spoiler_log = fs::read(&spoiler_log_path).await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?.into();
-                                    fs::remove_file(spoiler_log_path).await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                                    let spoiler_log = fs::read(&spoiler_log_path).await?.into();
+                                    fs::remove_file(spoiler_log_path).await?;
                                     spoiler_log
                                 }
                                 Either::Right(spoiler_log) => spoiler_log,
                             };
-                            websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, ready }.write_ws(sink).await.map_err(io::Error::from)?;
+                            websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, ready }.write_ws(sink).await?;
                         }
-                        ootrstats::worker::Message::Failure { seed_idx, instructions, error_log, ready } => websocket::ServerMessage::Failure { seed_idx, instructions, error_log, ready }.write_ws(sink).await.map_err(io::Error::from)?,
+                        ootrstats::worker::Message::Failure { seed_idx, instructions, error_log, ready } => websocket::ServerMessage::Failure { seed_idx, instructions, error_log, ready }.write_ws(sink).await?,
                     }
                 }
                 break
             }
             Some(msg) = worker_rx.recv() => match msg {
-                ootrstats::worker::Message::Init(msg) => websocket::ServerMessage::Init(msg).write_ws(sink).await.map_err(io::Error::from)?,
-                ootrstats::worker::Message::Ready(ready) => websocket::ServerMessage::Ready(ready).write_ws(sink).await.map_err(io::Error::from)?,
+                ootrstats::worker::Message::Init(msg) => websocket::ServerMessage::Init(msg).write_ws(sink).await?,
+                ootrstats::worker::Message::Ready(ready) => websocket::ServerMessage::Ready(ready).write_ws(sink).await?,
                 ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log, ready } => {
                     let spoiler_log = match spoiler_log {
                         Either::Left(spoiler_log_path) => {
-                            let spoiler_log = fs::read(&spoiler_log_path).await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?.into();
-                            fs::remove_file(spoiler_log_path).await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                            let spoiler_log = fs::read(&spoiler_log_path).await?.into();
+                            fs::remove_file(spoiler_log_path).await?;
                             spoiler_log
                         }
                         Either::Right(spoiler_log) => spoiler_log,
                     };
-                    websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, ready }.write_ws(sink).await.map_err(io::Error::from)?;
+                    websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, ready }.write_ws(sink).await?;
                 }
-                ootrstats::worker::Message::Failure { seed_idx, instructions, error_log, ready } => websocket::ServerMessage::Failure { seed_idx, instructions, error_log, ready }.write_ws(sink).await.map_err(io::Error::from)?,
+                ootrstats::worker::Message::Failure { seed_idx, instructions, error_log, ready } => websocket::ServerMessage::Failure { seed_idx, instructions, error_log, ready }.write_ws(sink).await?,
             },
-            res = websocket::ClientMessage::read_ws(stream) => match res.map_err(io::Error::from)? {
+            res = websocket::ClientMessage::read_ws(stream) => match res? {
                 websocket::ClientMessage::Handshake { .. } => break,
-                websocket::ClientMessage::Supervisor(msg) => supervisor_tx.send(msg).await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?,
+                websocket::ClientMessage::Supervisor(msg) => supervisor_tx.send(msg).await?,
             },
         }
     }
@@ -106,7 +115,7 @@ fn index(correct_password: &State<String>, ws: WebSocket) -> rocket_ws::Channel<
 }
 
 #[derive(Debug, thiserror::Error)]
-enum Error {
+enum MainError {
     #[error(transparent)] Rocket(#[from] rocket::Error),
     #[error(transparent)] Wheel(#[from] wheel::Error),
     #[cfg(unix)] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
@@ -119,7 +128,7 @@ enum Error {
 }
 
 #[wheel::main(rocket)]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<(), MainError> {
     let default_panic_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = wheel::night_report_sync("/net/ootrstats/error", Some("thread panic"));
@@ -133,8 +142,8 @@ async fn main() -> Result<(), Error> {
         index,
     ])
     .manage(fs::read_to_string({
-        #[cfg(unix)] { BaseDirectories::new()?.find_config_file("ootrstats-worker-daemon-password.txt").ok_or(Error::MissingPasswordFile)? }
-        #[cfg(windows)] { ProjectDirs::from("net", "Fenhl", "ootrstats").ok_or(Error::MissingHomeDir)?.config_dir().join("worker-daemon-password.txt") }
+        #[cfg(unix)] { BaseDirectories::new()?.find_config_file("ootrstats-worker-daemon-password.txt").ok_or(MainError::MissingPasswordFile)? }
+        #[cfg(windows)] { ProjectDirs::from("net", "Fenhl", "ootrstats").ok_or(MainError::MissingHomeDir)?.config_dir().join("worker-daemon-password.txt") }
     }).await?.trim().to_owned())
     .launch().await?;
     Ok(())
