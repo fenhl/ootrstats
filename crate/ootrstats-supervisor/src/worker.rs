@@ -39,6 +39,7 @@ pub(crate) struct Config {
 }
 
 fn make_neg_one() -> i8 { -1 }
+fn make_true() -> bool { true }
 
 #[derive(Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -52,6 +53,8 @@ pub(crate) enum Kind {
     },
     #[serde(rename_all = "camelCase")]
     WebSocket {
+        #[serde(default = "make_true")]
+        tls: bool,
         hostname: String,
         password: String,
         base_rom_path: String,
@@ -101,9 +104,9 @@ impl Kind {
                     }
                 }
             }
-            Self::WebSocket { hostname, password, base_rom_path, wsl_base_rom_path } => {
+            Self::WebSocket { tls, hostname, password, base_rom_path, wsl_base_rom_path } => {
                 tx.send((name.clone(), Message::Init(format!("connecting WebSocket")))).await?;
-                let (sink, stream) = async_proto::websocket(format!("wss://{hostname}/v{}", Version::parse(env!("CARGO_PKG_VERSION"))?.major)).await?;
+                let (sink, stream) = async_proto::websocket(format!("{}://{hostname}/v{}", if tls { "wss" } else { "ws" }, Version::parse(env!("CARGO_PKG_VERSION"))?.major)).await?;
                 let mut sink = pin!(sink);
                 let mut stream = pin!(stream);
                 tx.send((name.clone(), Message::Init(format!("handshaking")))).await?;
