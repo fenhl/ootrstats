@@ -153,8 +153,8 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
     Ok(RollOutput {
         instructions: if bench {
             let instructions_line = stderr.iter().rev().find(|line| line.contains("instructions:u")).ok_or_else(|| RollError::PerfSyntax(output.stderr.clone()))?;
-            let (_, instructions) = regex_captures!("^ *([0-9,]+) +instructions:u", instructions_line).ok_or_else(|| RollError::PerfSyntax(output.stderr.clone()))?;
-            Some(instructions.chars().filter(|&c| c != ',').collect::<String>().parse()?)
+            let (_, instructions) = regex_captures!("^ *([0-9,.]+) +instructions:u", instructions_line).ok_or_else(|| RollError::PerfSyntax(output.stderr.clone()))?;
+            Some(instructions.chars().filter(|&c| c != ',' && c != '.').collect::<String>().parse()?)
         } else {
             None
         },
@@ -219,9 +219,9 @@ pub async fn run_rsl(repo_path: &Path, bench: bool) -> Result<RollOutput, RollEr
         Ok(RollOutput {
             instructions: if bench {
                 let instructions_line = stderr.iter().rev().find(|line| line.contains("instructions:u")).ok_or_else(|| RollError::PerfSyntax(output.stderr.clone()))?;
-                let (_, instructions) = regex_captures!("^ *([0-9,]+) +instructions:u", instructions_line).ok_or_else(|| RollError::PerfSyntax(output.stderr.clone()))?;
-                Some(instructions.chars().filter(|&c| c != ',').collect::<String>().parse()?)
-            } else {
+                let (_, instructions) = regex_captures!("^ *([0-9,.]+) +instructions:u", instructions_line).ok_or_else(|| RollError::PerfSyntax(output.stderr.clone()))?;
+                Some(instructions.chars().filter(|&c| c != ',' && c != '.').collect::<String>().parse()?)
+                } else {
                 None
             },
             log: if stdout.iter().rev().any(|line| line.starts_with("rsl_tools.RandomizerError")) {
