@@ -107,8 +107,12 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 Command::new("git").arg("reset").arg("--hard").arg("FETCH_HEAD").current_dir(&repo_path).check("git reset").await?;
             }
             let rsl_base_rom_path = repo_path.join("data").join("oot-ntscu-1.0.z64");
-            if !fs::exists(&rsl_base_rom_path).await? {
-                fs::copy(&base_rom_path, rsl_base_rom_path).await?;
+            if cfg!(target_os = "windows") && bench {
+                Command::new(crate::WSL).arg("cp").arg(&base_rom_path).arg(rsl_base_rom_path).check("wsl cp").await?;
+            } else {
+                if !fs::exists(&rsl_base_rom_path).await? {
+                    fs::copy(&base_rom_path, rsl_base_rom_path).await?;
+                }
             }
             repo_path
         }
@@ -156,7 +160,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                         let tx = tx.clone();
                         let repo_path = repo_path.clone();
                         rando_tasks.push(tokio::spawn(async move {
-                            tx.send(match crate::run_rsl(&repo_path).await? {
+                            tx.send(match crate::run_rsl(&repo_path, bench).await? {
                                 RollOutput { instructions, log: Ok(spoiler_log_path) } => Message::Success {
                                     spoiler_log: Either::Left(spoiler_log_path),
                                     ready: first_seed_rolled,

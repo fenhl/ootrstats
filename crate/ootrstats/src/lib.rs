@@ -182,19 +182,46 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
     })
 }
 
-pub async fn run_rsl(repo_path: &Path) -> Result<RollOutput, RollError> {
+pub async fn run_rsl(repo_path: &Path, bench: bool) -> Result<RollOutput, RollError> {
     let python = python()?;
-    let mut cmd = Command::new(&python);
+    let mut cmd = if bench {
+        #[cfg(any(target_os = "linux", target_os = "windows"))] {
+            let mut cmd = {
+                #[cfg(target_os = "linux")] {
+                    Command::new("perf")
+                }
+                #[cfg(target_os = "windows")] {
+                    let mut cmd = Command::new(WSL);
+                    // install using `apt-get install linux-tools-generic` and symlink from `/usr/lib/linux-tools/*-generic/perf`
+                    cmd.arg("perf");
+                    cmd
+                }
+            };
+            cmd.arg("stat");
+            cmd.arg("/usr/bin/python3");
+            cmd
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))] { unimplemented!("`perf` is not available for macOS") }
+    } else {
+        Command::new(&python)
+    };
     cmd.arg("RandomSettingsGenerator.py");
     cmd.arg("--no_log_errors");
     cmd.arg("--plando_retries=1");
     cmd.arg("--rando_retries=1");
     cmd.current_dir(repo_path);
     let output = cmd.output().await.at_command(python.display().to_string())?;
+    let stderr = BufRead::lines(&*output.stderr).try_collect::<_, Vec<_>, _>().at_command(python.display().to_string())?;
     if output.status.success() || output.status.code() == Some(3) {
         let stdout = BufRead::lines(&*output.stdout).try_collect::<_, Vec<_>, _>().at_command(python.display().to_string())?;
         Ok(RollOutput {
-            instructions: None, //TODO
+            instructions: if bench {
+                let instructions_line = stderr.iter().rev().find(|line| line.contains("instructions:u")).ok_or_else(|| RollError::PerfSyntax(output.stderr.clone()))?;
+                let (_, instructions) = regex_captures!("^ *([0-9,]+) +instructions:u", instructions_line).ok_or_else(|| RollError::PerfSyntax(output.stderr.clone()))?;
+                Some(instructions.chars().filter(|&c| c != ',').collect::<String>().parse()?)
+            } else {
+                None
+            },
             log: if stdout.iter().rev().any(|line| line.starts_with("rsl_tools.RandomizerError")) {
                 Err(output.stdout.into())
             } else {
