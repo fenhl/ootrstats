@@ -35,15 +35,17 @@ use {
     },
 };
 
+fn make_neg_one() -> i8 { -1 }
+fn make_true() -> bool { true }
+
 #[derive(Deserialize)]
 pub(crate) struct Config {
     pub(crate) name: String,
     #[serde(flatten)]
     pub(crate) kind: Kind,
+    #[serde(default = "make_true")]
+    pub(crate) bench: bool,
 }
-
-fn make_neg_one() -> i8 { -1 }
-fn make_true() -> bool { true }
 
 #[derive(Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]

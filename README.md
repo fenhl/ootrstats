@@ -28,6 +28,10 @@ Each worker configuration is a JSON object with the following required entries:
 * `name`: A string which will be displayed on the progress display on the command line, as well as in error messages.
 * `kind`: One of the section headers listed below.
 
+And the following optional entry:
+
+* `bench`: If `false`, this worker is skipped when the `bench` subcommand is used. The default is `true`.
+
 Depending on the `kind`, there are additional entries:
 
 ### `local`
@@ -71,10 +75,11 @@ The supervisor can be interrupted cleanly using <kbd>Ctrl</kbd><kbd>C</kbd>. If 
 ## Options
 
 * `-b`, `--branch`: Specifies the git branch of the randomizer (or of the random settings script if combined with `--rsl`) to clone. Defaults to the repository's default branch.
+* `-n`, `--num-seeds`: Specifies the sample size, i.e. how many seeds to roll. Any existing seeds will be reused. Defaults to 16384.
+* `-p`, `--preset`: The name of the settings preset to use. Defaults to the Default/Beginner preset. Cannot be combined with `--rsl`.
 * `-u`, `--github-user`: Specifies the GitHub user or organization name from which to clone the randomizer (or the random settings script if combined with `--rsl`). Defaults to `OoTRandomizer` (or `matthewkirby` if combined with `--rsl`).
-* `--num-seeds`: Specifies the sample size, i.e. how many seeds to roll. Any existing seeds will be reused. Defaults to 16384.
-* `--preset`: The name of the settings preset to use. Defaults to the Default/Beginner preset. Cannot be combined with `--rsl`.
 * `--rsl`: Roll seeds using [the random settings script](https://github.com/matthewkirby/plando-random-settings).
+* `--settings`: The settings string to use for the randomizer. Cannot be combined with `--preset` or `--rsl`.
 
 ## Subcommands
 
@@ -85,3 +90,7 @@ Benchmarks the randomizer by measuring the average number of CPU instructions re
 This subcommand requires workers to have access to [`perf`](https://perf.wiki.kernel.org/), which is only available for Linux. Workers running on Windows will attempt to use [WSL](https://learn.microsoft.com/windows/wsl/about). To install `perf` on an Ubuntu or Debian distro running inside WSL, run `apt-get install linux-tools-generic` and copy/symlink `/usr/lib/linux-tools/*-generic/perf` into your `PATH`.
 
 Results will be displayed on stdout.
+
+### `midos-house`
+
+Collects statistics about the chest appearances in Mido's house, and saves them as a JSON file to the given path (a required positional argument). Used for generating the [midos.house](https://github.com/midoshouse/midos.house) logo.

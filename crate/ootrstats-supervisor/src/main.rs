@@ -366,7 +366,8 @@ async fn cli(args: Args) -> Result<(), Error> {
                             Ok(ref mut workers) => workers,
                             Err(worker_tx) => {
                                 let (new_worker_tasks, new_workers) = mem::take(&mut config.workers).into_iter()
-                                    .map(|worker::Config { name, kind }| {
+                                    .filter(|&worker::Config { bench, .. }| bench || !matches!(args.subcommand, Subcommand::Bench))
+                                    .map(|worker::Config { name, kind, .. }| {
                                         let (task, state) = worker::State::new(worker_tx.clone(), name.clone(), kind, rando_rev, &setup, bench);
                                         (task.map(move |res| (name, res)), state)
                                     })
