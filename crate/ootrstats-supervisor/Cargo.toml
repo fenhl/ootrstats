@@ -17,6 +17,7 @@ git2 = "0.18.2"
 if_chain = "1.0.2"
 itertools = "0.12.1"
 lazy-regex = "3.1.0"
+ootr-utils = { git = "https://github.com/midoshouse/rust-ootr-utils", branch = "main" }
 ootrstats = { path = "../ootrstats" }
 semver = "1.0.22"
 serde = { version = "1.0.197", features = ["derive"] }

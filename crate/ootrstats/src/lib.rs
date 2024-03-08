@@ -63,6 +63,7 @@ impl RandoSetup {
 pub enum RandoSettings {
     Default,
     Preset(String),
+    String(String),
 }
 
 impl RandoSettings {
@@ -70,6 +71,7 @@ impl RandoSettings {
         match self {
             Self::Default => Path::new("default").into(),
             Self::Preset(preset) => Path::new("preset").join(preset).into(),
+            Self::String(settings) => Path::new("settings").join(settings).into(),
         }
     }
 }
@@ -140,7 +142,14 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
     cmd.arg("--no_log");
     match settings {
         RandoSettings::Default => {}
-        RandoSettings::Preset(preset) => { cmd.arg(format!("--settings_preset={preset}")); }
+        RandoSettings::Preset(preset) => {
+            cmd.arg("--settings_preset");
+            cmd.arg(preset);
+        }
+        RandoSettings::String(settings) => {
+            cmd.arg("--settings_string");
+            cmd.arg(settings);
+        }
     }
     cmd.arg("--settings=-");
     cmd.stdin(Stdio::piped());
