@@ -196,6 +196,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                 .current_dir(&dir)
                 .check("git pull").await?;
         } else {
+            fs::create_dir_all(&dir_parent).await?;
             let mut cmd = Command::new("git");
             cmd.arg("clone");
             cmd.arg("--depth=1");
