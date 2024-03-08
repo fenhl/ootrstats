@@ -170,6 +170,7 @@ pub(crate) struct State {
     pub(crate) running: u8,
     pub(crate) completed: u16,
     pub(crate) supervisor_tx: mpsc::Sender<SupervisorMessage>,
+    pub(crate) stopped: bool,
 }
 
 impl State {
@@ -182,6 +183,7 @@ impl State {
                 ready: 0,
                 running: 0,
                 completed: 0,
+                stopped: false,
                 name, supervisor_tx,
             }
         )

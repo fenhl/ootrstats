@@ -383,7 +383,18 @@ async fn cli(args: Args) -> Result<(), Error> {
                         }
                     }
                 }
-                Event::WorkerDone(worker, result) => { let () = result?.map_err(|source| Error::Worker { worker, source })?; }
+                Event::WorkerDone(name, result) => {
+                    let () = result?.map_err(|source| Error::Worker { worker: name.clone(), source })?;
+                    if_chain! {
+                        if let Ok(ref mut workers) = workers;
+                        if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name);
+                        then {
+                            worker.stopped = true;
+                        } else {
+                            return Err(Error::WorkerNotFound)
+                        }
+                    }
+                }
                 Event::WorkerMessage(name, msg) => if_chain! {
                     if let Ok(ref mut workers) = workers;
                     if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name);
@@ -467,7 +478,12 @@ async fn cli(args: Args) -> Result<(), Error> {
         }
         if let Ok(ref workers) = workers {
             for worker in workers {
-                if let Some(ref msg) = worker.msg {
+                if worker.stopped {
+                    crossterm::execute!(stderr,
+                        Print(format_args!("\r\n{}: done", worker.name)),
+                        Clear(ClearType::UntilNewLine),
+                    ).at_unknown()?;
+                } else if let Some(ref msg) = worker.msg {
                     crossterm::execute!(stderr,
                         Print(format_args!("\r\n{}: {}", worker.name, msg)),
                         Clear(ClearType::UntilNewLine),
