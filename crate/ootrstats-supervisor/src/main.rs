@@ -9,7 +9,6 @@ use {
         TimeDelta,
         prelude::*,
     },
-    clap::builder::ArgPredicate,
     crossterm::{
         cursor::{
             MoveDown,
@@ -107,7 +106,7 @@ struct Args {
     num_seeds: SeedIdx,
     #[clap(long)]
     rsl: bool,
-    #[clap(short = 'u', long, default_value = "OoTRandomizer", default_value_if("rsl", ArgPredicate::IsPresent, Some("matthewkirby")))]
+    #[clap(short = 'u', long, default_value = "OoTRandomizer", default_value_if("rsl", "true", Some("matthewkirby")))]
     github_user: String,
     #[clap(short, long)]
     branch: Option<String>,
