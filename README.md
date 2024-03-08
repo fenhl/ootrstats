@@ -57,7 +57,7 @@ A worker that listens to WebSocket connections from the supervisor. To set up, d
 
 The worker configuration takes the following additional required entries:
 
-* `hostname`: The hostname or IP address of the worker, optionally with the port after a `:` separator (port defaults to 443).
+* `hostname`: The hostname or IP address of the worker, optionally with the port after a `:` separator (port defaults to 443 if `tls` is `true`, or to 80 otherwise).
 * `password`: The password from step 3 of the worker setup described above.
 * `baseRomPath`: An absolute path to the vanilla OoT rom on the worker computer. See [the randomizer's documentation](https://github.com/OoTRandomizer/OoT-Randomizer#installation) for details.
 
