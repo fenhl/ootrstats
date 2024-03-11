@@ -1,4 +1,5 @@
 use {
+    std::path::PathBuf,
     serde::Deserialize,
     wheel::fs,
     crate::worker,
@@ -7,7 +8,9 @@ use {
 #[cfg(unix)] use xdg::BaseDirectories;
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Config {
+    pub(crate) stats_dir: Option<PathBuf>,
     pub(crate) workers: Vec<worker::Config>,
 }
 

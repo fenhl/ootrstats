@@ -253,9 +253,13 @@ async fn cli(args: Args) -> Result<(), Error> {
         }
     };
     let stats_dir = {
-        #[cfg(windows)] let project_dirs = ProjectDirs::from("net", "Fenhl", "ootrstats").ok_or(Error::MissingHomeDir)?;
-        #[cfg(windows)] let stats_root = project_dirs.data_dir();
-        #[cfg(unix)] let stats_root = BaseDirectories::new()?.place_config_file("ootrstats").at_unknown()?;
+        let stats_root = if let Some(stats_dir) = config.stats_dir.take() {
+            stats_dir
+        } else {
+            #[cfg(windows)] let project_dirs = ProjectDirs::from("net", "Fenhl", "ootrstats").ok_or(Error::MissingHomeDir)?;
+            #[cfg(windows)] { project_dirs.data_dir().to_owned() }
+            #[cfg(unix)] { BaseDirectories::new()?.place_data_file("ootrstats").at_unknown()? }
+        };
         stats_root.join(setup.stats_dir(rando_rev))
     };
     let available_parallelism = std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN).get().try_into().unwrap_or(SeedIdx::MAX).min(args.num_seeds);
