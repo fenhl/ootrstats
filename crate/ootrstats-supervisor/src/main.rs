@@ -658,7 +658,9 @@ async fn cli(args: Args) -> Result<(), Error> {
         Print("\r\n"),
     ).at_unknown()?;
     match subcommand_data {
-        SubcommandData::None { .. } => {}
+        SubcommandData::None { .. } => crossterm::execute!(stderr,
+            Print(format_args!("stats saved to {}\r\n", stats_dir.display())),
+        ).at_unknown()?,
         SubcommandData::Bench { instructions_success, instructions_failure } => if instructions_success.is_empty() {
             crossterm::execute!(stderr,
                 Print("No successful seeds, so average instruction count is infinite\r\n"),
