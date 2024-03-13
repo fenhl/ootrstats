@@ -121,7 +121,7 @@ struct Args {
     #[clap(long, conflicts_with("rsl"), conflicts_with("preset"))]
     settings: Option<String>,
     #[clap(subcommand)]
-    subcommand: Subcommand,
+    subcommand: Option<Subcommand>,
 }
 
 #[derive(clap::Subcommand)]
@@ -135,6 +135,10 @@ enum Subcommand {
 }
 
 enum SubcommandData {
+    None {
+        num_successes: u16,
+        num_failures: u16,
+    },
     Bench {
         instructions_success: Vec<u64>,
         instructions_failure: Vec<u64>,
@@ -263,15 +267,19 @@ async fn cli(args: Args) -> Result<(), Error> {
         stats_root.join(setup.stats_dir(rando_rev))
     };
     let available_parallelism = std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN).get().try_into().unwrap_or(SeedIdx::MAX).min(args.num_seeds);
-    let is_bench = matches!(args.subcommand, Subcommand::Bench);
+    let is_bench = matches!(args.subcommand, Some(Subcommand::Bench));
     let start = Instant::now();
     let start_local = Local::now();
     let mut subcommand_data = match args.subcommand {
-        Subcommand::Bench => SubcommandData::Bench {
+        None => SubcommandData::None {
+            num_successes: 0,
+            num_failures: 0,
+        },
+        Some(Subcommand::Bench) => SubcommandData::Bench {
             instructions_success: Vec::with_capacity(args.num_seeds.into()),
             instructions_failure: Vec::with_capacity(args.num_seeds.into()),
         },
-        Subcommand::MidosHouse { out_path } => SubcommandData::MidosHouse {
+        Some(Subcommand::MidosHouse { out_path }) => SubcommandData::MidosHouse {
             spoiler_logs: Vec::with_capacity(args.num_seeds.into()),
             num_failures: 0,
             out_path,
@@ -349,6 +357,10 @@ async fn cli(args: Args) -> Result<(), Error> {
                     let seed_idx = match msg {
                         ReaderMessage::Pending(seed_idx) => Some(seed_idx),
                         ReaderMessage::Success { seed_idx, instructions } => match subcommand_data {
+                            SubcommandData::None { ref mut num_successes, .. } => {
+                                *num_successes += 1;
+                                None
+                            }
                             SubcommandData::Bench { ref mut instructions_success, .. } => if let Some(instructions) = instructions {
                                 instructions_success.push(instructions);
                                 None
@@ -363,6 +375,10 @@ async fn cli(args: Args) -> Result<(), Error> {
                             }
                         },
                         ReaderMessage::Failure { seed_idx, instructions } => match subcommand_data {
+                            SubcommandData::None { ref mut num_failures, .. } | SubcommandData::MidosHouse { ref mut num_failures, .. } => {
+                                *num_failures += 1;
+                                None
+                            }
                             SubcommandData::Bench { ref mut instructions_failure, .. } => if let Some(instructions) = instructions {
                                 instructions_failure.push(instructions);
                                 None
@@ -371,10 +387,6 @@ async fn cli(args: Args) -> Result<(), Error> {
                                 fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
                                 Some(seed_idx)
                             },
-                            SubcommandData::MidosHouse { ref mut num_failures, .. } => {
-                                *num_failures += 1;
-                                None
-                            }
                         },
                         ReaderMessage::Done => {
                             completed_readers += 1;
@@ -451,6 +463,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                                     instructions,
                                 })?).await?;
                                 match subcommand_data {
+                                    SubcommandData::None { ref mut num_successes, .. } => *num_successes += 1,
                                     SubcommandData::Bench { ref mut instructions_success, .. } => instructions_success.push(instructions.ok_or(Error::MissingInstructions)?),
                                     SubcommandData::MidosHouse { ref mut spoiler_logs, .. } => spoiler_logs.push(match spoiler_log {
                                         Either::Left(_) => fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?,
@@ -476,8 +489,8 @@ async fn cli(args: Args) -> Result<(), Error> {
                                     instructions,
                                 })?).await?;
                                 match subcommand_data {
+                                    SubcommandData::None { ref mut num_failures, .. } | SubcommandData::MidosHouse { ref mut num_failures, .. } => *num_failures += 1,
                                     SubcommandData::Bench { ref mut instructions_failure, .. } => instructions_failure.push(instructions.ok_or(Error::MissingInstructions)?),
-                                    SubcommandData::MidosHouse { ref mut num_failures, .. } => *num_failures += 1,
                                 }
                             }
                         }
@@ -543,6 +556,21 @@ async fn cli(args: Args) -> Result<(), Error> {
             Print(if completed_readers == available_parallelism {
                 // list of pending seeds fully initialized
                 match subcommand_data {
+                    SubcommandData::None { num_successes, num_failures } => {
+                        let rolled = num_successes + num_failures;
+                        let started = rolled + workers.as_ref().map(|workers| workers.iter().map(|worker| u16::from(worker.running)).sum::<u16>()).unwrap_or_default();
+                        let total = usize::from(started) + pending_seeds.len();
+                        let completed = match workers {
+                            Ok(ref workers) => workers.iter().map(|worker| worker.completed).sum(),
+                            Err(_) => 0,
+                        };
+                        let skipped = usize::from(rolled - completed);
+                        format!(
+                            "{started}/{total} seeds started, {rolled} rolled, {num_failures} failures ({}%), ETA {}",
+                            if num_successes > 0 || num_failures > 0 { 100 * num_failures / (num_successes + num_failures) } else { 100 },
+                            if completed > 0 { (start_local + TimeDelta::from_std(start.elapsed().mul_f64((total - skipped) as f64 / completed as f64)).expect("ETA too long")).format("%Y-%m-%d %H:%M:%S").to_string() } else { format!("unknown") },
+                        )
+                    }
                     SubcommandData::Bench { ref instructions_success, ref instructions_failure } => {
                         let rolled = instructions_success.len() + instructions_failure.len();
                         let started = rolled + workers.as_ref().map(|workers| workers.iter().map(|worker| usize::from(worker.running)).sum::<usize>()).unwrap_or_default();
@@ -577,6 +605,15 @@ async fn cli(args: Args) -> Result<(), Error> {
                 }
             } else {
                 match subcommand_data {
+                    SubcommandData::None { num_successes, num_failures } => {
+                        let rolled = usize::from(num_successes + num_failures);
+                        let started = workers.as_ref().map(|workers| workers.iter().map(|worker| usize::from(worker.running)).sum::<usize>()).unwrap_or_default();
+                        format!(
+                            "checking for existing seeds: {rolled} rolled, {started} running, {} pending, {} still being checked",
+                            pending_seeds.len(),
+                            usize::from(args.num_seeds) - pending_seeds.len() - started - rolled,
+                        )
+                    }
                     SubcommandData::Bench { ref instructions_success, ref instructions_failure } => {
                         let rolled = instructions_success.len() + instructions_failure.len();
                         let started = workers.as_ref().map(|workers| workers.iter().map(|worker| usize::from(worker.running)).sum::<usize>()).unwrap_or_default();
@@ -621,6 +658,7 @@ async fn cli(args: Args) -> Result<(), Error> {
         Print("\r\n"),
     ).at_unknown()?;
     match subcommand_data {
+        SubcommandData::None { .. } => {}
         SubcommandData::Bench { instructions_success, instructions_failure } => if instructions_success.is_empty() {
             crossterm::execute!(stderr,
                 Print("No successful seeds, so average instruction count is infinite\r\n"),
