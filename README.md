@@ -57,7 +57,7 @@ A worker that listens to WebSocket connections from the supervisor. To set up, d
 2. Run `cargo install --git=https://github.com/fenhl/ootrstats --branch=main ootrstats-worker-daemon`
 3. Create a text file at `$XDG_CONFIG_DIRS/ootrstats-worker-daemon-password.txt` on Unix or `%APPDATA%\Fenhl\ootrstats\config\worker-daemon-password.txt` on Windows, defining a password that the supervisor will use to connect to this worker. Leading and trailing whitespace in the text file will be ignored.
 4. Start the worker daemon, e.g. by editing `assets/ootrstats-worker.service` inside a clone of this repository to adjust the username, then running `sudo systemctl enable --now assets/ootrstats-worker.service` if the worker is on a Linux distro that uses systemd.
-5. Make the worker daemon reachable from the netowrk, e.g. by enabling (an edited copy of) `assets/ootrstats.fenhl.net.nginx` if nginx is installed on the worker.
+5. Make the worker daemon reachable from the network, e.g. by enabling (an edited copy of) `assets/ootrstats.fenhl.net.nginx` if nginx is installed on the worker.
 
 The worker configuration takes the following additional required entries:
 
