@@ -96,6 +96,8 @@ This subcommand requires workers to have access to [`perf`](https://perf.wiki.ke
 
 Results will be displayed on stdout.
 
+If this subcommand is run with the `--raw-data` option, it will output the following data instead of displaying a summary. Each seed's data is printed on a separate line, starting with the character `s` for success or `f` for failure, followed by a space, followed by the number of instructions taken.
+
 ### `midos-house`
 
 Collects statistics about the chest appearances in Mido's house, and saves them as a JSON file to the given path (a required positional argument). Used for generating the [midos.house](https://github.com/midoshouse/midos.house) logo.

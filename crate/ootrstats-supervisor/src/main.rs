@@ -129,7 +129,10 @@ struct Args {
 #[derive(clap::Subcommand)]
 enum Subcommand {
     /// Benchmark — measure average CPU instructions to generate a seed.
-    Bench,
+    Bench {
+        #[clap(long)]
+        raw_data: bool,
+    },
     /// Count chest appearances in Mido's house for the midos.house favicon
     MidosHouse {
         out_path: PathBuf,
@@ -144,6 +147,7 @@ enum SubcommandData {
     Bench {
         instructions_success: Vec<u64>,
         instructions_failure: Vec<u64>,
+        raw_data: bool,
     },
     MidosHouse {
         out_path: PathBuf,
@@ -269,7 +273,7 @@ async fn cli(args: Args) -> Result<(), Error> {
         stats_root.join(setup.stats_dir(rando_rev))
     };
     let available_parallelism = std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN).get().try_into().unwrap_or(SeedIdx::MAX).min(args.num_seeds);
-    let is_bench = matches!(args.subcommand, Some(Subcommand::Bench));
+    let is_bench = matches!(args.subcommand, Some(Subcommand::Bench { .. }));
     let start = Instant::now();
     let start_local = Local::now();
     let mut subcommand_data = match args.subcommand {
@@ -277,9 +281,10 @@ async fn cli(args: Args) -> Result<(), Error> {
             num_successes: 0,
             num_failures: 0,
         },
-        Some(Subcommand::Bench) => SubcommandData::Bench {
+        Some(Subcommand::Bench { raw_data }) => SubcommandData::Bench {
             instructions_success: Vec::with_capacity(args.num_seeds.into()),
             instructions_failure: Vec::with_capacity(args.num_seeds.into()),
+            raw_data,
         },
         Some(Subcommand::MidosHouse { out_path }) => SubcommandData::MidosHouse {
             spoiler_logs: Vec::with_capacity(args.num_seeds.into()),
@@ -573,7 +578,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                             if completed > 0 { (start_local + TimeDelta::from_std(start.elapsed().mul_f64((total - skipped) as f64 / completed as f64)).expect("ETA too long")).format("%Y-%m-%d %H:%M:%S").to_string() } else { format!("unknown") },
                         )
                     }
-                    SubcommandData::Bench { ref instructions_success, ref instructions_failure } => {
+                    SubcommandData::Bench { ref instructions_success, ref instructions_failure, .. } => {
                         let rolled = instructions_success.len() + instructions_failure.len();
                         let started = rolled + workers.as_ref().map(|workers| workers.iter().map(|worker| usize::from(worker.running)).sum::<usize>()).unwrap_or_default();
                         let total = started + pending_seeds.len();
@@ -616,7 +621,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                             usize::from(args.num_seeds) - pending_seeds.len() - started - rolled,
                         )
                     }
-                    SubcommandData::Bench { ref instructions_success, ref instructions_failure } => {
+                    SubcommandData::Bench { ref instructions_success, ref instructions_failure, .. } => {
                         let rolled = instructions_success.len() + instructions_failure.len();
                         let started = workers.as_ref().map(|workers| workers.iter().map(|worker| usize::from(worker.running)).sum::<usize>()).unwrap_or_default();
                         format!(
@@ -663,22 +668,31 @@ async fn cli(args: Args) -> Result<(), Error> {
         SubcommandData::None { .. } => crossterm::execute!(stderr,
             Print(format_args!("stats saved to {}\r\n", stats_dir.display())),
         ).at_unknown()?,
-        SubcommandData::Bench { instructions_success, instructions_failure } => if instructions_success.is_empty() {
-            crossterm::execute!(stderr,
-                Print("No successful seeds, so average instruction count is infinite\r\n"),
-            ).at_unknown()?;
+        SubcommandData::Bench { instructions_success, instructions_failure, raw_data } => if raw_data {
+            for instructions in instructions_success {
+                println!("s {instructions}");
+            }
+            for instructions in instructions_failure {
+                println!("f {instructions}");
+            }
         } else {
-            let success_rate = instructions_success.len() as f64 / (instructions_success.len() as f64 + instructions_failure.len() as f64);
-            let average_instructions_success = instructions_success.iter().sum::<u64>() / u64::try_from(instructions_success.len()).unwrap();
-            let average_instructions_failure = instructions_failure.iter().sum::<u64>().checked_div(u64::try_from(instructions_failure.len()).unwrap()).unwrap_or_default();
-            let average_failure_count = (1.0 - success_rate) / success_rate; // mean of 0-support geometric distribution
-            let average_instructions = average_failure_count * average_instructions_failure as f64 + average_instructions_success as f64;
-            crossterm::execute!(stderr,
-                Print(format_args!("success rate: {}/{} ({:.02}%)\r\n", instructions_success.len(), instructions_success.len() + instructions_failure.len(), success_rate * 100.0)),
-                Print(format_args!("average instructions (success): {average_instructions_success} ({average_instructions_success:.3e})\r\n")),
-                Print(format_args!("average instructions (failure): {}\r\n", if instructions_failure.is_empty() { format!("N/A") } else { format!("{average_instructions_failure} ({average_instructions_failure:.3e})") })),
-                Print(format_args!("average total instructions until success: {average_instructions} ({average_instructions:.3e})\r\n")),
-            ).at_unknown()?;
+            if instructions_success.is_empty() {
+                crossterm::execute!(stderr,
+                    Print("No successful seeds, so average instruction count is infinite\r\n"),
+                ).at_unknown()?;
+            } else {
+                let success_rate = instructions_success.len() as f64 / (instructions_success.len() as f64 + instructions_failure.len() as f64);
+                let average_instructions_success = instructions_success.iter().sum::<u64>() / u64::try_from(instructions_success.len()).unwrap();
+                let average_instructions_failure = instructions_failure.iter().sum::<u64>().checked_div(u64::try_from(instructions_failure.len()).unwrap()).unwrap_or_default();
+                let average_failure_count = (1.0 - success_rate) / success_rate; // mean of 0-support geometric distribution
+                let average_instructions = average_failure_count * average_instructions_failure as f64 + average_instructions_success as f64;
+                crossterm::execute!(stderr,
+                    Print(format_args!("success rate: {}/{} ({:.02}%)\r\n", instructions_success.len(), instructions_success.len() + instructions_failure.len(), success_rate * 100.0)),
+                    Print(format_args!("average instructions (success): {average_instructions_success} ({average_instructions_success:.3e})\r\n")),
+                    Print(format_args!("average instructions (failure): {}\r\n", if instructions_failure.is_empty() { format!("N/A") } else { format!("{average_instructions_failure} ({average_instructions_failure:.3e})") })),
+                    Print(format_args!("average total instructions until success: {average_instructions} ({average_instructions:.3e})\r\n")),
+                ).at_unknown()?;
+            }
         },
         SubcommandData::MidosHouse { out_path, spoiler_logs, .. } => {
             let mut counts = HashMap::<_, usize>::default();
