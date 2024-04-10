@@ -463,7 +463,21 @@ async fn cli(args: Args) -> Result<(), Error> {
                                 fs::create_dir_all(&seed_dir).await?;
                                 let stats_spoiler_log_path = seed_dir.join("spoiler.json");
                                 match spoiler_log {
-                                    Either::Left(ref spoiler_log_path) => fs::rename(spoiler_log_path, stats_spoiler_log_path).await?,
+                                    Either::Left(ref spoiler_log_path) => {
+                                        let is_same_drive = {
+                                            #[cfg(windows)] {
+                                                spoiler_log_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                                == stats_spoiler_log_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                            }
+                                            #[cfg(not(windows))] { true }
+                                        };
+                                        if is_same_drive {
+                                            fs::rename(spoiler_log_path, stats_spoiler_log_path).await?;
+                                        } else {
+                                            fs::copy(spoiler_log_path, stats_spoiler_log_path).await?;
+                                            fs::remove_file(spoiler_log_path).await?;
+                                        }
+                                    }
                                     Either::Right(ref spoiler_log) => fs::write(stats_spoiler_log_path, spoiler_log).await?,
                                 }
                                 fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
