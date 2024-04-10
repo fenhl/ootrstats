@@ -5,13 +5,14 @@ use {
             Pin,
             pin,
         },
+        time::Duration,
     },
     either::Either,
     futures::{
         SinkExt as _,
         stream::{
             self,
-            Stream,
+            FusedStream,
             StreamExt as _,
         },
     },
@@ -22,6 +23,11 @@ use {
         select,
         sync::mpsc,
         task::JoinHandle,
+        time::{
+            MissedTickBehavior,
+            interval,
+            timeout,
+        },
     },
     tokio_tungstenite::tungstenite,
     ootrstats::{
@@ -70,13 +76,14 @@ pub(crate) enum Kind {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
+    #[error(transparent)] Elapsed(#[from] tokio::time::error::Elapsed),
     #[error(transparent)] Local(#[from] ootrstats::worker::Error),
     #[error(transparent)] Read(#[from] async_proto::ReadError),
     #[error(transparent)] Semver(#[from] semver::Error),
     #[error(transparent)] Send(#[from] mpsc::error::SendError<(String, Message)>),
     #[error(transparent)] WebSocket(#[from] tungstenite::Error),
     #[error(transparent)] Write(#[from] async_proto::WriteError),
-    #[error("{debug}")]
+    #[error("{display}")]
     Remote {
         debug: String,
         display: String,
@@ -119,13 +126,16 @@ impl Kind {
                 tx.send((name.clone(), Message::Init(format!("connecting WebSocket")))).await?;
                 let (sink, stream) = async_proto::websocket(format!("{}://{hostname}/v{}", if tls { "wss" } else { "ws" }, Version::parse(env!("CARGO_PKG_VERSION"))?.major)).await?;
                 let mut sink = pin!(sink);
-                let mut stream = Box::pin(stream) as Pin<Box<dyn Stream<Item = _> + Send>>;
+                let mut stream = Box::pin(stream.fuse()) as Pin<Box<dyn FusedStream<Item = _> + Send>>;
                 tx.send((name.clone(), Message::Init(format!("handshaking")))).await?;
                 sink.send(websocket::ClientMessage::Handshake { password, base_rom_path, wsl_base_rom_path, rando_rev, setup, bench }).await?;
                 tx.send((name.clone(), Message::Init(format!("waiting for reply from worker")))).await?;
+                let mut ping_interval = interval(Duration::from_secs(30));
+                ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
                 loop {
                     select! {
-                        Some(res) = stream.next() => match res {
+                        _ = ping_interval.tick() => sink.send(websocket::ClientMessage::Ping).await?,
+                        res = timeout(Duration::from_secs(60), stream.select_next_some()) => match res? {
                             Ok(websocket::ServerMessage::Init(msg)) => tx.send((name.clone(), Message::Init(msg))).await?,
                             Ok(websocket::ServerMessage::Ready(ready)) => tx.send((name.clone(), Message::Ready(ready))).await?,
                             Ok(websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, ready }) => tx.send((name.clone(), Message::Success {
@@ -134,6 +144,7 @@ impl Kind {
                             })).await?,
                             Ok(websocket::ServerMessage::Failure { seed_idx, instructions, error_log, ready }) => tx.send((name.clone(), Message::Failure { seed_idx, instructions, error_log, ready })).await?,
                             Ok(websocket::ServerMessage::Error { display, debug }) => return Err(Error::Remote { debug, display }),
+                            Ok(websocket::ServerMessage::Ping) => {}
                             Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => stream = Box::pin(stream::empty()),
                             Err(e) => return Err(e.into()),
                         },
@@ -151,6 +162,7 @@ impl Kind {
                                     })).await?,
                                     Ok(websocket::ServerMessage::Failure { seed_idx, instructions, error_log, ready }) => tx.send((name.clone(), Message::Failure { seed_idx, instructions, error_log, ready })).await?,
                                     Ok(websocket::ServerMessage::Error { display, debug }) => return Err(Error::Remote { debug, display }),
+                                    Ok(websocket::ServerMessage::Ping) => {}
                                     Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => break,
                                     Err(e) => return Err(e.into()),
                                 }

@@ -19,6 +19,7 @@ pub enum ClientMessage {
         bench: bool,
     },
     Supervisor(SupervisorMessage),
+    Ping,
 }
 
 #[derive(Protocol)]
@@ -43,4 +44,5 @@ pub enum ServerMessage {
         display: String,
         debug: String,
     },
+    Ping,
 }

@@ -673,9 +673,9 @@ async fn cli(args: Args) -> Result<(), Error> {
             let average_instructions = average_failure_count * average_instructions_failure as f64 + average_instructions_success as f64;
             crossterm::execute!(stderr,
                 Print(format_args!("success rate: {}/{} ({:.02}%)\r\n", instructions_success.len(), instructions_success.len() + instructions_failure.len(), success_rate * 100.0)),
-                Print(format_args!("average instructions (success): {average_instructions_success}\r\n")),
-                Print(format_args!("average instructions (failure): {}\r\n", if instructions_failure.is_empty() { format!("N/A") } else { average_instructions_failure.to_string() })),
-                Print(format_args!("average total instructions until success: {average_instructions}\r\n")),
+                Print(format_args!("average instructions (success): {average_instructions_success} ({average_instructions_success:e})\r\n")),
+                Print(format_args!("average instructions (failure): {}\r\n", if instructions_failure.is_empty() { format!("N/A") } else { format!("{average_instructions_failure} ({average_instructions_failure:e})") })),
+                Print(format_args!("average total instructions until success: {average_instructions} ({average_instructions:e})\r\n")),
             ).at_unknown()?;
         },
         SubcommandData::MidosHouse { out_path, spoiler_logs, .. } => {

@@ -11,11 +11,12 @@ async-proto = { version = "0.19.0", features = ["tokio-tungstenite"] }
 either = "1.10.0"
 futures = "0.3.30"
 if_chain = "1.0.2"
+log-lock = { git = "https://github.com/fenhl/log-lock", branch = "main", version = "0.2.1" }
 ootrstats = { path = "../ootrstats" }
 rocket = "0.5.0"
 rocket_ws = "0.1.0"
 thiserror = "1.0.57"
-tokio = { version = "1.36.0", features = ["macros", "sync"] }
+tokio = { version = "1.36.0", features = ["macros", "sync", "time"] }
 wheel = { git = "https://github.com/fenhl/wheel", branch = "main", features = ["rocket"] }
 
 [target."cfg(windows)".dependencies]
