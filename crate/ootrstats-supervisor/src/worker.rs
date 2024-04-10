@@ -151,6 +151,7 @@ impl Kind {
                         res = rx.recv() => if let Some(msg) = res {
                             sink.send(websocket::ClientMessage::Supervisor(msg)).await?;
                         } else {
+                            sink.send(websocket::ClientMessage::Goodbye).await?;
                             drop(sink);
                             while let Some(res) = stream.next().await {
                                 match res {

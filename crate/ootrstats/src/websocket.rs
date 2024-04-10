@@ -20,6 +20,7 @@ pub enum ClientMessage {
     },
     Supervisor(SupervisorMessage),
     Ping,
+    Goodbye,
 }
 
 #[derive(Protocol)]

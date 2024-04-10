@@ -8,10 +8,13 @@ use {
     },
     async_proto::Protocol as _,
     either::Either,
-    futures::stream::{
-        SplitSink,
-        SplitStream,
-        StreamExt as _,
+    futures::{
+        future,
+        stream::{
+            SplitSink,
+            SplitStream,
+            StreamExt as _,
+        },
     },
     if_chain::if_chain,
     log_lock::*,
@@ -56,8 +59,14 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
             base_rom_path
         }
     };
+    let mut stream = Some(stream);
     let mut work = pin!(ootrstats::worker::work(worker_tx, supervisor_rx, PathBuf::from(base_rom_path), 0, rando_rev, setup, bench));
     loop {
+        let next_msg = if let Some(ref mut stream) = stream {
+            Either::Left(timeout(Duration::from_secs(60), websocket::ClientMessage::read_ws(*stream)))
+        } else {
+            Either::Right(future::pending())
+        };
         select! {
             res = &mut work => {
                 let () = res?;
@@ -97,10 +106,11 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                 }
                 ootrstats::worker::Message::Failure { seed_idx, instructions, error_log, ready } => lock!(sink = sink; websocket::ServerMessage::Failure { seed_idx, instructions, error_log, ready }.write_ws(&mut *sink).await)?,
             },
-            res = timeout(Duration::from_secs(60), websocket::ClientMessage::read_ws(stream)) => match res?? {
+            res = next_msg => match res?? {
                 websocket::ClientMessage::Handshake { .. } => break,
                 websocket::ClientMessage::Supervisor(msg) => supervisor_tx.send(msg).await?,
                 websocket::ClientMessage::Ping => {}
+                websocket::ClientMessage::Goodbye => stream = None,
             },
         }
     }
