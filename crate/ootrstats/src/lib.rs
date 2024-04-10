@@ -41,20 +41,18 @@ pub type SeedIdx = u16;
 pub enum RandoSetup {
     Normal {
         github_user: String,
-        branch: Option<String>,
         settings: RandoSettings,
     },
     Rsl {
         github_user: String,
-        branch: Option<String>,
     },
 }
 
 impl RandoSetup {
     pub fn stats_dir(&self, rando_rev: git2::Oid) -> PathBuf {
         match self {
-            Self::Normal { github_user, branch: _, settings } => Path::new("rando").join(github_user).join(rando_rev.to_string()).join(settings.stats_dir()),
-            Self::Rsl { github_user, branch: _ } => Path::new("rsl").join(github_user).join(rando_rev.to_string()),
+            Self::Normal { github_user, settings } => Path::new("rando").join(github_user).join(rando_rev.to_string()).join(settings.stats_dir()),
+            Self::Rsl { github_user } => Path::new("rsl").join(github_user).join(rando_rev.to_string()),
         }
     }
 }

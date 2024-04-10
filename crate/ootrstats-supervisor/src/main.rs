@@ -115,6 +115,8 @@ struct Args {
     github_user: String,
     #[clap(short, long)]
     branch: Option<String>,
+    #[clap(long, conflicts_with("branch"))]
+    rev: Option<git2::Oid>,
     #[clap(short, long, conflicts_with("rsl"))]
     preset: Option<String>,
     /// Settings string for the randomizer.
@@ -207,7 +209,9 @@ async fn cli(args: Args) -> Result<(), Error> {
         Print("preparing..."),
     ).at_unknown()?;
     let mut config = Config::load().await?;
-    let rando_rev = {
+    let rando_rev = if let Some(rev) = args.rev {
+        rev
+    } else {
         let repo_name = if args.rsl { "plando-random-settings" } else { "OoT-Randomizer" };
         #[cfg(windows)] let mut dir_parent = UserDirs::new().ok_or(Error::MissingHomeDir)?.home_dir().join("git").join("github.com").join(&args.github_user).join(repo_name);
         #[cfg(unix)] let mut dir_parent = Path::new("/opt/git/github.com").join(&args.github_user).join(repo_name); //TODO respect GITDIR envar and allow ~/git fallback
@@ -241,12 +245,10 @@ async fn cli(args: Args) -> Result<(), Error> {
     let setup = if args.rsl {
         RandoSetup::Rsl {
             github_user: args.github_user,
-            branch: args.branch,
         }
     } else {
         RandoSetup::Normal {
             github_user: args.github_user,
-            branch: args.branch,
             settings: if let Some(preset) = args.preset {
                 RandoSettings::Preset(preset)
             } else if let Some(settings) = args.settings {
