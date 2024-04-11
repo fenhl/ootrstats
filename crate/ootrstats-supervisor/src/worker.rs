@@ -110,6 +110,9 @@ impl Kind {
                     select! {
                         res = &mut work => {
                             let () = res?;
+                            while let Some(msg) = inner_rx.recv().await {
+                                tx.send((name.clone(), msg)).await?;
+                            }
                             break
                         }
                         msg = inner_rx.recv() => if let Some(msg) = msg {
