@@ -153,7 +153,7 @@ impl Kind {
                         } else {
                             sink.send(websocket::ClientMessage::Goodbye).await?;
                             drop(sink);
-                            while let Some(res) = stream.next().await {
+                            while let Some(res) = timeout(Duration::from_secs(60), stream.next()).await? {
                                 match res {
                                     Ok(websocket::ServerMessage::Init(msg)) => tx.send((name.clone(), Message::Init(msg))).await?,
                                     Ok(websocket::ServerMessage::Ready(ready)) => tx.send((name.clone(), Message::Ready(ready))).await?,

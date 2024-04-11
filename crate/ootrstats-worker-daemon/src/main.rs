@@ -48,7 +48,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
     let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_base_rom_path, rando_rev, setup, bench } = websocket::ClientMessage::read_ws(stream).await? else { return Ok(()) };
     if received_password != correct_password { return Ok(()) }
     let (worker_tx, mut worker_rx) = mpsc::channel(256);
-    let (supervisor_tx, supervisor_rx) = mpsc::channel(256);
+    let (mut supervisor_tx, supervisor_rx) = mpsc::channel(256);
     let base_rom_path = if_chain! {
         if cfg!(windows);
         if bench;
@@ -110,7 +110,11 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                 websocket::ClientMessage::Handshake { .. } => break,
                 websocket::ClientMessage::Supervisor(msg) => supervisor_tx.send(msg).await?,
                 websocket::ClientMessage::Ping => {}
-                websocket::ClientMessage::Goodbye => stream = None,
+                websocket::ClientMessage::Goodbye => {
+                    // drop sender so the worker can shut down
+                    supervisor_tx = mpsc::channel(1).0;
+                    stream = None;
+                }
             },
         }
     }
