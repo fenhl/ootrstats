@@ -86,7 +86,7 @@ pub enum Error {
 async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[String]) -> wheel::Result<Option<(Duration, String)>> {
     #[cfg(windows)] if !priority_users.is_empty() {
         // wait until no priority users are signed in
-        let qwinsta = Command::new("qwinsta").check("qwinsta").await?;
+        let qwinsta = Command::new("pwsh").arg("-c").arg("Get-Process -IncludeUserName | Select-Object -Unique -Property UserName").check("pwsh Get-Process").await?;
         let qwinsta_stdout = String::from_utf8_lossy(&qwinsta.stdout);
         //HACK: this checks the entire qwinsta output for the given username. Usernames appearing in the table headers or in other columns can cause false positives. We would have to parse the output to fix this
         if let Some(priority_user) = priority_users.iter().find(|&priority_user| qwinsta_stdout.contains(priority_user)) {
