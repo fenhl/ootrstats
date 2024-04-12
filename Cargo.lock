@@ -1455,6 +1455,7 @@ dependencies = [
  "ootrstats",
  "rocket",
  "rocket_ws",
+ "serde",
  "thiserror",
  "tokio",
  "wheel",

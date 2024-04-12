@@ -15,6 +15,7 @@ log-lock = { git = "https://github.com/fenhl/log-lock", branch = "main", version
 ootrstats = { path = "../ootrstats" }
 rocket = "0.5.0"
 rocket_ws = "0.1.0"
+serde = { version = "1.0.197", features = ["derive"] }
 thiserror = "1.0.57"
 tokio = { version = "1.36.0", features = ["macros", "sync", "time"] }
 wheel = { git = "https://github.com/fenhl/wheel", branch = "main", features = ["rocket"] }

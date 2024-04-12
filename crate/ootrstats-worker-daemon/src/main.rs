@@ -30,9 +30,10 @@ use {
     },
     wheel::fs,
     ootrstats::websocket,
+    crate::config::Config,
 };
-#[cfg(unix)] use xdg::BaseDirectories;
-#[cfg(windows)] use directories::ProjectDirs;
+
+mod config;
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
@@ -148,15 +149,8 @@ fn index(correct_password: &State<String>, ws: WebSocket) -> rocket_ws::Channel<
 
 #[derive(Debug, thiserror::Error)]
 enum MainError {
+    #[error(transparent)] Config(#[from] config::Error),
     #[error(transparent)] Rocket(#[from] rocket::Error),
-    #[error(transparent)] Wheel(#[from] wheel::Error),
-    #[cfg(unix)] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
-    #[cfg(windows)]
-    #[error("user folder not found")]
-    MissingHomeDir,
-    #[cfg(unix)]
-    #[error("password file not found")]
-    MissingPasswordFile,
 }
 
 #[wheel::main(rocket)]
@@ -166,17 +160,16 @@ async fn main() -> Result<(), MainError> {
         let _ = wheel::night_report_sync("/net/ootrstats/error", Some("thread panic"));
         default_panic_hook(info)
     }));
+    let config = Config::load().await?;
     rocket::custom(rocket::Config {
+        address: config.address,
         port: 18826,
         ..rocket::Config::default()
     })
     .mount("/", rocket::routes![
         index,
     ])
-    .manage(fs::read_to_string({
-        #[cfg(unix)] { BaseDirectories::new()?.find_config_file("ootrstats-worker-daemon-password.txt").ok_or(MainError::MissingPasswordFile)? }
-        #[cfg(windows)] { ProjectDirs::from("net", "Fenhl", "ootrstats").ok_or(MainError::MissingHomeDir)?.config_dir().join("worker-daemon-password.txt") }
-    }).await?.trim().to_owned())
+    .manage(config.password)
     .launch().await?;
     Ok(())
 }

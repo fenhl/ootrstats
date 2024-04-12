@@ -54,11 +54,13 @@ A worker that listens to WebSocket connections from the supervisor. To set up, d
 
 1. Install Rust
 2. Run `cargo install --git=https://github.com/fenhl/ootrstats --branch=main ootrstats-worker-daemon`
-3. Create a text file at `$XDG_CONFIG_DIRS/ootrstats-worker-daemon-password.txt` on Unix or `%APPDATA%\Fenhl\ootrstats\config\worker-daemon-password.txt` on Windows, defining a password that the supervisor will use to connect to this worker. Leading and trailing whitespace in the text file will be ignored.
+3. Create a JSON file at `$XDG_CONFIG_DIRS/ootrstats-worker-daemon.json` on Unix or `%APPDATA%\Fenhl\ootrstats\config\worker-daemon.json` on Windows, containing a JSON object with the following entries:
+    * `password` (required): A password string that the supervisor will use to connect to this worker.
+    * `address` (optional): The IP address on which the worker daemon will listen. Defaults to `127.0.0.1`, meaning only local connections will be accepted and you will need a reverse proxy like nginx. Change to `0.0.0.0` to accept connections from anywhere.
 4. Start the worker daemon, e.g. by editing `assets/ootrstats-worker.service` inside a clone of this repository to adjust the username, then running `sudo systemctl enable --now assets/ootrstats-worker.service` if the worker is on a Linux distro that uses systemd.
-5. Make the worker daemon reachable from the network, e.g. by enabling (an edited copy of) `assets/ootrstats.fenhl.net.nginx` if nginx is installed on the worker.
+5. Make the worker daemon reachable from the network, e.g. by enabling (an edited copy of) `assets/ootrstats.fenhl.net.nginx` if nginx is installed on the worker or by configuring the `address`.
 
-The worker configuration takes the following additional required entries:
+The worker configuration on the supervisor takes the following additional required entries:
 
 * `hostname`: The hostname or IP address of the worker, optionally with the port after a `:` separator (port defaults to 443 if `tls` is `true`, or to 80 otherwise).
 * `password`: The password from step 3 of the worker setup described above.
