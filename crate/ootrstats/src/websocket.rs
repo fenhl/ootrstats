@@ -17,6 +17,7 @@ pub enum ClientMessage {
         rando_rev: git2::Oid,
         setup: RandoSetup,
         bench: bool,
+        priority_users: Vec<String>,
     },
     Supervisor(SupervisorMessage),
     Ping,
@@ -32,14 +33,12 @@ pub enum ServerMessage {
         /// present iff the `bench` parameter was set.
         instructions: Option<u64>,
         spoiler_log: Bytes,
-        ready: bool,
     },
     Failure {
         seed_idx: SeedIdx,
         /// present iff the `bench` parameter was set.
         instructions: Option<u64>,
         error_log: Bytes,
-        ready: bool,
     },
     Error {
         display: String,

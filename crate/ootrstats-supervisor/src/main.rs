@@ -442,23 +442,16 @@ async fn cli(args: Args) -> Result<(), Error> {
                         match msg {
                             ootrstats::worker::Message::Init(msg) => worker.msg = Some(msg),
                             ootrstats::worker::Message::Ready(ready) => {
-                                worker.ready = ready;
+                                worker.ready += ready;
                                 while worker.ready > 0 {
                                     worker.msg = None;
                                     let Some(seed_idx) = pending_seeds.pop_front() else { break };
                                     worker.roll(seed_idx).await?;
                                 }
                             }
-                            ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log, ready } => {
+                            ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log } => {
                                 worker.running -= 1;
                                 worker.completed += 1;
-                                if ready {
-                                    worker.ready += 1;
-                                    worker.msg = None;
-                                    if let Some(seed_idx) = pending_seeds.pop_front() {
-                                        worker.roll(seed_idx).await?;
-                                    }
-                                }
                                 let seed_dir = stats_dir.join(seed_idx.to_string());
                                 fs::create_dir_all(&seed_dir).await?;
                                 let stats_spoiler_log_path = seed_dir.join("spoiler.json");
@@ -492,16 +485,9 @@ async fn cli(args: Args) -> Result<(), Error> {
                                     }),
                                 }
                             }
-                            ootrstats::worker::Message::Failure { seed_idx, instructions, error_log, ready } => {
+                            ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => {
                                 worker.running -= 1;
                                 worker.completed += 1;
-                                if ready {
-                                    worker.ready += 1;
-                                    worker.msg = None;
-                                    if let Some(seed_idx) = pending_seeds.pop_front() {
-                                        worker.roll(seed_idx).await?;
-                                    }
-                                }
                                 let seed_dir = stats_dir.join(seed_idx.to_string());
                                 fs::create_dir_all(&seed_dir).await?;
                                 let stats_error_log_path = seed_dir.join("error.log");

@@ -1409,6 +1409,7 @@ dependencies = [
  "git2",
  "itertools",
  "lazy-regex",
+ "rand",
  "serde_json",
  "thiserror",
  "tokio",
