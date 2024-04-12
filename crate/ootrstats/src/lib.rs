@@ -114,6 +114,7 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
         Cow::Borrowed("create_compressed_rom") => json!(bench),
     ];
     let python = python()?;
+    #[cfg_attr(not(target_os = "windows"), allow(unused_mut))] let mut cmd_name = python.display().to_string();
     let mut cmd = if bench {
         #[cfg(any(target_os = "linux", target_os = "windows"))] {
             let mut cmd = {
@@ -121,6 +122,7 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
                     Command::new("perf")
                 }
                 #[cfg(target_os = "windows")] {
+                    cmd_name = format!("{WSL} {cmd_name}");
                     let mut cmd = Command::new(WSL);
                     // install using `apt-get install linux-tools-generic` and symlink from `/usr/lib/linux-tools/*-generic/perf`
                     cmd.arg("perf");
@@ -153,10 +155,10 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
     cmd.stdin(Stdio::piped());
     cmd.stderr(Stdio::piped());
     cmd.current_dir(repo_path);
-    let mut child = cmd.spawn().at_command(python.display().to_string())?;
-    child.stdin.as_mut().expect("configured").write_all(&serde_json::to_vec(&resolved_settings)?).await.at_command(python.display().to_string())?;
-    let output = child.wait_with_output().await.at_command(python.display().to_string())?;
-    let stderr = BufRead::lines(&*output.stderr).try_collect::<_, Vec<_>, _>().at_command(python.display().to_string())?;
+    let mut child = cmd.spawn().at_command(cmd_name.clone())?;
+    child.stdin.as_mut().expect("configured").write_all(&serde_json::to_vec(&resolved_settings)?).await.at_command(cmd_name.clone())?;
+    let output = child.wait_with_output().await.at_command(cmd_name.clone())?;
+    let stderr = BufRead::lines(&*output.stderr).try_collect::<_, Vec<_>, _>().at_command(cmd_name)?;
     Ok(RollOutput {
         instructions: if bench {
             let instructions_line = stderr.iter().rev().find(|line| line.contains("instructions:u")).ok_or_else(|| RollError::PerfSyntax(output.stderr.clone()))?;
@@ -192,6 +194,7 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
 
 pub async fn run_rsl(repo_path: &Path, bench: bool) -> Result<RollOutput, RollError> {
     let python = python()?;
+    #[cfg_attr(not(target_os = "windows"), allow(unused_mut))] let mut cmd_name = python.display().to_string();
     let mut cmd = if bench {
         #[cfg(any(target_os = "linux", target_os = "windows"))] {
             let mut cmd = {
@@ -199,6 +202,7 @@ pub async fn run_rsl(repo_path: &Path, bench: bool) -> Result<RollOutput, RollEr
                     Command::new("perf")
                 }
                 #[cfg(target_os = "windows")] {
+                    cmd_name = format!("{WSL} {cmd_name}");
                     let mut cmd = Command::new(WSL);
                     // install using `apt-get install linux-tools-generic` and symlink from `/usr/lib/linux-tools/*-generic/perf`
                     cmd.arg("perf");
@@ -219,10 +223,10 @@ pub async fn run_rsl(repo_path: &Path, bench: bool) -> Result<RollOutput, RollEr
     cmd.arg("--plando_retries=1");
     cmd.arg("--rando_retries=1");
     cmd.current_dir(repo_path);
-    let output = cmd.output().await.at_command(python.display().to_string())?;
-    let stderr = BufRead::lines(&*output.stderr).try_collect::<_, Vec<_>, _>().at_command(python.display().to_string())?;
+    let output = cmd.output().await.at_command(cmd_name.clone())?;
+    let stderr = BufRead::lines(&*output.stderr).try_collect::<_, Vec<_>, _>().at_command(cmd_name.clone())?;
     if output.status.success() || output.status.code() == Some(3) {
-        let stdout = BufRead::lines(&*output.stdout).try_collect::<_, Vec<_>, _>().at_command(python.display().to_string())?;
+        let stdout = BufRead::lines(&*output.stdout).try_collect::<_, Vec<_>, _>().at_command(cmd_name)?;
         Ok(RollOutput {
             instructions: if bench {
                 let instructions_line = stderr.iter().rev().find(|line| line.contains("instructions:u")).ok_or_else(|| RollError::PerfSyntax(output.stderr.clone()))?;
