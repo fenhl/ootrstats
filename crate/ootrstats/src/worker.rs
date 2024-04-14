@@ -20,13 +20,13 @@ use {
             StreamExt as _,
         },
     },
+    if_chain::if_chain,
     tokio::{
         select,
         process::Command,
         sync::mpsc,
         time::{
             Instant,
-            sleep,
             sleep_until,
         },
     },
@@ -86,10 +86,10 @@ pub enum Error {
 async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[String]) -> wheel::Result<Option<(Duration, String)>> {
     #[cfg(windows)] if !priority_users.is_empty() {
         // wait until no priority users are signed in
-        let qwinsta = Command::new("pwsh").arg("-c").arg("Get-Process -IncludeUserName | Select-Object -Unique -Property UserName").check("pwsh Get-Process").await?;
-        let qwinsta_stdout = String::from_utf8_lossy(&qwinsta.stdout);
-        //HACK: this checks the entire qwinsta output for the given username. Usernames appearing in the table headers or in other columns can cause false positives. We would have to parse the output to fix this
-        if let Some(priority_user) = priority_users.iter().find(|&priority_user| qwinsta_stdout.contains(priority_user)) {
+        let get_process = Command::new("pwsh").arg("-c").arg("Get-Process -IncludeUserName | Select-Object -Unique -Property UserName").check("pwsh Get-Process").await?;
+        let get_process_stdout = String::from_utf8_lossy(&get_process.stdout);
+        //TODO this checks the entire Get-Process output for the given username. Usernames appearing in the table header can cause false positives. Consider requesting XML output from pwsh and parsing that
+        if let Some(priority_user) = priority_users.iter().find(|&priority_user| get_process_stdout.contains(priority_user)) {
             let jitter = thread_rng().gen_range(0..120);
             return Ok(Some((Duration::from_secs(14 * 60 + jitter), format!("waiting for {priority_user} to sign out"))))
         }
@@ -150,19 +150,76 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
         }
     };
     let mut first_seed_rolled = false;
-    while let Some((duration, reason)) = wait_ready(priority_users).await? {
+    let mut msg_buf = Vec::default();
+    'wait_ready: while let Some((duration, reason)) = wait_ready(priority_users).await? {
         tx.send(Message::Init(reason)).await?;
-        sleep(duration).await;
+        let recheck_ready_at = Instant::now() + duration;
+        loop {
+            select! {
+                () = sleep_until(recheck_ready_at) => continue 'wait_ready,
+                msg = rx.recv() => if let Some(msg) = msg {
+                    msg_buf.push(msg);
+                } else {
+                    break 'wait_ready
+                },
+            }
+        }
     }
     tx.send(Message::Ready(1)).await?; // on first roll, the randomizer decompresses the base rom, and the RSL script downloads and extracts the randomizer, neither of which are reentrant
     let mut rando_tasks = FuturesUnordered::default();
     let mut recheck_ready_at = None;
     let mut waiting_cores = 0;
+    let handle_msg = |msg| match msg {
+        SupervisorMessage::Roll(seed_idx) => match setup {
+            RandoSetup::Normal { ref settings, .. } => {
+                let tx = tx.clone();
+                let base_rom_path = base_rom_path.clone();
+                let repo_path = repo_path.clone();
+                let settings = settings.clone();
+                tokio::spawn(async move {
+                    tx.send(match crate::run_rando(&base_rom_path, &repo_path, &settings, bench).await? {
+                        RollOutput { instructions, log: Ok(spoiler_log_path) } => Message::Success {
+                            spoiler_log: Either::Left(spoiler_log_path),
+                            seed_idx, instructions,
+                        },
+                        RollOutput { instructions, log: Err(error_log) } => Message::Failure {
+                            seed_idx, instructions, error_log,
+                        },
+                    }).await?;
+                    Ok::<_, Error>(())
+                })
+            }
+            RandoSetup::Rsl { .. } => {
+                let tx = tx.clone();
+                let repo_path = repo_path.clone();
+                tokio::spawn(async move {
+                    tx.send(match crate::run_rsl(&repo_path, bench).await? {
+                        RollOutput { instructions, log: Ok(spoiler_log_path) } => Message::Success {
+                            spoiler_log: Either::Left(spoiler_log_path),
+                            seed_idx, instructions,
+                        },
+                        RollOutput { instructions, log: Err(error_log) } => Message::Failure {
+                            seed_idx, instructions, error_log,
+                        },
+                    }).await?;
+                    Ok(())
+                })
+            }
+        }
+    };
+    for msg in msg_buf {
+        rando_tasks.push(handle_msg(msg));
+    }
     loop {
-        let recheck_ready = if let Some(recheck_ready_at) = recheck_ready_at {
-            Either::Left(sleep_until(recheck_ready_at).map(Some))
-        } else {
-            Either::Right(future::ready(None))
+        let rx_is_closed = rx.is_closed();
+        let recheck_ready = if_chain! {
+            if !rx_is_closed;
+            if let Some(recheck_ready_at) = recheck_ready_at;
+            then {
+                Either::Left(sleep_until(recheck_ready_at).map(Some))
+            } else {
+                Either::Right(future::ready(None))
+            }
         };
         select! {
             Some(()) = recheck_ready => if let Some((duration, reason)) = wait_ready(priority_users).await? {
@@ -197,43 +254,10 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 }
                 first_seed_rolled = true;
             }
-            Some(msg) = rx.recv() => match msg {
-                SupervisorMessage::Roll(seed_idx) => match setup {
-                    RandoSetup::Normal { ref settings, .. } => {
-                        let tx = tx.clone();
-                        let base_rom_path = base_rom_path.clone();
-                        let repo_path = repo_path.clone();
-                        let settings = settings.clone();
-                        rando_tasks.push(tokio::spawn(async move {
-                            tx.send(match crate::run_rando(&base_rom_path, &repo_path, &settings, bench).await? {
-                                RollOutput { instructions, log: Ok(spoiler_log_path) } => Message::Success {
-                                    spoiler_log: Either::Left(spoiler_log_path),
-                                    seed_idx, instructions,
-                                },
-                                RollOutput { instructions, log: Err(error_log) } => Message::Failure {
-                                    seed_idx, instructions, error_log,
-                                },
-                            }).await?;
-                            Ok::<_, Error>(())
-                        }));
-                    }
-                    RandoSetup::Rsl { .. } => {
-                        let tx = tx.clone();
-                        let repo_path = repo_path.clone();
-                        rando_tasks.push(tokio::spawn(async move {
-                            tx.send(match crate::run_rsl(&repo_path, bench).await? {
-                                RollOutput { instructions, log: Ok(spoiler_log_path) } => Message::Success {
-                                    spoiler_log: Either::Left(spoiler_log_path),
-                                    seed_idx, instructions,
-                                },
-                                RollOutput { instructions, log: Err(error_log) } => Message::Failure {
-                                    seed_idx, instructions, error_log,
-                                },
-                            }).await?;
-                            Ok(())
-                        }));
-                    }
-                }
+            msg = rx.recv(), if !rx_is_closed => if let Some(msg) = msg {
+                rando_tasks.push(handle_msg(msg));
+            } else {
+                // stop awaiting recheck_ready
             },
             else => break,
         }
