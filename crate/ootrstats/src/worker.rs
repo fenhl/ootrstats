@@ -9,6 +9,7 @@ use {
     },
     async_proto::Protocol,
     bytes::Bytes,
+    directories::UserDirs,
     either::Either,
     futures::{
         future::{
@@ -40,10 +41,7 @@ use {
         SeedIdx,
     },
 };
-#[cfg(windows)] use {
-    directories::UserDirs,
-    rand::prelude::*,
-};
+#[cfg(windows)] use rand::prelude::*;
 #[cfg(unix)] use std::path::Path;
 
 pub enum Message {
@@ -74,7 +72,6 @@ pub enum Error {
     #[error(transparent)] Send(#[from] mpsc::error::SendError<Message>),
     #[error(transparent)] Task(#[from] tokio::task::JoinError),
     #[error(transparent)] Wheel(#[from] wheel::Error),
-    #[cfg(windows)]
     #[error("user folder not found")]
     MissingHomeDir,
 }
@@ -125,7 +122,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     cargo.arg("cargo");
                     cargo
                 } else {
-                    Command::new("cargo")
+                    Command::new(UserDirs::new().ok_or(Error::MissingHomeDir)?.home_dir().join(".cargo").join("bin").join("cargo"))
                 };
                 cargo.arg("build");
                 cargo.arg("--lib");

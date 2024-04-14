@@ -10,6 +10,7 @@ workspace = true
 async-proto = { version = "0.19.2", features = ["bytes", "git2"] }
 bytes = "1.5.0"
 collect-mac = "0.1.0"
+directories = "5.0.1"
 either = "1.10.0"
 futures = "0.3.30"
 git2 = "0.18.2"
@@ -22,5 +23,4 @@ tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }
 wheel = { git = "https://github.com/fenhl/wheel", branch = "main" }
 
 [target."cfg(windows)".dependencies]
-directories = "5.0.1"
 rand = "0.8.5"
