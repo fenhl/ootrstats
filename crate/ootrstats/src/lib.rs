@@ -94,7 +94,7 @@ pub enum RollError {
     #[error("the RSL script errored")]
     RslScriptExit(std::process::Output),
     #[error("randomizer did not report spoiler log location")]
-    SpoilerLogPath,
+    SpoilerLogPath(std::process::Output),
 }
 
 fn python() -> Result<PathBuf, RollError> {
@@ -185,7 +185,7 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
                     fs::remove_file(cosmetics_log_path).await?;
                 }
             }
-            Ok(repo_path.join("Output").join(stderr.iter().rev().find_map(|line| line.strip_prefix("Created spoiler log at: ")).ok_or(RollError::SpoilerLogPath)?))
+            Ok(repo_path.join("Output").join(stderr.iter().rev().find_map(|line| line.strip_prefix("Created spoiler log at: ")).ok_or_else(|| RollError::SpoilerLogPath(output))?))
         } else {
             Err(output.stderr.into())
         },
@@ -247,7 +247,7 @@ pub async fn run_rsl(repo_path: &Path, bench: bool) -> Result<RollOutput, RollEr
                 if let Some(cosmetics_log_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Creating Cosmetics Log: ")) {
                     fs::remove_file(repo_path.join("patches").join(cosmetics_log_path)).await?;
                 }
-                Ok(repo_path.join("patches").join(stdout.iter().rev().find_map(|line| line.strip_prefix("Created spoiler log at: ")).ok_or(RollError::SpoilerLogPath)?))
+                Ok(repo_path.join("patches").join(stdout.iter().rev().find_map(|line| line.strip_prefix("Created spoiler log at: ")).ok_or_else(|| RollError::SpoilerLogPath(output))?))
             },
         })
     } else {
