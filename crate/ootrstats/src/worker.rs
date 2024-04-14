@@ -117,6 +117,30 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 tx.send(Message::Init(format!("cloning randomizer: resetting"))).await?;
                 Command::new("git").arg("reset").arg("--hard").arg("FETCH_HEAD").current_dir(&repo_path).check("git reset").await?;
             }
+            if fs::exists(repo_path.join("Cargo.toml")).await? {
+                //TODO update Rust
+                tx.send(Message::Init(format!("building Rust code"))).await?;
+                let mut cargo = if cfg!(target_os = "windows") && bench {
+                    let mut cargo = Command::new(crate::WSL);
+                    cargo.arg("cargo");
+                    cargo
+                } else {
+                    Command::new("cargo")
+                };
+                cargo.arg("build");
+                cargo.arg("--lib");
+                cargo.arg("--release");
+                cargo.current_dir(&repo_path);
+                cargo.check("cargo build").await?;
+                tx.send(Message::Init(format!("copying Rust module"))).await?;
+                #[cfg(target_os = "windows")] {
+                    if bench {
+                        Command::new(crate::WSL).arg("cp").arg("target/release/librs.so").arg("rs.so").current_dir(&repo_path).check("wsl cp").await?;
+                    } else {
+                        fs::copy(repo_path.join("target").join("release").join("rs.dll"), repo_path.join("rs.pyd")).await?;
+                    }
+                }
+            }
             repo_path
         }
         RandoSetup::Rsl { ref github_user, .. } => {
