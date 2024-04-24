@@ -160,6 +160,7 @@ async fn main() -> Result<(), MainError> {
         let _ = wheel::night_report_sync("/net/ootrstats/error", Some("thread panic"));
         default_panic_hook(info)
     }));
+    //TODO on Windows, use the `windows-service` crate to run as a service?
     let config = Config::load().await?;
     rocket::custom(rocket::Config {
         address: config.address,

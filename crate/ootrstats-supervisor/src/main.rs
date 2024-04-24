@@ -4,7 +4,10 @@ use {
             HashMap,
             VecDeque,
         },
-        io::stderr,
+        io::{
+            IsTerminal as _,
+            stderr,
+        },
         mem,
         num::NonZeroUsize,
         path::PathBuf,
@@ -192,8 +195,20 @@ impl wheel::CustomExit for Error {
                 eprintln!("{}\r", String::from_utf8_lossy(&stderr).lines().filter(|line| !regex_is_match!("^[0-9]+ files remaining$", line)).format("\r\n"));
             }
             _ => {
+                let mut debug = format!("{self:?}");
+                if debug.len() > 2000 && stderr().is_terminal() {
+                    let mut prefix_end = 1000;
+                    while !debug.is_char_boundary(prefix_end) {
+                        prefix_end -= 1;
+                    }
+                    let mut suffix_start = debug.len() - 1000;
+                    while !debug.is_char_boundary(suffix_start) {
+                        suffix_start += 1;
+                    }
+                    debug = format!("{} […] {}", &debug[..prefix_end], &debug[suffix_start..]);
+                }
                 eprintln!("{cmd_name}: {self}\r");
-                eprintln!("debug info: {self:?}\r");
+                eprintln!("debug info: {debug}\r");
             }
         }
         std::process::exit(1)
