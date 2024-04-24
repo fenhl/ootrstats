@@ -87,6 +87,12 @@ The supervisor can be interrupted cleanly using <kbd>Ctrl</kbd><kbd>C</kbd> or <
 * `--rev`: Specifies the git revision of the randomizer (or of the random settings script if combined with `--rsl`) to clone. Must be given as an unabbreviated git commit hash. Cannot be combined with `--branch`.
 * `--rsl`: Roll seeds using [the random settings script](https://github.com/matthewkirby/plando-random-settings).
 * `--settings`: The settings string to use for the randomizer. Cannot be combined with `--preset` or `--rsl`.
+* `--suite`: Runs the benchmarking suite. Should usually be combined with the `bench` subcommand. Cannot be combined with `--preset` or `--rsl`. The benchmarking suite consists of:
+    * the Default/Beginner preset
+    * the current main tournament settings
+    * the current multiworld tournament settings
+    * Hell Mode
+    * a version of the random settings script adjusted for compatibility with main Dev
 
 ## Subcommands
 

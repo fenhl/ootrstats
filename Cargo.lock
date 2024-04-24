@@ -1414,6 +1414,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "videocore-gencmd",
  "wheel",
 ]
 
@@ -2600,6 +2601,17 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
+
+[[package]]
+name = "videocore-gencmd"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5670fd82104c43f51a7ced5175f282c4bfdfe7ac8ab5ecdd7ddd135245ec01b"
+dependencies = [
+ "log",
+ "once_cell",
+ "thiserror",
+]
 
 [[package]]
 name = "want"

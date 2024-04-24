@@ -9,9 +9,10 @@ setting up an ootrstats worker with `bench` support on a fresh Windows PC
     * `libgtk-3-dev` which is required for [`rfd`](https://docs.rs/rfd)
     * `perf` (`linux-tools-generic`) which is used by the `bench` subcommand
 6. Symlink `/usr/lib/linux-tools/*-generic/perf` into your WSL `PATH`.
-7. [Install Rust](https://www.rust-lang.org/tools/install) inside WSL.
-8. In Windows Settings, go to System → Optional features → Add an optional feature and enable the “OpenSSH Server” feature.
-9. In the Services app, double-click on OpenSSH SSH Server, set Startup type to Automatic, click Start, then OK.
-10. Connect once from the supervisor to verify the SSH host key. You can check the host key by running `sudo ssh-keygen -lf C:\ProgramData\ssh\ssh_host_ed25519_key.pub` on the worker, where `sudo` can be installed via `scoop install sudo`.
-11. Allow `~\.cargo\bin\ootrstats-worker-daemon` through Windows Firewall.
-12. Run `ootrstats-worker-daemon`.
+7. Run `wsl sudo sysctl -w kernel.perf_event_paranoid=0` to allow `perf` to count instructions.
+8. [Install Rust](https://www.rust-lang.org/tools/install) inside WSL.
+9. In Windows Settings, go to System → Optional features → Add an optional feature and enable the “OpenSSH Server” feature.
+10. In the Services app, double-click on OpenSSH SSH Server, set Startup type to Automatic, click Start, then OK.
+11. Connect once from the supervisor to verify the SSH host key. You can check the host key by running `sudo ssh-keygen -lf C:\ProgramData\ssh\ssh_host_ed25519_key.pub` on the worker, where `sudo` can be installed via `scoop install sudo`.
+12. Allow `~\.cargo\bin\ootrstats-worker-daemon` through Windows Firewall.
+13. Run `ootrstats-worker-daemon`.

@@ -38,7 +38,10 @@ use {
     },
     either::Either,
     futures::{
-        future::FutureExt as _,
+        future::{
+            FutureExt as _,
+            TryFutureExt as _,
+        },
         stream::{
             FuturesUnordered,
             StreamExt as _,
@@ -106,12 +109,15 @@ struct Metadata {
     instructions: Option<u64>,
 }
 
-#[derive(clap::Parser)]
+#[derive(Clone, clap::Parser)]
 #[clap(version)]
 struct Args {
     /// Sample size — how many seeds to roll.
     #[clap(short, long, default_value_t = 16384)]
     num_seeds: SeedIdx,
+    /// Run the benchmarking suite.
+    #[clap(long, conflicts_with("rsl"), conflicts_with("preset"))]
+    suite: bool,
     #[clap(long)]
     rsl: bool,
     #[clap(short = 'u', long, default_value = "OoTRandomizer", default_value_if("rsl", "true", Some("matthewkirby")))]
@@ -129,7 +135,7 @@ struct Args {
     subcommand: Option<Subcommand>,
 }
 
-#[derive(clap::Subcommand)]
+#[derive(Clone, clap::Subcommand)]
 enum Subcommand {
     /// Benchmark — measure average CPU instructions to generate a seed.
     Bench {
@@ -522,6 +528,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                 },
                 Event::End => break,
             },
+            //TODO use signal-hook-tokio crate to handle interrupts on Unix?
             Some(res) = cli_rx.recv() => if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), modifiers, kind: KeyEventKind::Release, .. }) = res.at_unknown()? {
                 if modifiers.contains(KeyModifiers::CONTROL) {
                     // finish rolling seeds that are already in progress but don't start any more
@@ -729,7 +736,16 @@ async fn cli(args: Args) -> Result<(), Error> {
 #[wheel::main(custom_exit)]
 async fn main(args: Args) -> Result<(), Error> {
     enable_raw_mode().at_unknown()?;
-    let res = cli(args).await;
+    let res = if args.suite {
+        cli(args.clone())
+            .and_then(|()| cli(Args { preset: Some(format!("tournament")), ..args.clone() }))
+            .and_then(|()| cli(Args { preset: Some(format!("mw")), ..args.clone() }))
+            .and_then(|()| cli(Args { preset: Some(format!("hell")), ..args.clone() }))
+            .and_then(|()| cli(Args { rsl: true, github_user: format!("fenhl"), branch: Some(format!("dev-mvp")), ..args.clone() })) //TODO check to make sure plando-random-settings branch is up to date with matthewkirby:master and the randomizer commit specified in rslversion.py is equal to the specified randomizer commit
+            .await
+    } else {
+        cli(args).await
+    };
     disable_raw_mode().at_unknown()?;
     res
 }
