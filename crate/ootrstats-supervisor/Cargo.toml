@@ -6,6 +6,9 @@ edition.workspace = true
 [lints]
 workspace = true
 
+[features]
+videocore-gencmd = ["ootrstats/videocore-gencmd"]
+
 [dependencies]
 async-proto = { version = "0.19.0", features = ["tokio-tungstenite"] }
 chrono = { version = "0.4.34", default-features = false, features = ["clock", "std"] }

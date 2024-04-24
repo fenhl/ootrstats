@@ -42,8 +42,9 @@ use {
     },
 };
 #[cfg(unix)] use std::path::Path;
-#[cfg(target_os = "linux")] use videocore_gencmd::prelude::*;
-#[cfg(any(windows, target_os = "linux"))] use rand::prelude::*;
+#[cfg(feature = "videocore-gencmd")] use videocore_gencmd::prelude::*;
+#[cfg(any(windows, feature = "videocore-gencmd"))] use rand::prelude::*;
+#[cfg(not(any(windows, feature = "videocore-gencmd")))] use rand as _;
 
 pub enum Message {
     Init(String),
@@ -69,8 +70,8 @@ pub enum SupervisorMessage {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[cfg(target_os = "linux")] #[error(transparent)] GencmdCmd(#[from] GencmdCmdError),
-    #[cfg(target_os = "linux")] #[error(transparent)] GencmdInit(#[from] GencmdInitError),
+    #[cfg(feature = "videocore-gencmd")] #[error(transparent)] GencmdCmd(#[from] GencmdCmdError),
+    #[cfg(feature = "videocore-gencmd")] #[error(transparent)] GencmdInit(#[from] GencmdInitError),
     #[error(transparent)] Roll(#[from] crate::RollError),
     #[error(transparent)] Send(#[from] mpsc::error::SendError<Message>),
     #[error(transparent)] Task(#[from] tokio::task::JoinError),
@@ -84,9 +85,9 @@ pub enum Error {
 /// * The duration after which this function may be called again to recheck.
 /// * The reason for the wait as a human-readable string.
 async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[String]) -> Result<Option<(Duration, String)>, Error> {
-    #[cfg_attr(not(any(windows, target_os = "linux")), allow(unused_mut))] let mut wait = Duration::default();
-    #[cfg_attr(not(any(windows, target_os = "linux")), allow(unused_mut))] let mut message = String::default();
-    #[cfg(target_os = "linux")] if GencmdGlobal::new()?.send_cmd::<CmdMeasureTemp>()? >= 80.0 {
+    #[cfg_attr(not(any(windows, feature = "videocore-gencmd")), allow(unused_mut))] let mut wait = Duration::default();
+    #[cfg_attr(not(any(windows, feature = "videocore-gencmd")), allow(unused_mut))] let mut message = String::default();
+    #[cfg(feature = "videocore-gencmd")] if GencmdGlobal::new()?.send_cmd::<CmdMeasureTemp>()? >= 80.0 {
         let jitter = thread_rng().gen_range(0..10);
         let new_wait = Duration::from_secs(55 + jitter);
         if new_wait > wait {

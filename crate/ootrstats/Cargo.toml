@@ -17,13 +17,9 @@ git2 = "0.18.2"
 if_chain = "1.0.2"
 itertools = "0.12.1"
 lazy-regex = "3.1.0"
+rand = "0.8.5"
 serde_json = "1.0.114"
 thiserror = "1.0.57"
 tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }
+videocore-gencmd = { version = "0.1.0", optional = true }
 wheel = { git = "https://github.com/fenhl/wheel", branch = "main" }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-videocore-gencmd = "0.1.0"
-
-[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
-rand = "0.8.5"
