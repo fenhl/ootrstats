@@ -115,15 +115,16 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
         Cow::Borrowed("create_compressed_rom") => json!(bench),
     ];
     let python = python()?;
-    #[cfg_attr(not(target_os = "windows"), allow(unused_mut))] let mut cmd_name = python.display().to_string();
+    #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(unused_mut))] let mut cmd_name = python.display().to_string();
     let mut cmd = if bench {
         #[cfg(any(target_os = "linux", target_os = "windows"))] {
             let mut cmd = {
                 #[cfg(target_os = "linux")] {
+                    cmd_name = format!("perf stat {cmd_name}");
                     Command::new("perf")
                 }
                 #[cfg(target_os = "windows")] {
-                    cmd_name = format!("{WSL} {cmd_name}");
+                    cmd_name = format!("{WSL} perf stat {cmd_name}");
                     let mut cmd = Command::new(WSL);
                     // install using `apt-get install linux-tools-generic` and symlink from `/usr/lib/linux-tools/*-generic/perf`
                     cmd.arg("perf");
