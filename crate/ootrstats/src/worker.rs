@@ -182,7 +182,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             let rsl_data_dir = repo_path.join("data");
             let rsl_base_rom_path = rsl_data_dir.join("oot-ntscu-1.0.z64");
             if cfg!(target_os = "windows") && bench {
-                Command::new(crate::WSL).arg("mkdir").arg("data").current_dir(&repo_path).check("wsl mkdir").await?;
+                Command::new(crate::WSL).arg("mkdir").arg("-p").arg("data").current_dir(&repo_path).check("wsl mkdir").await?;
                 Command::new(crate::WSL).arg("cp").arg(&base_rom_path).arg("data/oot-ntscu-1.0.z64").current_dir(&repo_path).check("wsl cp").await?;
             } else {
                 if !fs::exists(&rsl_base_rom_path).await? {
