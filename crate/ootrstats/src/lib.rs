@@ -92,7 +92,7 @@ pub enum RollError {
     MissingHomeDir,
     #[error("failed to parse `perf` output: {}", String::from_utf8_lossy(.0))]
     PerfSyntax(Vec<u8>),
-    #[error("the RSL script errored")]
+    #[error("the RSL script errored\nstdout:\n{}\nstderr:\n{}", String::from_utf8_lossy(&.0.stdout), String::from_utf8_lossy(&.0.stderr))]
     RslScriptExit(std::process::Output),
     #[error("randomizer did not report spoiler log location")]
     SpoilerLogPath(std::process::Output),
