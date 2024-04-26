@@ -178,8 +178,6 @@ enum Error {
     #[cfg(windows)]
     #[error("user folder not found")]
     MissingHomeDir,
-    #[error("requested benchmark but worker did not report instructions")]
-    MissingInstructions,
     #[error("found both spoiler and error logs for a seed")]
     SuccessAndFailure,
     #[error("error in worker {worker}: {source}")]
@@ -359,7 +357,7 @@ async fn cli(args: Args) -> Result<(), Error> {
     let mut completed_readers = 0;
     let (worker_tx, mut worker_rx) = mpsc::channel(256);
     let mut worker_tasks = FuturesUnordered::default();
-    let mut workers = Err(worker_tx);
+    let mut workers = Err::<Vec<worker::State>, _>(worker_tx);
     let mut pending_seeds = VecDeque::default();
     loop {
         enum Event {
@@ -379,10 +377,13 @@ async fn cli(args: Args) -> Result<(), Error> {
                     Some((name, msg)) = worker_rx.recv() => Event::WorkerMessage(name, msg),
                     else => Event::End,
                 }
-            } => match event {
-                Event::ReaderDone(res) => { let () = res??; }
-                Event::ReaderMessage(msg) => {
-                    let seed_idx = match msg {
+            } => {
+                let seed_idx = match event {
+                    Event::ReaderDone(res) => {
+                        let () = res??;
+                        None
+                    }
+                    Event::ReaderMessage(msg) => match msg {
                         ReaderMessage::Pending(seed_idx) => Some(seed_idx),
                         ReaderMessage::Success { seed_idx, instructions } => match subcommand_data {
                             SubcommandData::None { ref mut num_successes, .. } => {
@@ -420,113 +421,141 @@ async fn cli(args: Args) -> Result<(), Error> {
                             completed_readers += 1;
                             None
                         }
-                    };
-                    if let Some(seed_idx) = seed_idx {
-                        let workers = match workers {
-                            Ok(ref mut workers) => workers,
-                            Err(worker_tx) => {
-                                let (new_worker_tasks, new_workers) = mem::take(&mut config.workers).into_iter()
-                                    .filter(|&worker::Config { bench, .. }| bench || !is_bench)
-                                    .map(|worker::Config { name, kind, .. }| {
-                                        let (task, state) = worker::State::new(worker_tx.clone(), name.clone(), kind, rando_rev, &setup, is_bench);
-                                        (task.map(move |res| (name, res)), state)
-                                    })
-                                    .unzip::<_, _, _, Vec<_>>();
-                                worker_tasks = new_worker_tasks;
-                                workers = Ok(new_workers);
-                                workers.as_mut().ok().expect("just inserted")
+                    },
+                    Event::WorkerDone(name, result) => {
+                        let () = result?.map_err(|source| Error::Worker { worker: name.clone(), source })?;
+                        if_chain! {
+                            if let Ok(ref mut workers) = workers;
+                            if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name);
+                            then {
+                                worker.stopped = true;
+                            } else {
+                                return Err(Error::WorkerNotFound)
                             }
-                        };
-                        if let Some(worker) = workers.iter_mut().find(|worker| worker.ready > 0) {
-                            worker.roll(seed_idx).await?;
-                        } else {
-                            pending_seeds.push_back(seed_idx);
                         }
+                        None
                     }
-                }
-                Event::WorkerDone(name, result) => {
-                    let () = result?.map_err(|source| Error::Worker { worker: name.clone(), source })?;
-                    if_chain! {
+                    Event::WorkerMessage(name, msg) => if_chain! {
                         if let Ok(ref mut workers) = workers;
                         if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name);
                         then {
-                            worker.stopped = true;
+                            match msg {
+                                ootrstats::worker::Message::Init(msg) => {
+                                    worker.msg = Some(msg);
+                                    None
+                                }
+                                ootrstats::worker::Message::Ready(ready) => {
+                                    worker.ready += ready;
+                                    while worker.ready > 0 {
+                                        worker.msg = None;
+                                        let Some(seed_idx) = pending_seeds.pop_front() else { break };
+                                        worker.roll(seed_idx).await?;
+                                    }
+                                    None
+                                }
+                                ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log } => {
+                                    worker.running -= 1;
+                                    worker.completed += 1;
+                                    let seed_dir = stats_dir.join(seed_idx.to_string());
+                                    fs::create_dir_all(&seed_dir).await?;
+                                    let stats_spoiler_log_path = seed_dir.join("spoiler.json");
+                                    match spoiler_log {
+                                        Either::Left(ref spoiler_log_path) => {
+                                            let is_same_drive = {
+                                                #[cfg(windows)] {
+                                                    spoiler_log_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                                    == stats_spoiler_log_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                                }
+                                                #[cfg(not(windows))] { true }
+                                            };
+                                            if is_same_drive {
+                                                fs::rename(spoiler_log_path, stats_spoiler_log_path).await?;
+                                            } else {
+                                                fs::copy(spoiler_log_path, stats_spoiler_log_path).await?;
+                                                fs::remove_file(spoiler_log_path).await?;
+                                            }
+                                        }
+                                        Either::Right(ref spoiler_log) => fs::write(stats_spoiler_log_path, spoiler_log).await?,
+                                    }
+                                    fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
+                                        instructions,
+                                    })?).await?;
+                                    match subcommand_data {
+                                        SubcommandData::None { ref mut num_successes, .. } => {
+                                            *num_successes += 1;
+                                            None
+                                        }
+                                        SubcommandData::Bench { ref mut instructions_success, .. } => if let Some(instructions) = instructions {
+                                            instructions_success.push(instructions);
+                                            None
+                                        } else {
+                                            // perf sometimes doesn't output instruction count for whatever reason, retry if this happens
+                                            fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                                            Some(seed_idx)
+                                        },
+                                        SubcommandData::MidosHouse { ref mut spoiler_logs, .. } => {
+                                            spoiler_logs.push(match spoiler_log {
+                                                Either::Left(_) => fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?,
+                                                Either::Right(spoiler_log) => serde_json::from_slice(&spoiler_log)?,
+                                            });
+                                            None
+                                        }
+                                    }
+                                }
+                                ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => {
+                                    worker.running -= 1;
+                                    worker.completed += 1;
+                                    let seed_dir = stats_dir.join(seed_idx.to_string());
+                                    fs::create_dir_all(&seed_dir).await?;
+                                    let stats_error_log_path = seed_dir.join("error.log");
+                                    fs::write(stats_error_log_path, &error_log).await?;
+                                    fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
+                                        instructions,
+                                    })?).await?;
+                                    match subcommand_data {
+                                        SubcommandData::None { ref mut num_failures, .. } | SubcommandData::MidosHouse { ref mut num_failures, .. } => {
+                                            *num_failures += 1;
+                                            None
+                                        }
+                                        SubcommandData::Bench { ref mut instructions_failure, .. } => if let Some(instructions) = instructions {
+                                            instructions_failure.push(instructions);
+                                            None
+                                        } else {
+                                            // perf sometimes doesn't output instruction count for whatever reason, retry if this happens
+                                            fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                                            Some(seed_idx)
+                                        },
+                                    }
+                                }
+                            }
                         } else {
                             return Err(Error::WorkerNotFound)
                         }
+                    },
+                    Event::End => break,
+                };
+                if let Some(seed_idx) = seed_idx {
+                    let workers = match workers {
+                        Ok(ref mut workers) => workers,
+                        Err(worker_tx) => {
+                            let (new_worker_tasks, new_workers) = mem::take(&mut config.workers).into_iter()
+                                .filter(|&worker::Config { bench, .. }| bench || !is_bench)
+                                .map(|worker::Config { name, kind, .. }| {
+                                    let (task, state) = worker::State::new(worker_tx.clone(), name.clone(), kind, rando_rev, &setup, is_bench);
+                                    (task.map(move |res| (name, res)), state)
+                                })
+                                .unzip::<_, _, _, Vec<_>>();
+                            worker_tasks = new_worker_tasks;
+                            workers = Ok(new_workers);
+                            workers.as_mut().ok().expect("just inserted")
+                        }
+                    };
+                    if let Some(worker) = workers.iter_mut().find(|worker| worker.ready > 0) {
+                        worker.roll(seed_idx).await?;
+                    } else {
+                        pending_seeds.push_back(seed_idx);
                     }
                 }
-                Event::WorkerMessage(name, msg) => if_chain! {
-                    if let Ok(ref mut workers) = workers;
-                    if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name);
-                    then {
-                        match msg {
-                            ootrstats::worker::Message::Init(msg) => worker.msg = Some(msg),
-                            ootrstats::worker::Message::Ready(ready) => {
-                                worker.ready += ready;
-                                while worker.ready > 0 {
-                                    worker.msg = None;
-                                    let Some(seed_idx) = pending_seeds.pop_front() else { break };
-                                    worker.roll(seed_idx).await?;
-                                }
-                            }
-                            ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log } => {
-                                worker.running -= 1;
-                                worker.completed += 1;
-                                let seed_dir = stats_dir.join(seed_idx.to_string());
-                                fs::create_dir_all(&seed_dir).await?;
-                                let stats_spoiler_log_path = seed_dir.join("spoiler.json");
-                                match spoiler_log {
-                                    Either::Left(ref spoiler_log_path) => {
-                                        let is_same_drive = {
-                                            #[cfg(windows)] {
-                                                spoiler_log_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
-                                                == stats_spoiler_log_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
-                                            }
-                                            #[cfg(not(windows))] { true }
-                                        };
-                                        if is_same_drive {
-                                            fs::rename(spoiler_log_path, stats_spoiler_log_path).await?;
-                                        } else {
-                                            fs::copy(spoiler_log_path, stats_spoiler_log_path).await?;
-                                            fs::remove_file(spoiler_log_path).await?;
-                                        }
-                                    }
-                                    Either::Right(ref spoiler_log) => fs::write(stats_spoiler_log_path, spoiler_log).await?,
-                                }
-                                fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
-                                    instructions,
-                                })?).await?;
-                                match subcommand_data {
-                                    SubcommandData::None { ref mut num_successes, .. } => *num_successes += 1,
-                                    SubcommandData::Bench { ref mut instructions_success, .. } => instructions_success.push(instructions.ok_or(Error::MissingInstructions)?),
-                                    SubcommandData::MidosHouse { ref mut spoiler_logs, .. } => spoiler_logs.push(match spoiler_log {
-                                        Either::Left(_) => fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?,
-                                        Either::Right(spoiler_log) => serde_json::from_slice(&spoiler_log)?,
-                                    }),
-                                }
-                            }
-                            ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => {
-                                worker.running -= 1;
-                                worker.completed += 1;
-                                let seed_dir = stats_dir.join(seed_idx.to_string());
-                                fs::create_dir_all(&seed_dir).await?;
-                                let stats_error_log_path = seed_dir.join("error.log");
-                                fs::write(stats_error_log_path, &error_log).await?;
-                                fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
-                                    instructions,
-                                })?).await?;
-                                match subcommand_data {
-                                    SubcommandData::None { ref mut num_failures, .. } | SubcommandData::MidosHouse { ref mut num_failures, .. } => *num_failures += 1,
-                                    SubcommandData::Bench { ref mut instructions_failure, .. } => instructions_failure.push(instructions.ok_or(Error::MissingInstructions)?),
-                                }
-                            }
-                        }
-                    } else {
-                        return Err(Error::WorkerNotFound)
-                    }
-                },
-                Event::End => break,
             },
             //TODO use signal-hook-tokio crate to handle interrupts on Unix?
             Some(res) = cli_rx.recv() => if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), modifiers, kind: KeyEventKind::Release, .. }) = res.at_unknown()? {
