@@ -57,7 +57,6 @@ use {
         Deserialize,
         Serialize,
     },
-    serde_json::Value as Json,
     tokio::{
         io,
         process::Command,
@@ -113,6 +112,10 @@ struct Metadata {
     instructions: Option<u64>,
 }
 
+fn parse_json_object(arg: &str) -> Result<serde_json::Map<String, serde_json::Value>, serde_json::Error> {
+    serde_json::from_str(arg)
+}
+
 #[derive(Clone, clap::Parser)]
 #[clap(version)]
 struct Args {
@@ -136,8 +139,8 @@ struct Args {
     #[clap(long, conflicts_with("rsl"), conflicts_with("preset"))]
     settings: Option<String>,
     /// Specifies a JSON object of settings on the command line that will override the given preset or settings string.
-    #[clap(long, conflicts_with("rsl"), default_value = "{}")]
-    json_settings: Json,
+    #[clap(long, conflicts_with("rsl"), default_value = "{}", value_parser = parse_json_object)]
+    json_settings: serde_json::Map<String, serde_json::Value>,
     /// Generate seeds with varying world counts.
     #[clap(long, conflicts_with("rsl"))]
     world_counts: bool,
@@ -190,8 +193,6 @@ enum Error {
     #[error(transparent)] WorkerSend(#[from] mpsc::error::SendError<ootrstats::worker::SupervisorMessage>),
     #[error(transparent)] Wheel(#[from] wheel::Error),
     #[cfg(unix)] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
-    #[error("JSON settings must be an object")]
-    JsonSettings,
     #[cfg(windows)]
     #[error("user folder not found")]
     MissingHomeDir,
@@ -301,11 +302,7 @@ async fn cli(args: Args) -> Result<(), Error> {
             } else {
                 RandoSettings::Default
             },
-            json_settings: if let Json::Object(json_settings) = args.json_settings {
-                json_settings
-            } else {
-                return Err(Error::JsonSettings)
-            },
+            json_settings: args.json_settings,
             world_counts: args.world_counts,
         }
     };
