@@ -137,6 +137,8 @@ struct Args {
     /// Generate .zpf/.zpfz patch files.
     #[clap(long, conflicts_with("rsl"))]
     patch: bool,
+    #[clap(long)]
+    retry_failures: bool,
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
 }
@@ -409,19 +411,24 @@ async fn cli(args: Args) -> Result<(), Error> {
                                 None
                             }
                         },
-                        ReaderMessage::Failure { seed_idx, instructions } => match subcommand_data {
-                            SubcommandData::None { ref mut num_failures, .. } | SubcommandData::MidosHouse { ref mut num_failures, .. } => {
-                                *num_failures += 1;
-                                None
+                        ReaderMessage::Failure { seed_idx, instructions } => if args.retry_failures {
+                            fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                            Some(seed_idx)
+                        } else {
+                            match subcommand_data {
+                                SubcommandData::None { ref mut num_failures, .. } | SubcommandData::MidosHouse { ref mut num_failures, .. } => {
+                                    *num_failures += 1;
+                                    None
+                                }
+                                SubcommandData::Bench { ref mut instructions_failure, .. } => if let Some(instructions) = instructions {
+                                    instructions_failure.push(instructions);
+                                    None
+                                } else {
+                                    // seed was already rolled but not benchmarked, roll a new seed instead
+                                    fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                                    Some(seed_idx)
+                                },
                             }
-                            SubcommandData::Bench { ref mut instructions_failure, .. } => if let Some(instructions) = instructions {
-                                instructions_failure.push(instructions);
-                                None
-                            } else {
-                                // seed was already rolled but not benchmarked, roll a new seed instead
-                                fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
-                                Some(seed_idx)
-                            },
                         },
                         ReaderMessage::Done => {
                             completed_readers += 1;
@@ -530,7 +537,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                                             None
                                         } else {
                                             // perf sometimes doesn't output instruction count for whatever reason, retry if this happens
-                                            fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                                            fs::remove_dir_all(seed_dir).await?;
                                             Some(seed_idx)
                                         },
                                         SubcommandData::MidosHouse { ref mut spoiler_logs, .. } => {
@@ -546,25 +553,30 @@ async fn cli(args: Args) -> Result<(), Error> {
                                     worker.running -= 1;
                                     worker.completed += 1;
                                     let seed_dir = stats_dir.join(seed_idx.to_string());
-                                    fs::create_dir_all(&seed_dir).await?;
-                                    let stats_error_log_path = seed_dir.join("error.log");
-                                    fs::write(stats_error_log_path, &error_log).await?;
-                                    fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
-                                        instructions,
-                                    })?).await?;
-                                    match subcommand_data {
-                                        SubcommandData::None { ref mut num_failures, .. } | SubcommandData::MidosHouse { ref mut num_failures, .. } => {
-                                            *num_failures += 1;
-                                            None
+                                    if args.retry_failures {
+                                        fs::remove_dir_all(seed_dir).await.missing_ok()?;
+                                        Some(seed_idx)
+                                    } else {
+                                        fs::create_dir_all(&seed_dir).await?;
+                                        let stats_error_log_path = seed_dir.join("error.log");
+                                        fs::write(stats_error_log_path, &error_log).await?;
+                                        fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
+                                            instructions,
+                                        })?).await?;
+                                        match subcommand_data {
+                                            SubcommandData::None { ref mut num_failures, .. } | SubcommandData::MidosHouse { ref mut num_failures, .. } => {
+                                                *num_failures += 1;
+                                                None
+                                            }
+                                            SubcommandData::Bench { ref mut instructions_failure, .. } => if let Some(instructions) = instructions {
+                                                instructions_failure.push(instructions);
+                                                None
+                                            } else {
+                                                // perf sometimes doesn't output instruction count for whatever reason, retry if this happens
+                                                fs::remove_dir_all(seed_dir).await?;
+                                                Some(seed_idx)
+                                            },
                                         }
-                                        SubcommandData::Bench { ref mut instructions_failure, .. } => if let Some(instructions) = instructions {
-                                            instructions_failure.push(instructions);
-                                            None
-                                        } else {
-                                            // perf sometimes doesn't output instruction count for whatever reason, retry if this happens
-                                            fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
-                                            Some(seed_idx)
-                                        },
                                     }
                                 }
                             }

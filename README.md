@@ -86,6 +86,7 @@ The supervisor can be interrupted cleanly using <kbd>Ctrl</kbd><kbd>C</kbd> or <
 * `-p`, `--preset`: The name of the settings preset to use. Defaults to the Default/Beginner preset. Cannot be combined with `--rsl`.
 * `-u`, `--github-user`: Specifies the GitHub user or organization name from which to clone the randomizer (or the random settings script if combined with `--rsl`). Defaults to `OoTRandomizer` (or `matthewkirby` if combined with `--rsl`).
 * `--patch`: Generate `.zpf`/`.zpfz` patch files and include them in the [`statsDir`](#configuration). Cannot be combined with `--rsl` or with the `bench` subcommand.
+* `--retry-failures`: If the randomizer errors, retry instead of recording as a failure. Care should be taken when using this command for statistics since it may skew results, but it can be useful when generating seeds for other purposes.
 * `--rev`: Specifies the git revision of the randomizer (or of the random settings script if combined with `--rsl`) to clone. Must be given as an unabbreviated git commit hash. Cannot be combined with `--branch`.
 * `--rsl`: Roll seeds using [the random settings script](https://github.com/matthewkirby/plando-random-settings).
 * `--settings`: The settings string to use for the randomizer. Cannot be combined with `--preset` or `--rsl`.
