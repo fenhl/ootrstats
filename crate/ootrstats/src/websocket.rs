@@ -2,6 +2,7 @@ use {
     async_proto::Protocol,
     bytes::Bytes,
     crate::{
+        OutputMode,
         RandoSetup,
         SeedIdx,
         worker::SupervisorMessage,
@@ -16,7 +17,7 @@ pub enum ClientMessage {
         wsl_base_rom_path: Option<String>,
         rando_rev: git2::Oid,
         setup: RandoSetup,
-        bench: bool,
+        output_mode: OutputMode,
         priority_users: Vec<String>,
     },
     Supervisor(SupervisorMessage),
@@ -33,6 +34,7 @@ pub enum ServerMessage {
         /// present iff the `bench` parameter was set.
         instructions: Option<u64>,
         spoiler_log: Bytes,
+        patch: Option<(String, Bytes)>,
     },
     Failure {
         seed_idx: SeedIdx,

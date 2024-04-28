@@ -34,7 +34,7 @@ pub mod websocket;
 pub mod worker;
 
 /// install using `wsl --update --pre-release` to get support for the CPU instruction counter and SSH access
-const WSL: &str = "C:\\Program Files\\WSL\\wsl.exe";
+pub const WSL: &str = "C:\\Program Files\\WSL\\wsl.exe";
 
 pub type SeedIdx = u16;
 
@@ -75,11 +75,20 @@ impl RandoSettings {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Protocol)]
+pub enum OutputMode {
+    Normal,
+    Bench,
+    Patch,
+}
+
 pub struct RollOutput {
     /// present iff the `bench` parameter was set.
     pub instructions: Option<u64>,
     /// `Ok`: spoiler log, `Err`: stderr
     pub log: Result<PathBuf, Bytes>,
+    /// `(is_wsl, path)`
+    pub patch: Option<(bool, PathBuf)>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -107,16 +116,17 @@ fn python() -> Result<PathBuf, RollError> {
     })
 }
 
-pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoSettings, bench: bool) -> Result<RollOutput, RollError> {
+pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoSettings, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let resolved_settings = collect![as HashMap<_, _>:
         Cow::Borrowed("rom") => json!(base_rom_path),
         Cow::Borrowed("create_spoiler") => json!(true),
-        Cow::Borrowed("create_cosmetics_log") => json!(bench),
-        Cow::Borrowed("create_compressed_rom") => json!(bench),
+        Cow::Borrowed("create_cosmetics_log") => json!(output_mode == OutputMode::Bench),
+        Cow::Borrowed("create_patch_file") => json!(output_mode == OutputMode::Patch),
+        Cow::Borrowed("create_compressed_rom") => json!(output_mode == OutputMode::Bench),
     ];
     let python = python()?;
     #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(unused_mut))] let mut cmd_name = python.display().to_string();
-    let mut cmd = if bench {
+    let mut cmd = if let OutputMode::Bench = output_mode {
         #[cfg(any(target_os = "linux", target_os = "windows"))] {
             let mut cmd = {
                 #[cfg(target_os = "linux")] {
@@ -161,9 +171,28 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
     child.stdin.as_mut().expect("configured").write_all(&serde_json::to_vec(&resolved_settings)?).await.at_command(cmd_name.clone())?;
     let output = child.wait_with_output().await.at_command(cmd_name.clone())?;
     let stderr = BufRead::lines(&*output.stderr).try_collect::<_, Vec<_>, _>().at_command(cmd_name)?;
+    if output.status.success() {
+        if let Some(distribution_file_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Copied distribution file to: ")) {
+            fs::remove_file(distribution_file_path).await?;
+        }
+        if let Some(compressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created compressed ROM at: ")) {
+            if cfg!(target_os = "windows") && output_mode == OutputMode::Bench {
+                Command::new(WSL).arg("rm").arg(compressed_rom_path).check("wsl rm").await?;
+            } else {
+                fs::remove_file(compressed_rom_path).await?;
+            }
+        }
+        if let Some(cosmetics_log_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created cosmetic log at: ")) {
+            if cfg!(target_os = "windows") && output_mode == OutputMode::Bench {
+                Command::new(WSL).arg("rm").arg(cosmetics_log_path).check("wsl rm").await?;
+            } else {
+                fs::remove_file(cosmetics_log_path).await?;
+            }
+        }
+    }
     Ok(RollOutput {
         instructions: if_chain! {
-            if bench;
+            if let OutputMode::Bench = output_mode;
             if let Some(instructions_line) = stderr.iter().rev().find(|line| line.contains("instructions:u"));
             if let Some((_, instructions)) = regex_captures!("^ *([0-9,.]+) +instructions:u", instructions_line);
             then {
@@ -172,24 +201,18 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
                 None
             }
         },
+        patch: if output.status.success() {
+            if let Some(patch_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created patch file archive at: ")) {
+                Some((cfg!(target_os = "windows") && output_mode == OutputMode::Bench, PathBuf::from(patch_path)))
+            } else if let Some(patch_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Creating Patch File: ")) {
+                Some((false, repo_path.join("Output").join(patch_path)))
+            } else {
+                None
+            }
+        } else {
+            None
+        },
         log: if output.status.success() {
-            if let Some(distribution_file_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Copied distribution file to: ")) {
-                fs::remove_file(distribution_file_path).await?;
-            }
-            if let Some(compressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created compressed ROM at: ")) {
-                if cfg!(target_os = "windows") && bench {
-                    Command::new(WSL).arg("rm").arg(compressed_rom_path).check("wsl rm").await?;
-                } else {
-                    fs::remove_file(compressed_rom_path).await?;
-                }
-            }
-            if let Some(cosmetics_log_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created cosmetic log at: ")) {
-                if cfg!(target_os = "windows") && bench {
-                    Command::new(WSL).arg("rm").arg(cosmetics_log_path).check("wsl rm").await?;
-                } else {
-                    fs::remove_file(cosmetics_log_path).await?;
-                }
-            }
             Ok(repo_path.join("Output").join(stderr.iter().rev().find_map(|line| line.strip_prefix("Created spoiler log at: ")).ok_or_else(|| RollError::SpoilerLogPath(output))?))
         } else {
             Err(output.stderr.into())
@@ -254,6 +277,7 @@ pub async fn run_rsl(repo_path: &Path, bench: bool) -> Result<RollOutput, RollEr
                 }
                 Ok(repo_path.join("patches").join(stdout.iter().rev().find_map(|line| line.strip_prefix("Created spoiler log at: ")).ok_or_else(|| RollError::SpoilerLogPath(output))?))
             },
+            patch: None, //TODO?
         })
     } else {
         Err(RollError::RslScriptExit(output))

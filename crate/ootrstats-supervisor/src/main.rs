@@ -4,6 +4,7 @@ use {
             HashMap,
             VecDeque,
         },
+        ffi::OsString,
         io::{
             IsTerminal as _,
             stderr,
@@ -72,9 +73,11 @@ use {
         },
     },
     ootrstats::{
+        OutputMode,
         RandoSettings,
         RandoSetup,
         SeedIdx,
+        WSL,
     },
     crate::config::Config,
 };
@@ -131,6 +134,9 @@ struct Args {
     /// Settings string for the randomizer.
     #[clap(long, conflicts_with("rsl"), conflicts_with("preset"))]
     settings: Option<String>,
+    /// Generate .zpf/.zpfz patch files.
+    #[clap(long, conflicts_with("rsl"))]
+    patch: bool,
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
 }
@@ -453,7 +459,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                                     }
                                     None
                                 }
-                                ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log } => {
+                                ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log, patch } => {
                                     worker.running -= 1;
                                     worker.completed += 1;
                                     let seed_dir = stats_dir.join(seed_idx.to_string());
@@ -476,6 +482,40 @@ async fn cli(args: Args) -> Result<(), Error> {
                                             }
                                         }
                                         Either::Right(ref spoiler_log) => fs::write(stats_spoiler_log_path, spoiler_log).await?,
+                                    }
+                                    if let Some(patch) = patch {
+                                        match patch {
+                                            Either::Left((wsl, patch_path)) => {
+                                                let mut patch_filename = OsString::from("patch.");
+                                                if let Some(ext) = patch_path.extension() {
+                                                    patch_filename.push(ext);
+                                                }
+                                                let stats_patch_path = seed_dir.join(patch_filename);
+                                                if wsl {
+                                                    let patch = Command::new(WSL).arg("cat").arg(&patch_path).check("wsl cat").await?.stdout;
+                                                    fs::write(stats_patch_path, patch).await?;
+                                                    Command::new(WSL).arg("rm").arg(patch_path).check("wsl rm").await?;
+                                                } else {
+                                                    let is_same_drive = {
+                                                        #[cfg(windows)] {
+                                                            patch_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                                            == stats_patch_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                                        }
+                                                        #[cfg(not(windows))] { true }
+                                                    };
+                                                    if is_same_drive {
+                                                        fs::rename(patch_path, stats_patch_path).await?;
+                                                    } else {
+                                                        fs::copy(&patch_path, stats_patch_path).await?;
+                                                        fs::remove_file(patch_path).await?;
+                                                    }
+                                                }
+                                            }
+                                            Either::Right((ext, patch)) => {
+                                                let stats_patch_path = seed_dir.join(format!("patch.{ext}"));
+                                                fs::write(stats_patch_path, patch).await?;
+                                            }
+                                        }
                                     }
                                     fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
                                         instructions,
@@ -541,7 +581,12 @@ async fn cli(args: Args) -> Result<(), Error> {
                             let (new_worker_tasks, new_workers) = mem::take(&mut config.workers).into_iter()
                                 .filter(|&worker::Config { bench, .. }| bench || !is_bench)
                                 .map(|worker::Config { name, kind, .. }| {
-                                    let (task, state) = worker::State::new(worker_tx.clone(), name.clone(), kind, rando_rev, &setup, is_bench);
+                                    let (task, state) = worker::State::new(worker_tx.clone(), name.clone(), kind, rando_rev, &setup, match (is_bench, args.patch) {
+                                        (false, false) => OutputMode::Normal,
+                                        (false, true) => OutputMode::Patch,
+                                        (true, false) => OutputMode::Bench,
+                                        (true, true) => unimplemented!("The `bench` subcommand currently cannot generate patch files"),
+                                    });
                                     (task.map(move |res| (name, res)), state)
                                 })
                                 .unzip::<_, _, _, Vec<_>>();

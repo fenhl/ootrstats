@@ -22,14 +22,22 @@ use {
     rocket_ws::WebSocket,
     tokio::{
         select,
+        process::Command,
         sync::mpsc,
         time::{
             sleep,
             timeout,
         },
     },
-    wheel::fs,
-    ootrstats::websocket,
+    wheel::{
+        fs,
+        traits::AsyncCommandOutputExt as _,
+    },
+    ootrstats::{
+        OutputMode,
+        WSL,
+        websocket,
+    },
     crate::config::Config,
 };
 
@@ -43,16 +51,18 @@ enum Error {
     #[error(transparent)] Worker(#[from] ootrstats::worker::Error),
     #[error(transparent)] WorkerSend(#[from] mpsc::error::SendError<ootrstats::worker::SupervisorMessage>),
     #[error(transparent)] Write(#[from] async_proto::WriteError),
+    #[error("patch file with unexpected file name structure")]
+    PatchFilename,
 }
 
 async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::stream::DuplexStream, rocket_ws::Message>>>, stream: &mut SplitStream<rocket_ws::stream::DuplexStream>) -> Result<(), Error> {
-    let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_base_rom_path, rando_rev, setup, bench, priority_users } = websocket::ClientMessage::read_ws(stream).await? else { return Ok(()) };
+    let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_base_rom_path, rando_rev, setup, output_mode, priority_users } = websocket::ClientMessage::read_ws(stream).await? else { return Ok(()) };
     if received_password != correct_password { return Ok(()) }
     let (worker_tx, mut worker_rx) = mpsc::channel(256);
     let (mut supervisor_tx, supervisor_rx) = mpsc::channel(256);
     let base_rom_path = if_chain! {
         if cfg!(windows);
-        if bench;
+        if let OutputMode::Bench = output_mode;
         if let Some(wsl_base_rom_path) = wsl_base_rom_path;
         then {
             wsl_base_rom_path
@@ -61,7 +71,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
         }
     };
     let mut stream = Some(stream);
-    let mut work = pin!(ootrstats::worker::work(worker_tx, supervisor_rx, PathBuf::from(base_rom_path), 0, rando_rev, setup, bench, &priority_users));
+    let mut work = pin!(ootrstats::worker::work(worker_tx, supervisor_rx, PathBuf::from(base_rom_path), 0, rando_rev, setup, output_mode, &priority_users));
     loop {
         let next_msg = if let Some(ref mut stream) = stream {
             Either::Left(timeout(Duration::from_secs(60), websocket::ClientMessage::read_ws(*stream)))
@@ -75,7 +85,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                     match msg {
                         ootrstats::worker::Message::Init(msg) => lock!(sink = sink; websocket::ServerMessage::Init(msg).write_ws(&mut *sink).await)?,
                         ootrstats::worker::Message::Ready(ready) => lock!(sink = sink; websocket::ServerMessage::Ready(ready).write_ws(&mut *sink).await)?,
-                        ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log } => {
+                        ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log, patch } => {
                             let spoiler_log = match spoiler_log {
                                 Either::Left(spoiler_log_path) => {
                                     let spoiler_log = fs::read(&spoiler_log_path).await?.into();
@@ -84,7 +94,20 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                                 }
                                 Either::Right(spoiler_log) => spoiler_log,
                             };
-                            lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log }.write_ws(&mut *sink).await)?;
+                            let patch = match patch {
+                                Some(Either::Left((wsl, patch_path))) => Some((patch_path.extension().ok_or(Error::PatchFilename)?.to_str().ok_or(Error::PatchFilename)?.to_owned(), if wsl {
+                                    let patch = Command::new(WSL).arg("cat").arg(&patch_path).check("wsl cat").await?.stdout.into();
+                                    Command::new(WSL).arg("rm").arg(patch_path).check("wsl rm").await?;
+                                    patch
+                                } else {
+                                    let patch = fs::read(&patch_path).await?.into();
+                                    fs::remove_file(patch_path).await?;
+                                    patch
+                                })),
+                                Some(Either::Right((ext, patch))) => Some((ext, patch)),
+                                None => None,
+                            };
+                            lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, patch }.write_ws(&mut *sink).await)?;
                         }
                         ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => lock!(sink = sink; websocket::ServerMessage::Failure { seed_idx, instructions, error_log }.write_ws(&mut *sink).await)?,
                     }
@@ -94,7 +117,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
             Some(msg) = worker_rx.recv() => match msg {
                 ootrstats::worker::Message::Init(msg) => lock!(sink = sink; websocket::ServerMessage::Init(msg).write_ws(&mut *sink).await)?,
                 ootrstats::worker::Message::Ready(ready) => lock!(sink = sink; websocket::ServerMessage::Ready(ready).write_ws(&mut *sink).await)?,
-                ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log } => {
+                ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log, patch } => {
                     let spoiler_log = match spoiler_log {
                         Either::Left(spoiler_log_path) => {
                             let spoiler_log = fs::read(&spoiler_log_path).await?.into();
@@ -103,7 +126,20 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                         }
                         Either::Right(spoiler_log) => spoiler_log,
                     };
-                    lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log }.write_ws(&mut *sink).await)?;
+                    let patch = match patch {
+                        Some(Either::Left((wsl, patch_path))) => Some((patch_path.extension().ok_or(Error::PatchFilename)?.to_str().ok_or(Error::PatchFilename)?.to_owned(), if wsl {
+                            let patch = Command::new(WSL).arg("cat").arg(&patch_path).check("wsl cat").await?.stdout.into();
+                            Command::new(WSL).arg("rm").arg(patch_path).check("wsl rm").await?;
+                            patch
+                        } else {
+                            let patch = fs::read(&patch_path).await?.into();
+                            fs::remove_file(patch_path).await?;
+                            patch
+                        })),
+                        Some(Either::Right((ext, patch))) => Some((ext, patch)),
+                        None => None,
+                    };
+                    lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, patch }.write_ws(&mut *sink).await)?;
                 }
                 ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => lock!(sink = sink; websocket::ServerMessage::Failure { seed_idx, instructions, error_log }.write_ws(&mut *sink).await)?,
             },

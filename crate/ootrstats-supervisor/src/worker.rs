@@ -31,6 +31,7 @@ use {
     },
     tokio_tungstenite::tungstenite,
     ootrstats::{
+        OutputMode,
         RandoSetup,
         SeedIdx,
         websocket,
@@ -93,12 +94,12 @@ pub(crate) enum Error {
 }
 
 impl Kind {
-    async fn run(self, name: String, tx: mpsc::Sender<(String, Message)>, mut rx: mpsc::Receiver<SupervisorMessage>, rando_rev: git2::Oid, setup: RandoSetup, bench: bool) -> Result<(), Error> {
+    async fn run(self, name: String, tx: mpsc::Sender<(String, Message)>, mut rx: mpsc::Receiver<SupervisorMessage>, rando_rev: git2::Oid, setup: RandoSetup, output_mode: OutputMode) -> Result<(), Error> {
         match self {
             Self::Local { base_rom_path, wsl_base_rom_path, cores } => {
                 let base_rom_path = if_chain! {
                     if cfg!(windows);
-                    if bench;
+                    if let OutputMode::Bench = output_mode;
                     if let Some(wsl_base_rom_path) = wsl_base_rom_path;
                     then {
                         wsl_base_rom_path
@@ -107,7 +108,7 @@ impl Kind {
                     }
                 };
                 let (inner_tx, mut inner_rx) = mpsc::channel(256);
-                let mut work = pin!(ootrstats::worker::work(inner_tx, rx, base_rom_path, cores, rando_rev, setup, bench, &[]));
+                let mut work = pin!(ootrstats::worker::work(inner_tx, rx, base_rom_path, cores, rando_rev, setup, output_mode, &[]));
                 loop {
                     select! {
                         res = &mut work => {
@@ -133,7 +134,7 @@ impl Kind {
                 let mut sink = pin!(sink);
                 let mut stream = Box::pin(stream.fuse()) as Pin<Box<dyn FusedStream<Item = _> + Send>>;
                 tx.send((name.clone(), Message::Init(format!("handshaking")))).await?;
-                sink.send(websocket::ClientMessage::Handshake { password, base_rom_path, wsl_base_rom_path, rando_rev, setup, bench, priority_users }).await?;
+                sink.send(websocket::ClientMessage::Handshake { password, base_rom_path, wsl_base_rom_path, rando_rev, setup, output_mode, priority_users }).await?;
                 tx.send((name.clone(), Message::Init(format!("waiting for reply from worker")))).await?;
                 let mut ping_interval = interval(Duration::from_secs(30));
                 ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -143,8 +144,9 @@ impl Kind {
                         res = timeout(Duration::from_secs(60), stream.select_next_some()) => match res? {
                             Ok(websocket::ServerMessage::Init(msg)) => tx.send((name.clone(), Message::Init(msg))).await?,
                             Ok(websocket::ServerMessage::Ready(ready)) => tx.send((name.clone(), Message::Ready(ready))).await?,
-                            Ok(websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log }) => tx.send((name.clone(), Message::Success {
+                            Ok(websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, patch }) => tx.send((name.clone(), Message::Success {
                                 spoiler_log: Either::Right(spoiler_log),
+                                patch: patch.map(Either::Right),
                                 seed_idx, instructions,
                             })).await?,
                             Ok(websocket::ServerMessage::Failure { seed_idx, instructions, error_log }) => tx.send((name.clone(), Message::Failure { seed_idx, instructions, error_log })).await?,
@@ -162,8 +164,9 @@ impl Kind {
                                 match res {
                                     Ok(websocket::ServerMessage::Init(msg)) => tx.send((name.clone(), Message::Init(msg))).await?,
                                     Ok(websocket::ServerMessage::Ready(ready)) => tx.send((name.clone(), Message::Ready(ready))).await?,
-                                    Ok(websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log }) => tx.send((name.clone(), Message::Success {
+                                    Ok(websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, patch }) => tx.send((name.clone(), Message::Success {
                                         spoiler_log: Either::Right(spoiler_log),
+                                        patch: patch.map(Either::Right),
                                         seed_idx, instructions,
                                     })).await?,
                                     Ok(websocket::ServerMessage::Failure { seed_idx, instructions, error_log }) => tx.send((name.clone(), Message::Failure { seed_idx, instructions, error_log })).await?,
@@ -194,10 +197,10 @@ pub(crate) struct State {
 }
 
 impl State {
-    pub(crate) fn new(worker_tx: mpsc::Sender<(String, Message)>, name: String, kind: Kind, rando_rev: git2::Oid, setup: &RandoSetup, bench: bool) -> (JoinHandle<Result<(), Error>>, Self) {
+    pub(crate) fn new(worker_tx: mpsc::Sender<(String, Message)>, name: String, kind: Kind, rando_rev: git2::Oid, setup: &RandoSetup, output_mode: OutputMode) -> (JoinHandle<Result<(), Error>>, Self) {
         let (supervisor_tx, supervisor_rx) = mpsc::channel(256);
         (
-            tokio::spawn(kind.run(name.clone(), worker_tx, supervisor_rx, rando_rev, setup.clone(), bench)),
+            tokio::spawn(kind.run(name.clone(), worker_tx, supervisor_rx, rando_rev, setup.clone(), output_mode)),
             Self {
                 msg: None,
                 ready: 0,

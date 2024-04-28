@@ -36,6 +36,7 @@ use {
         traits::AsyncCommandOutputExt as _,
     },
     crate::{
+        OutputMode,
         RandoSetup,
         RollOutput,
         SeedIdx,
@@ -54,6 +55,7 @@ pub enum Message {
         /// present iff the `bench` parameter was set.
         instructions: Option<u64>,
         spoiler_log: Either<PathBuf, Bytes>,
+        patch: Option<Either<(bool, PathBuf), (String, Bytes)>>,
     },
     Failure {
         seed_idx: SeedIdx,
@@ -112,7 +114,7 @@ async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[S
     Ok(if wait > Duration::default() { Some((wait, message)) } else { None })
 }
 
-pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, rando_rev: git2::Oid, setup: RandoSetup, bench: bool, priority_users: &[String]) -> Result<(), Error> {
+pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, rando_rev: git2::Oid, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String]) -> Result<(), Error> {
     let repo_path = match setup {
         RandoSetup::Normal { ref github_user, .. } => {
             tx.send(Message::Init(format!("cloning randomizer: determining repo path"))).await?;
@@ -135,7 +137,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             if fs::exists(repo_path.join("Cargo.toml")).await? {
                 //TODO update Rust
                 tx.send(Message::Init(format!("building Rust code"))).await?;
-                let mut cargo = if cfg!(target_os = "windows") && bench {
+                let mut cargo = if cfg!(target_os = "windows") && output_mode == OutputMode::Bench {
                     let mut cargo = Command::new(crate::WSL);
                     cargo.arg("cargo");
                     cargo
@@ -149,7 +151,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 cargo.check("cargo build").await?;
                 tx.send(Message::Init(format!("copying Rust module"))).await?;
                 #[cfg(target_os = "windows")] {
-                    if bench {
+                    if let OutputMode::Bench = output_mode {
                         Command::new(crate::WSL).arg("cp").arg("target/release/librs.so").arg("rs.so").current_dir(&repo_path).check("wsl cp").await?;
                     } else {
                         fs::copy(repo_path.join("target").join("release").join("rs.dll"), repo_path.join("rs.pyd")).await?;
@@ -181,7 +183,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             tx.send(Message::Init(format!("copying base rom to RSL repo"))).await?;
             let rsl_data_dir = repo_path.join("data");
             let rsl_base_rom_path = rsl_data_dir.join("oot-ntscu-1.0.z64");
-            if cfg!(target_os = "windows") && bench {
+            if cfg!(target_os = "windows") && output_mode == OutputMode::Bench {
                 Command::new(crate::WSL).arg("mkdir").arg("-p").arg("data").current_dir(&repo_path).check("wsl mkdir").await?;
                 Command::new(crate::WSL).arg("cp").arg(&base_rom_path).arg("data/oot-ntscu-1.0.z64").current_dir(&repo_path).check("wsl cp").await?;
             } else {
@@ -214,41 +216,33 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
     let mut recheck_ready_at = None;
     let mut waiting_cores = 0;
     let handle_msg = |msg| match msg {
-        SupervisorMessage::Roll(seed_idx) => match setup {
-            RandoSetup::Normal { ref settings, .. } => {
-                let tx = tx.clone();
-                let base_rom_path = base_rom_path.clone();
-                let repo_path = repo_path.clone();
-                let settings = settings.clone();
-                tokio::spawn(async move {
-                    tx.send(match crate::run_rando(&base_rom_path, &repo_path, &settings, bench).await? {
-                        RollOutput { instructions, log: Ok(spoiler_log_path) } => Message::Success {
-                            spoiler_log: Either::Left(spoiler_log_path),
-                            seed_idx, instructions,
-                        },
-                        RollOutput { instructions, log: Err(error_log) } => Message::Failure {
-                            seed_idx, instructions, error_log,
-                        },
-                    }).await?;
-                    Ok::<_, Error>(())
-                })
-            }
-            RandoSetup::Rsl { .. } => {
-                let tx = tx.clone();
-                let repo_path = repo_path.clone();
-                tokio::spawn(async move {
-                    tx.send(match crate::run_rsl(&repo_path, bench).await? {
-                        RollOutput { instructions, log: Ok(spoiler_log_path) } => Message::Success {
-                            spoiler_log: Either::Left(spoiler_log_path),
-                            seed_idx, instructions,
-                        },
-                        RollOutput { instructions, log: Err(error_log) } => Message::Failure {
-                            seed_idx, instructions, error_log,
-                        },
-                    }).await?;
-                    Ok(())
-                })
-            }
+        SupervisorMessage::Roll(seed_idx) => {
+            let run_future = match setup {
+                RandoSetup::Normal { ref settings, .. } => {
+                    let base_rom_path = base_rom_path.clone();
+                    let repo_path = repo_path.clone();
+                    let settings = settings.clone();
+                    Either::Left(async move { crate::run_rando(&base_rom_path, &repo_path, &settings, output_mode).await })
+                }
+                RandoSetup::Rsl { .. } => {
+                    let repo_path = repo_path.clone();
+                    Either::Right(async move { crate::run_rsl(&repo_path, output_mode == OutputMode::Bench).await })
+                }
+            };
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                tx.send(match run_future.await? {
+                    RollOutput { instructions, log: Ok(spoiler_log_path), patch } => Message::Success {
+                        spoiler_log: Either::Left(spoiler_log_path),
+                        patch: patch.map(Either::Left),
+                        seed_idx, instructions,
+                    },
+                    RollOutput { instructions, log: Err(error_log), patch: _ } => Message::Failure {
+                        seed_idx, instructions, error_log,
+                    },
+                }).await?;
+                Ok::<_, Error>(())
+            })
         }
     };
     for msg in msg_buf {
