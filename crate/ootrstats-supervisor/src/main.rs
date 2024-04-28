@@ -57,6 +57,7 @@ use {
         Deserialize,
         Serialize,
     },
+    serde_json::Value as Json,
     tokio::{
         io,
         process::Command,
@@ -116,7 +117,7 @@ struct Metadata {
 #[clap(version)]
 struct Args {
     /// Sample size — how many seeds to roll.
-    #[clap(short, long, default_value_t = 16384)]
+    #[clap(short, long, default_value = "16384", default_value_if("world_counts", "true", Some("255")))]
     num_seeds: SeedIdx,
     /// Run the benchmarking suite.
     #[clap(long, conflicts_with("rsl"), conflicts_with("preset"))]
@@ -134,6 +135,12 @@ struct Args {
     /// Settings string for the randomizer.
     #[clap(long, conflicts_with("rsl"), conflicts_with("preset"))]
     settings: Option<String>,
+    /// Specifies a JSON object of settings on the command line that will override the given preset or settings string.
+    #[clap(long, conflicts_with("rsl"), default_value = "{}")]
+    json_settings: Json,
+    /// Generate seeds with varying world counts.
+    #[clap(long, conflicts_with("rsl"))]
+    world_counts: bool,
     /// Generate .zpf/.zpfz patch files.
     #[clap(long, conflicts_with("rsl"))]
     patch: bool,
@@ -183,11 +190,15 @@ enum Error {
     #[error(transparent)] WorkerSend(#[from] mpsc::error::SendError<ootrstats::worker::SupervisorMessage>),
     #[error(transparent)] Wheel(#[from] wheel::Error),
     #[cfg(unix)] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
+    #[error("JSON settings must be an object")]
+    JsonSettings,
     #[cfg(windows)]
     #[error("user folder not found")]
     MissingHomeDir,
     #[error("found both spoiler and error logs for a seed")]
     SuccessAndFailure,
+    #[error("at most 255 seeds may be generated with the --world-counts option")]
+    TooManyWorlds,
     #[error("error in worker {worker}: {source}")]
     Worker {
         worker: String,
@@ -228,6 +239,9 @@ impl wheel::CustomExit for Error {
 }
 
 async fn cli(args: Args) -> Result<(), Error> {
+    if args.world_counts && args.num_seeds > 255 {
+        return Err(Error::TooManyWorlds)
+    }
     let (cli_tx, mut cli_rx) = mpsc::channel(256);
     tokio::spawn(async move {
         let mut cli_events = crossterm::event::EventStream::default();
@@ -287,6 +301,12 @@ async fn cli(args: Args) -> Result<(), Error> {
             } else {
                 RandoSettings::Default
             },
+            json_settings: if let Json::Object(json_settings) = args.json_settings {
+                json_settings
+            } else {
+                return Err(Error::JsonSettings)
+            },
+            world_counts: args.world_counts,
         }
     };
     let stats_dir = {

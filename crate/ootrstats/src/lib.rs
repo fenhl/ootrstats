@@ -43,6 +43,8 @@ pub enum RandoSetup {
     Normal {
         github_user: String,
         settings: RandoSettings,
+        json_settings: serde_json::Map<String, serde_json::Value>,
+        world_counts: bool,
     },
     Rsl {
         github_user: String,
@@ -52,7 +54,8 @@ pub enum RandoSetup {
 impl RandoSetup {
     pub fn stats_dir(&self, rando_rev: git2::Oid) -> PathBuf {
         match self {
-            Self::Normal { github_user, settings } => Path::new("rando").join(github_user).join(rando_rev.to_string()).join(settings.stats_dir()),
+            Self::Normal { github_user, settings, json_settings, world_counts: false } if json_settings.is_empty() => Path::new("rando").join(github_user).join(rando_rev.to_string()).join(settings.stats_dir()),
+            Self::Normal { github_user, settings, .. } => Path::new("rando").join(github_user).join(rando_rev.to_string()).join("custom").join(settings.stats_dir()),
             Self::Rsl { github_user } => Path::new("rsl").join(github_user).join(rando_rev.to_string()),
         }
     }
@@ -116,14 +119,18 @@ fn python() -> Result<PathBuf, RollError> {
     })
 }
 
-pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoSettings, output_mode: OutputMode) -> Result<RollOutput, RollError> {
-    let resolved_settings = collect![as HashMap<_, _>:
+pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
+    let mut resolved_settings = collect![as HashMap<_, _>:
         Cow::Borrowed("rom") => json!(base_rom_path),
         Cow::Borrowed("create_spoiler") => json!(true),
         Cow::Borrowed("create_cosmetics_log") => json!(output_mode == OutputMode::Bench),
         Cow::Borrowed("create_patch_file") => json!(output_mode == OutputMode::Patch),
         Cow::Borrowed("create_compressed_rom") => json!(output_mode == OutputMode::Bench),
     ];
+    resolved_settings.extend(json_settings.iter().map(|(name, value)| (Cow::<str>::Borrowed(name), value.clone())));
+    if world_counts {
+        resolved_settings.insert(Cow::Borrowed("world_count"), json!(seed_idx + 1));
+    }
     let python = python()?;
     #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(unused_mut))] let mut cmd_name = python.display().to_string();
     let mut cmd = if let OutputMode::Bench = output_mode {

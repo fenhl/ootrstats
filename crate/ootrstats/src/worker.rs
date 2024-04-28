@@ -218,11 +218,12 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
     let handle_msg = |msg| match msg {
         SupervisorMessage::Roll(seed_idx) => {
             let run_future = match setup {
-                RandoSetup::Normal { ref settings, .. } => {
+                RandoSetup::Normal { ref settings, ref json_settings, world_counts, .. } => {
                     let base_rom_path = base_rom_path.clone();
                     let repo_path = repo_path.clone();
                     let settings = settings.clone();
-                    Either::Left(async move { crate::run_rando(&base_rom_path, &repo_path, &settings, output_mode).await })
+                    let json_settings = json_settings.clone();
+                    Either::Left(async move { crate::run_rando(&base_rom_path, &repo_path, &settings, &json_settings, world_counts, seed_idx, output_mode).await })
                 }
                 RandoSetup::Rsl { .. } => {
                     let repo_path = repo_path.clone();

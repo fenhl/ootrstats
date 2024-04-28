@@ -85,6 +85,7 @@ The supervisor can be interrupted cleanly using <kbd>Ctrl</kbd><kbd>C</kbd> or <
 * `-n`, `--num-seeds`: Specifies the sample size, i.e. how many seeds to roll. Any existing seeds will be reused. Defaults to 16384.
 * `-p`, `--preset`: The name of the settings preset to use. Defaults to the Default/Beginner preset. Cannot be combined with `--rsl`.
 * `-u`, `--github-user`: Specifies the GitHub user or organization name from which to clone the randomizer (or the random settings script if combined with `--rsl`). Defaults to `OoTRandomizer` (or `matthewkirby` if combined with `--rsl`).
+* `--json-settings`: Specifies a JSON object of settings on the command line that will override the given preset or settings string. Cannot be combined with `--rsl`.
 * `--patch`: Generate `.zpf`/`.zpfz` patch files and include them in the [`statsDir`](#configuration). Cannot be combined with `--rsl` or with the `bench` subcommand.
 * `--retry-failures`: If the randomizer errors, retry instead of recording as a failure. Care should be taken when using this command for statistics since it may skew results, but it can be useful when generating seeds for other purposes.
 * `--rev`: Specifies the git revision of the randomizer (or of the random settings script if combined with `--rsl`) to clone. Must be given as an unabbreviated git commit hash. Cannot be combined with `--branch`.
@@ -96,6 +97,7 @@ The supervisor can be interrupted cleanly using <kbd>Ctrl</kbd><kbd>C</kbd> or <
     * the current multiworld tournament settings
     * Hell Mode
     * a version of the random settings script adjusted for compatibility with main Dev
+* `--world-counts`: Each seed will override the value of the `world_count` setting to be equal to its seed ID (plus 1 because seed IDs start at 0). Restricts the `--num-seeds` option to a maximum of 255. Cannot be combined with `--rsl`.
 
 ## Subcommands
 
