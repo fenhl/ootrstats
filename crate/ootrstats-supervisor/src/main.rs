@@ -144,6 +144,9 @@ struct Args {
     /// Generate .zpf/.zpfz patch files.
     #[clap(long, conflicts_with("rsl"))]
     patch: bool,
+    /// If there are more workers than remaining seeds, have multiple workers attempt to generate the same seed.
+    #[clap(long)]
+    race: bool,
     #[clap(long)]
     retry_failures: bool,
     #[clap(subcommand)]
@@ -387,6 +390,8 @@ async fn cli(args: Args) -> Result<(), Error> {
     let mut worker_tasks = FuturesUnordered::default();
     let mut workers = Err::<Vec<worker::State>, _>(worker_tx);
     let mut pending_seeds = VecDeque::default();
+    let mut ongoing_seeds = HashMap::<_, usize>::default();
+    let mut completed_seeds = HashSet::default();
     loop {
         enum Event {
             ReaderDone(Result<Result<(), Error>, JoinError>),
@@ -481,8 +486,21 @@ async fn cli(args: Args) -> Result<(), Error> {
                                     worker.ready += ready;
                                     while worker.ready > 0 {
                                         worker.msg = None;
-                                        let Some(seed_idx) = pending_seeds.pop_front() else { break };
-                                        worker.roll(seed_idx).await?;
+                                        if let Some(seed_idx) = pending_seeds.pop_front() {
+                                            worker.roll(seed_idx).await?;
+                                            *ongoing_seeds.entry(seed_idx).or_default() += 1;
+                                        } else {
+                                            if_chain! {
+                                                if args.race;
+                                                if let Some((&seed_idx, num_workers)) = ongoing_seeds.iter_mut().min_by_key(|(_, num_workers)| **num_workers);
+                                                then {
+                                                    worker.roll(seed_idx).await?;
+                                                    *num_workers += 1;
+                                                } else {
+                                                    break
+                                                }
+                                            }
+                                        }
                                     }
                                     None
                                 }
@@ -629,6 +647,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                     };
                     if let Some(worker) = workers.iter_mut().find(|worker| worker.ready > 0) {
                         worker.roll(seed_idx).await?;
+                        *ongoing_seeds.entry(seed_idx).or_default() += 1;
                     } else {
                         pending_seeds.push_back(seed_idx);
                     }
