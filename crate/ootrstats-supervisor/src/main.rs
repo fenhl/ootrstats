@@ -183,6 +183,24 @@ enum SubcommandData {
     },
 }
 
+impl SubcommandData {
+    fn num_successes(&self) -> u16 {
+        match self {
+            Self::None { num_successes, .. } => *num_successes,
+            Self::Bench { instructions_success, .. } => instructions_success.len().try_into().expect("more than u16::MAX seeds rolled"),
+            Self::MidosHouse { spoiler_logs, .. } => spoiler_logs.len().try_into().expect("more than u16::MAX seeds rolled"),
+        }
+    }
+
+    fn num_failures(&self) -> u16 {
+        match self {
+            Self::None { num_failures, .. } => *num_failures,
+            Self::Bench { instructions_failure, .. } => instructions_failure.len().try_into().expect("more than u16::MAX seeds rolled"),
+            Self::MidosHouse { num_failures, .. } => *num_failures,
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 enum Error {
     #[error(transparent)] Config(#[from] config::Error),
@@ -568,12 +586,12 @@ async fn cli(args: Args) -> Result<(), Error> {
                                 }
                                 ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => {
                                     worker.running -= 1;
-                                    worker.completed += 1;
                                     let seed_dir = stats_dir.join(seed_idx.to_string());
                                     if args.retry_failures {
                                         fs::remove_dir_all(seed_dir).await.missing_ok()?;
                                         Some(seed_idx)
                                     } else {
+                                        worker.completed += 1;
                                         fs::create_dir_all(&seed_dir).await?;
                                         let stats_error_log_path = seed_dir.join("error.log");
                                         fs::write(stats_error_log_path, &error_log).await?;
@@ -687,84 +705,29 @@ async fn cli(args: Args) -> Result<(), Error> {
             MoveToColumn(0),
             Print(if completed_readers == available_parallelism {
                 // list of pending seeds fully initialized
-                match subcommand_data {
-                    SubcommandData::None { num_successes, num_failures } => {
-                        let rolled = num_successes + num_failures;
-                        let started = rolled + workers.as_ref().map(|workers| workers.iter().map(|worker| u16::from(worker.running)).sum::<u16>()).unwrap_or_default();
-                        let total = usize::from(started) + pending_seeds.len();
-                        let completed = match workers {
-                            Ok(ref workers) => workers.iter().map(|worker| worker.completed).sum(),
-                            Err(_) => 0,
-                        };
-                        let skipped = usize::from(rolled - completed);
-                        format!(
-                            "{started}/{total} seeds started, {rolled} rolled, {num_failures} failures ({}%), ETA {}",
-                            if num_successes > 0 || num_failures > 0 { 100 * num_failures / (num_successes + num_failures) } else { 100 },
-                            if completed > 0 { (start_local + TimeDelta::from_std(start.elapsed().mul_f64((total - skipped) as f64 / completed as f64)).expect("ETA too long")).format("%Y-%m-%d %H:%M:%S").to_string() } else { format!("unknown") },
-                        )
-                    }
-                    SubcommandData::Bench { ref instructions_success, ref instructions_failure, .. } => {
-                        let rolled = instructions_success.len() + instructions_failure.len();
-                        let started = rolled + workers.as_ref().map(|workers| workers.iter().map(|worker| usize::from(worker.running)).sum::<usize>()).unwrap_or_default();
-                        let total = started + pending_seeds.len();
-                        let completed = match workers {
-                            Ok(ref workers) => workers.iter().map(|worker| worker.completed).sum(),
-                            Err(_) => 0,
-                        };
-                        let skipped = rolled - usize::from(completed);
-                        format!(
-                            "{started}/{total} seeds started, {rolled} rolled, {} failures ({}%), ETA {}",
-                            instructions_failure.len(),
-                            if !instructions_success.is_empty() || !instructions_failure.is_empty() { 100 * instructions_failure.len() / (instructions_success.len() + instructions_failure.len()) } else { 100 },
-                            if completed > 0 { (start_local + TimeDelta::from_std(start.elapsed().mul_f64((total - skipped) as f64 / completed as f64)).expect("ETA too long")).format("%Y-%m-%d %H:%M:%S").to_string() } else { format!("unknown") },
-                        )
-                    }
-                    SubcommandData::MidosHouse { ref spoiler_logs, num_failures, .. } => {
-                        let rolled = spoiler_logs.len() + usize::from(num_failures);
-                        let started = rolled + workers.as_ref().map(|workers| workers.iter().map(|worker| usize::from(worker.running)).sum::<usize>()).unwrap_or_default();
-                        let total = started + pending_seeds.len();
-                        let completed = match workers {
-                            Ok(ref workers) => workers.iter().map(|worker| worker.completed).sum(),
-                            Err(_) => 0,
-                        };
-                        let skipped = rolled - usize::from(completed);
-                        format!(
-                            "{started}/{total} seeds started, {rolled} rolled, {num_failures} failures ({}%), ETA {}",
-                            if !spoiler_logs.is_empty() || num_failures > 0 { 100 * usize::from(num_failures) / (spoiler_logs.len() + usize::from(num_failures)) } else { 100 },
-                            if completed > 0 { (start_local + TimeDelta::from_std(start.elapsed().mul_f64((total - skipped) as f64 / completed as f64)).expect("ETA too long")).format("%Y-%m-%d %H:%M:%S").to_string() } else { format!("unknown") },
-                        )
-                    }
-                }
+                let num_successes = subcommand_data.num_successes();
+                let num_failures = subcommand_data.num_failures();
+                let rolled = num_successes + num_failures;
+                let started = rolled + workers.as_ref().map(|workers| workers.iter().map(|worker| u16::from(worker.running)).sum::<u16>()).unwrap_or_default();
+                let total = usize::from(started) + pending_seeds.len();
+                let completed = match workers {
+                    Ok(ref workers) => workers.iter().map(|worker| worker.completed).sum(),
+                    Err(_) => 0,
+                };
+                let skipped = usize::from(rolled - completed);
+                format!(
+                    "{started}/{total} seeds started, {rolled} rolled, {num_failures} failures ({}%), ETA {}",
+                    if num_successes > 0 || num_failures > 0 { 100 * num_failures / (num_successes + num_failures) } else { 100 },
+                    if completed > 0 { (start_local + TimeDelta::from_std(start.elapsed().mul_f64((total - skipped) as f64 / completed as f64)).expect("ETA too long")).format("%Y-%m-%d %H:%M:%S").to_string() } else { format!("unknown") },
+                )
             } else {
-                match subcommand_data {
-                    SubcommandData::None { num_successes, num_failures } => {
-                        let rolled = usize::from(num_successes + num_failures);
-                        let started = workers.as_ref().map(|workers| workers.iter().map(|worker| usize::from(worker.running)).sum::<usize>()).unwrap_or_default();
-                        format!(
-                            "checking for existing seeds: {rolled} rolled, {started} running, {} pending, {} still being checked",
-                            pending_seeds.len(),
-                            usize::from(args.num_seeds) - pending_seeds.len() - started - rolled,
-                        )
-                    }
-                    SubcommandData::Bench { ref instructions_success, ref instructions_failure, .. } => {
-                        let rolled = instructions_success.len() + instructions_failure.len();
-                        let started = workers.as_ref().map(|workers| workers.iter().map(|worker| usize::from(worker.running)).sum::<usize>()).unwrap_or_default();
-                        format!(
-                            "checking for existing seeds: {rolled} rolled, {started} running, {} pending, {} still being checked",
-                            pending_seeds.len(),
-                            usize::from(args.num_seeds) - pending_seeds.len() - started - rolled,
-                        )
-                    }
-                    SubcommandData::MidosHouse { ref spoiler_logs, num_failures, .. } => {
-                        let rolled = spoiler_logs.len() + usize::from(num_failures);
-                        let started = workers.as_ref().map(|workers| workers.iter().map(|worker| usize::from(worker.running)).sum::<usize>()).unwrap_or_default();
-                        format!(
-                            "checking for existing seeds: {rolled} rolled, {started} running, {} pending, {} still being checked",
-                            pending_seeds.len(),
-                            usize::from(args.num_seeds) - pending_seeds.len() - started - rolled,
-                        )
-                    }
-                }
+                let rolled = usize::from(subcommand_data.num_successes() + subcommand_data.num_failures());
+                let started = workers.as_ref().map(|workers| workers.iter().map(|worker| usize::from(worker.running)).sum::<usize>()).unwrap_or_default();
+                format!(
+                    "checking for existing seeds: {rolled} rolled, {started} running, {} pending, {} still being checked",
+                    pending_seeds.len(),
+                    usize::from(args.num_seeds) - pending_seeds.len() - started - rolled,
+                )
             }),
             Clear(ClearType::UntilNewLine),
         ).at_unknown()?;
