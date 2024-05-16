@@ -483,19 +483,20 @@ async fn cli(args: Args) -> Result<(), Error> {
                             None
                         }
                     },
-                    Event::WorkerDone(name, result) => {
-                        let () = result?.map_err(|source| Error::Worker { worker: name.clone(), source })?;
-                        if_chain! {
-                            if let Ok(ref mut workers) = workers;
-                            if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name);
-                            then {
-                                worker.stopped = true;
-                            } else {
-                                return Err(Error::WorkerNotFound)
+                    Event::WorkerDone(name, result) => if_chain! {
+                        if let Ok(ref mut workers) = workers;
+                        if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name);
+                        then {
+                            worker.stopped = true;
+                            match result? {
+                                Ok(()) => {}
+                                Err(e) => worker.error = Some(e),
                             }
+                            None
+                        } else {
+                            return Err(Error::WorkerNotFound)
                         }
-                        None
-                    }
+                    },
                     Event::WorkerMessage(name, msg) => if_chain! {
                         if let Ok(ref mut workers) = workers;
                         if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name);
@@ -677,14 +678,19 @@ async fn cli(args: Args) -> Result<(), Error> {
         }
         if let Ok(ref workers) = workers {
             for worker in workers {
-                if worker.stopped {
+                if let Some(ref e) = worker.error {
+                    crossterm::execute!(stderr,
+                        Print(format_args!("\r\n{}: error: {e}", worker.name)),
+                        Clear(ClearType::UntilNewLine),
+                    ).at_unknown()?;
+                } else if worker.stopped {
                     crossterm::execute!(stderr,
                         Print(format_args!("\r\n{}: done", worker.name)),
                         Clear(ClearType::UntilNewLine),
                     ).at_unknown()?;
                 } else if let Some(ref msg) = worker.msg {
                     crossterm::execute!(stderr,
-                        Print(format_args!("\r\n{}: {}", worker.name, msg)),
+                        Print(format_args!("\r\n{}: {msg}", worker.name)),
                         Clear(ClearType::UntilNewLine),
                     ).at_unknown()?;
                 } else {
@@ -817,6 +823,13 @@ async fn cli(args: Args) -> Result<(), Error> {
             let mut buf = serde_json::to_vec_pretty(&counts)?;
             buf.push(b'\n');
             fs::write(out_path, buf).await?;
+        }
+    }
+    if let Ok(workers) = workers {
+        for worker in workers {
+            if let Some(source) = worker.error {
+                return Err(Error::Worker { worker: worker.name, source })
+            }
         }
     }
     Ok(())

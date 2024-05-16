@@ -193,6 +193,7 @@ impl Kind {
 pub(crate) struct State {
     pub(crate) name: String,
     pub(crate) msg: Option<String>,
+    pub(crate) error: Option<Error>,
     pub(crate) ready: u8,
     pub(crate) running: u8,
     pub(crate) completed: u16,
@@ -207,6 +208,7 @@ impl State {
             tokio::spawn(kind.run(name.clone(), worker_tx, supervisor_rx, rando_rev, setup.clone(), output_mode)),
             Self {
                 msg: None,
+                error: None,
                 ready: 0,
                 running: 0,
                 completed: 0,
