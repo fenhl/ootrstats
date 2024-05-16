@@ -10,6 +10,10 @@ use {
     either::Either,
     futures::{
         SinkExt as _,
+        future::{
+            self,
+            FutureExt as _,
+        },
         stream::{
             self,
             FusedStream,
@@ -141,7 +145,7 @@ impl Kind {
                 loop {
                     select! {
                         _ = ping_interval.tick() => sink.send(websocket::ClientMessage::Ping).await?,
-                        res = timeout(Duration::from_secs(60), stream.select_next_some()) => match res? {
+                        res = timeout(Duration::from_secs(60), stream.next().then(|opt| if let Some(res) = opt { Either::Left(future::ready(res)) } else { Either::Right(future::pending()) })) => match res? {
                             Ok(websocket::ServerMessage::Init(msg)) => tx.send((name.clone(), Message::Init(msg))).await?,
                             Ok(websocket::ServerMessage::Ready(ready)) => tx.send((name.clone(), Message::Ready(ready))).await?,
                             Ok(websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, patch }) => tx.send((name.clone(), Message::Success {

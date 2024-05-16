@@ -83,15 +83,17 @@ The supervisor can be interrupted cleanly using <kbd>Ctrl</kbd><kbd>C</kbd> or <
 
 * `-b`, `--branch`: Specifies the git branch of the randomizer (or of the random settings script if combined with `--rsl`) to clone. Defaults to the repository's default branch.
 * `-n`, `--num-seeds`: Specifies the sample size, i.e. how many seeds to roll. Any existing seeds will be reused. Defaults to 16384.
-* `-p`, `--preset`: The name of the settings preset to use. Defaults to the Default/Beginner preset. Cannot be combined with `--rsl`.
+* `-p`, `--preset`: The name of the settings preset to use. Defaults to the Default/Beginner preset. Cannot be combined with `--rsl`, `--settings`, or `--suite`.
 * `-u`, `--github-user`: Specifies the GitHub user or organization name from which to clone the randomizer (or the random settings script if combined with `--rsl`). Defaults to `OoTRandomizer` (or `matthewkirby` if combined with `--rsl`).
+* `-w`, `--worker`: Use only the specified worker(s). May be specified multiple times. Cannot be combined with `--exclude-worker`.
+* `-x`, `--exclude-worker`: Don't use the specified worker(s). May be specified multiple times. Cannot be combined with `--worker`.
 * `--json-settings`: Specifies a JSON object of settings on the command line that will override the given preset or settings string. Cannot be combined with `--rsl`.
 * `--patch`: Generate `.zpf`/`.zpfz` patch files and include them in the [`statsDir`](#configuration). Cannot be combined with `--rsl` or with the `bench` subcommand.
 * `--retry-failures`: If the randomizer errors, retry instead of recording as a failure. Care should be taken when using this command for statistics since it may skew results, but it can be useful when generating seeds for other purposes.
 * `--rev`: Specifies the git revision of the randomizer (or of the random settings script if combined with `--rsl`) to clone. Must be given as an unabbreviated git commit hash. Cannot be combined with `--branch`.
 * `--rsl`: Roll seeds using [the random settings script](https://github.com/matthewkirby/plando-random-settings).
-* `--settings`: The settings string to use for the randomizer. Cannot be combined with `--preset` or `--rsl`.
-* `--suite`: Runs the benchmarking suite. Should usually be combined with the `bench` subcommand. Cannot be combined with `--preset` or `--rsl`. The benchmarking suite consists of:
+* `--settings`: The settings string to use for the randomizer. Cannot be combined with `--preset` or `--rsl`, or `--suite`.
+* `--suite`: Runs the benchmarking suite. Should usually be combined with the `bench` subcommand. Cannot be combined with `--preset`, `--settings`, or `--rsl`. The benchmarking suite consists of:
     * the Default/Beginner preset
     * the current main tournament settings
     * the current multiworld tournament settings

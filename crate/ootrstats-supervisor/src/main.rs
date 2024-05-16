@@ -119,12 +119,12 @@ fn parse_json_object(arg: &str) -> Result<serde_json::Map<String, serde_json::Va
 #[derive(Clone, clap::Parser)]
 #[clap(version)]
 struct Args {
-    /// Sample size — how many seeds to roll.
-    #[clap(short, long, default_value = "16384", default_value_if("world_counts", "true", Some("255")))]
-    num_seeds: SeedIdx,
+    // randomizer settings
+
     /// Run the benchmarking suite.
-    #[clap(long, conflicts_with("rsl"), conflicts_with("preset"))]
+    #[clap(long, conflicts_with("rsl"), conflicts_with("preset"), conflicts_with("settings"))]
     suite: bool,
+    /// Use the random settings script to determine settings.
     #[clap(long)]
     rsl: bool,
     #[clap(short = 'u', long, default_value = "OoTRandomizer", default_value_if("rsl", "true", Some("matthewkirby")))]
@@ -147,8 +147,21 @@ struct Args {
     /// Generate .zpf/.zpfz patch files.
     #[clap(long, conflicts_with("rsl"))]
     patch: bool,
+
+    // ootrstats settings
+
+    /// Sample size — how many seeds to roll.
+    #[clap(short, long, default_value = "16384", default_value_if("world_counts", "true", Some("255")))]
+    num_seeds: SeedIdx,
+    /// If the randomizer errors, retry instead of recording the failure.
     #[clap(long)]
     retry_failures: bool,
+    /// Only roll seeds on the given worker(s).
+    #[clap(short = 'w', long = "worker", conflicts_with("exclude_workers"))]
+    include_workers: Vec<String>,
+    /// Don't roll seeds on the given worker(s).
+    #[clap(short = 'x', long = "exclude-worker", conflicts_with("include_workers"))]
+    exclude_workers: Vec<String>,
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
 }
@@ -626,6 +639,8 @@ async fn cli(args: Args) -> Result<(), Error> {
                         Ok(ref mut workers) => workers,
                         Err(worker_tx) => {
                             let (new_worker_tasks, new_workers) = mem::take(&mut config.workers).into_iter()
+                                .filter(|worker::Config { name, .. }| args.include_workers.is_empty() || args.include_workers.contains(name))
+                                .filter(|worker::Config { name, .. }| !args.exclude_workers.contains(name))
                                 .filter(|&worker::Config { bench, .. }| bench || !is_bench)
                                 .map(|worker::Config { name, kind, .. }| {
                                     let (task, state) = worker::State::new(worker_tx.clone(), name.clone(), kind, rando_rev, &setup, match (is_bench, args.patch) {
@@ -716,9 +731,17 @@ async fn cli(args: Args) -> Result<(), Error> {
                 };
                 let skipped = usize::from(rolled - completed);
                 format!(
-                    "{started}/{total} seeds started, {rolled} rolled, {num_failures} failures ({}%), ETA {}",
-                    if num_successes > 0 || num_failures > 0 { 100 * num_failures / (num_successes + num_failures) } else { 100 },
-                    if completed > 0 { (start_local + TimeDelta::from_std(start.elapsed().mul_f64((total - skipped) as f64 / completed as f64)).expect("ETA too long")).format("%Y-%m-%d %H:%M:%S").to_string() } else { format!("unknown") },
+                    "{started}/{total} seeds started, {rolled} rolled{}, ETA {}",
+                    if args.retry_failures {
+                        String::default()
+                    } else {
+                        format!(", {num_failures} failures ({}%)", if num_successes > 0 || num_failures > 0 { 100 * num_failures / (num_successes + num_failures) } else { 100 })
+                    },
+                    if completed > 0 {
+                        (start_local + TimeDelta::from_std(start.elapsed().mul_f64((total - skipped) as f64 / completed as f64)).expect("ETA too long")).format("%Y-%m-%d %H:%M:%S").to_string()
+                    } else {
+                        format!("unknown")
+                    },
                 )
             } else {
                 let rolled = usize::from(subcommand_data.num_successes() + subcommand_data.num_failures());
