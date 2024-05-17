@@ -1,7 +1,10 @@
 use {
     std::{
         collections::{
-            HashMap,
+            hash_map::{
+                self,
+                HashMap,
+            },
             VecDeque,
         },
         ffi::OsString,
@@ -196,7 +199,7 @@ enum SubcommandData {
     },
     Failures {
         num_successes: u16,
-        error_logs: Vec<Bytes>,
+        error_logs: Vec<(SeedIdx, Bytes)>,
     },
     MidosHouse {
         out_path: PathBuf,
@@ -498,7 +501,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                                     Some(seed_idx)
                                 },
                                 SubcommandData::Failures { ref mut error_logs, .. } => {
-                                    error_logs.push(fs::read(stats_dir.join(seed_idx.to_string()).join("error.log")).await?.into());
+                                    error_logs.push((seed_idx, fs::read(stats_dir.join(seed_idx.to_string()).join("error.log")).await?.into()));
                                     None
                                 }
                             }
@@ -651,7 +654,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                                                 Some(seed_idx)
                                             },
                                             SubcommandData::Failures { ref mut error_logs, .. } => {
-                                                error_logs.push(error_log);
+                                                error_logs.push((seed_idx, error_log));
                                                 None
                                             }
                                         }
@@ -861,30 +864,33 @@ async fn cli(args: Args) -> Result<(), Error> {
             }
         },
         SubcommandData::Failures { error_logs, .. } => {
-            let mut counts = HashMap::<_, HashMap<_, _>>::default();
-            for error_log in &error_logs {
+            let mut counts = HashMap::<_, HashMap<_, (SeedIdx, usize)>>::default();
+            for (seed_idx, error_log) in &error_logs {
                 let error_log = std::str::from_utf8(error_log)?;
                 let mut lines = error_log.trim().lines();
                 let msg = lines.next_back().ok_or(Error::EmptyErrorLog)?;
                 let _ = lines.next_back().ok_or(Error::MissingTraceback)?;
                 let location = lines.next_back().ok_or(Error::MissingTraceback)?;
-                *counts.entry(location).or_default().entry(msg).or_default() += 1;
+                match counts.entry(location).or_default().entry(msg) {
+                    hash_map::Entry::Occupied(mut entry) => entry.get_mut().1 += 1,
+                    hash_map::Entry::Vacant(entry) => { entry.insert((*seed_idx, 1)); }
+                }
             }
             crossterm::execute!(stdout,
                 Print("Top failure reasons by last line:\r\n"),
             ).at_unknown()?;
-            for msgs in counts.into_values().sorted_unstable_by_key(|msgs| -(msgs.values().copied().sum::<usize>() as isize)).take(10) {
-                let count = msgs.values().sum::<usize>();
+            for msgs in counts.into_values().sorted_unstable_by_key(|msgs| -(msgs.values().map(|&(_, count)| count).sum::<usize>() as isize)).take(10) {
+                let count = msgs.values().map(|&(_, count)| count).sum::<usize>();
                 let mut msgs = msgs.into_iter().collect_vec();
-                msgs.sort_unstable_by_key(|&(_, count)| count);
-                let (top_msg, top_count) = msgs.pop().expect("no error messages");
+                msgs.sort_unstable_by_key(|&(_, (_, count))| count);
+                let (top_msg, (seed_idx, top_count)) = msgs.pop().expect("no error messages");
                 if msgs.is_empty() {
                     crossterm::execute!(stdout,
-                        Print(format_args!("{count}x: {top_msg}\r\n")),
+                        Print(format_args!("{count}x: {top_msg} (e.g. seed {seed_idx})\r\n")),
                     ).at_unknown()?;
                 } else {
                     crossterm::execute!(stdout,
-                        Print(format_args!("{count}x: {top_msg} ({top_count}x, and {} other variants)\r\n", msgs.len())),
+                        Print(format_args!("{count}x: {top_msg} ({top_count}x, e.g. seed {seed_idx}, and {} other variants)\r\n", msgs.len())),
                     ).at_unknown()?;
                 }
             }
