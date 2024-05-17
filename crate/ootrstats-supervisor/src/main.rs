@@ -877,6 +877,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                 }
             }
             crossterm::execute!(stdout,
+                Print("Output directory: {stats_dir}\r\n"),
                 Print("Top failure reasons by last line:\r\n"),
             ).at_unknown()?;
             for msgs in counts.into_values().sorted_unstable_by_key(|msgs| -(msgs.values().map(|&(_, count)| count).sum::<usize>() as isize)).take(10) {
