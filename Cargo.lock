@@ -1432,6 +1432,7 @@ name = "ootrstats-supervisor"
 version = "5.0.0"
 dependencies = [
  "async-proto",
+ "bytes",
  "chrono",
  "clap",
  "crossterm",

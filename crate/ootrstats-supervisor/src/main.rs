@@ -8,11 +8,13 @@ use {
         io::{
             IsTerminal as _,
             stderr,
+            stdout,
         },
         mem,
         num::NonZeroUsize,
         path::PathBuf,
     },
+    bytes::Bytes,
     chrono::{
         TimeDelta,
         prelude::*,
@@ -173,7 +175,9 @@ enum Subcommand {
         #[clap(long)]
         raw_data: bool,
     },
-    /// Count chest appearances in Mido's house for the midos.house favicon
+    /// Display most common exceptions thrown by the randomizer.
+    Failures,
+    /// Count chest appearances in Mido's house for the midos.house favicon.
     MidosHouse {
         out_path: PathBuf,
     },
@@ -189,6 +193,10 @@ enum SubcommandData {
         instructions_failure: Vec<u64>,
         raw_data: bool,
     },
+    Failures {
+        num_successes: u16,
+        error_logs: Vec<Bytes>,
+    },
     MidosHouse {
         out_path: PathBuf,
         spoiler_logs: Vec<SpoilerLog>,
@@ -201,6 +209,7 @@ impl SubcommandData {
         match self {
             Self::None { num_successes, .. } => *num_successes,
             Self::Bench { instructions_success, .. } => instructions_success.len().try_into().expect("more than u16::MAX seeds rolled"),
+            Self::Failures { num_successes, .. } => *num_successes,
             Self::MidosHouse { spoiler_logs, .. } => spoiler_logs.len().try_into().expect("more than u16::MAX seeds rolled"),
         }
     }
@@ -209,6 +218,7 @@ impl SubcommandData {
         match self {
             Self::None { num_failures, .. } => *num_failures,
             Self::Bench { instructions_failure, .. } => instructions_failure.len().try_into().expect("more than u16::MAX seeds rolled"),
+            Self::Failures { error_logs, .. } => error_logs.len().try_into().expect("more than u16::MAX seeds rolled"),
             Self::MidosHouse { num_failures, .. } => *num_failures,
         }
     }
@@ -221,12 +231,17 @@ enum Error {
     #[error(transparent)] Json(#[from] serde_json::Error),
     #[error(transparent)] Task(#[from] JoinError),
     #[error(transparent)] ReaderSend(#[from] mpsc::error::SendError<ReaderMessage>),
+    #[error(transparent)] Utf8(#[from] std::str::Utf8Error),
     #[error(transparent)] WorkerSend(#[from] mpsc::error::SendError<ootrstats::worker::SupervisorMessage>),
     #[error(transparent)] Wheel(#[from] wheel::Error),
     #[cfg(unix)] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
+    #[error("empty error log")]
+    EmptyErrorLog,
     #[cfg(windows)]
     #[error("user folder not found")]
     MissingHomeDir,
+    #[error("missing traceback from error log")]
+    MissingTraceback,
     #[error("found both spoiler and error logs for a seed")]
     SuccessAndFailure,
     #[error("at most 255 seeds may be generated with the --world-counts option")]
@@ -281,6 +296,7 @@ async fn cli(args: Args) -> Result<(), Error> {
             if cli_tx.send(event).await.is_err() { break }
         }
     });
+    let mut stdout = stdout();
     let mut stderr = stderr();
     crossterm::execute!(stderr,
         Print("preparing..."),
@@ -360,6 +376,10 @@ async fn cli(args: Args) -> Result<(), Error> {
             instructions_success: Vec::with_capacity(args.num_seeds.into()),
             instructions_failure: Vec::with_capacity(args.num_seeds.into()),
             raw_data,
+        },
+        Some(Subcommand::Failures) => SubcommandData::Failures {
+            num_successes: 0,
+            error_logs: Vec::with_capacity(args.num_seeds.into()),
         },
         Some(Subcommand::MidosHouse { out_path }) => SubcommandData::MidosHouse {
             spoiler_logs: Vec::with_capacity(args.num_seeds.into()),
@@ -442,7 +462,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                     Event::ReaderMessage(msg) => match msg {
                         ReaderMessage::Pending(seed_idx) => Some(seed_idx),
                         ReaderMessage::Success { seed_idx, instructions } => match subcommand_data {
-                            SubcommandData::None { ref mut num_successes, .. } => {
+                            SubcommandData::None { ref mut num_successes, .. } | SubcommandData::Failures { ref mut num_successes, .. } => {
                                 *num_successes += 1;
                                 None
                             }
@@ -476,6 +496,10 @@ async fn cli(args: Args) -> Result<(), Error> {
                                     fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
                                     Some(seed_idx)
                                 },
+                                SubcommandData::Failures { ref mut error_logs, .. } => {
+                                    error_logs.push(fs::read(stats_dir.join(seed_idx.to_string())).await?.into());
+                                    None
+                                }
                             }
                         },
                         ReaderMessage::Done => {
@@ -577,7 +601,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                                         instructions,
                                     })?).await?;
                                     match subcommand_data {
-                                        SubcommandData::None { ref mut num_successes, .. } => {
+                                        SubcommandData::None { ref mut num_successes, .. } | SubcommandData::Failures { ref mut num_successes, .. } => {
                                             *num_successes += 1;
                                             None
                                         }
@@ -625,6 +649,10 @@ async fn cli(args: Args) -> Result<(), Error> {
                                                 fs::remove_dir_all(seed_dir).await?;
                                                 Some(seed_idx)
                                             },
+                                            SubcommandData::Failures { ref mut error_logs, .. } => {
+                                                error_logs.push(error_log);
+                                                None
+                                            }
                                         }
                                     }
                                 }
@@ -787,14 +815,18 @@ async fn cli(args: Args) -> Result<(), Error> {
         ).at_unknown()?,
         SubcommandData::Bench { instructions_success, instructions_failure, raw_data } => if raw_data {
             for instructions in instructions_success {
-                println!("s {instructions}");
+                crossterm::execute!(stdout,
+                    Print(format_args!("s {instructions}")),
+                ).at_unknown()?;
             }
             for instructions in instructions_failure {
-                println!("f {instructions}");
+                crossterm::execute!(stdout,
+                    Print(format_args!("f {instructions}")),
+                ).at_unknown()?;
             }
         } else {
             if instructions_success.is_empty() {
-                crossterm::execute!(stderr,
+                crossterm::execute!(stdout,
                     Print("No successful seeds, so average instruction count is infinite\r\n"),
                 ).at_unknown()?;
             } else {
@@ -803,7 +835,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                 let average_instructions_failure = instructions_failure.iter().sum::<u64>().checked_div(u64::try_from(instructions_failure.len()).unwrap()).unwrap_or_default();
                 let average_failure_count = (1.0 - success_rate) / success_rate; // mean of 0-support geometric distribution
                 let average_instructions = average_failure_count * average_instructions_failure as f64 + average_instructions_success as f64;
-                crossterm::execute!(stderr,
+                crossterm::execute!(stdout,
                     Print(format_args!("success rate: {}/{} ({:.02}%)\r\n", instructions_success.len(), instructions_success.len() + instructions_failure.len(), success_rate * 100.0)),
                     Print(format_args!("average instructions (success): {average_instructions_success} ({average_instructions_success:.3e})\r\n")),
                     Print(format_args!("average instructions (failure): {}\r\n", if instructions_failure.is_empty() { format!("N/A") } else { format!("{average_instructions_failure} ({average_instructions_failure:.3e})") })),
@@ -811,6 +843,35 @@ async fn cli(args: Args) -> Result<(), Error> {
                 ).at_unknown()?;
             }
         },
+        SubcommandData::Failures { error_logs, .. } => {
+            let mut counts = HashMap::<_, HashMap<_, _>>::default();
+            for error_log in &error_logs {
+                let error_log = std::str::from_utf8(error_log)?;
+                let mut lines = error_log.trim().lines();
+                let msg = lines.next_back().ok_or(Error::EmptyErrorLog)?;
+                let _ = lines.next_back().ok_or(Error::MissingTraceback)?;
+                let location = lines.next_back().ok_or(Error::MissingTraceback)?;
+                *counts.entry(location).or_default().entry(msg).or_default() += 1;
+            }
+            crossterm::execute!(stdout,
+                Print("Top failure reasons by last line:\r\n"),
+            ).at_unknown()?;
+            for msgs in counts.into_values().sorted_unstable_by_key(|msgs| -(msgs.values().copied().sum::<usize>() as isize)).take(10) {
+                let count = msgs.values().sum::<usize>();
+                let mut msgs = msgs.into_iter().collect_vec();
+                msgs.sort_unstable_by_key(|&(_, count)| count);
+                let (top_msg, top_count) = msgs.pop().expect("no error messages");
+                if msgs.is_empty() {
+                    crossterm::execute!(stdout,
+                        Print(format_args!("{count}x: {top_msg}\r\n")),
+                    ).at_unknown()?;
+                } else {
+                    crossterm::execute!(stdout,
+                        Print(format_args!("{count}x: {top_msg} ({top_count}x, and {} other variants)\r\n", msgs.len())),
+                    ).at_unknown()?;
+                }
+            }
+        }
         SubcommandData::MidosHouse { out_path, spoiler_logs, .. } => {
             let mut counts = HashMap::<_, usize>::default();
             for spoiler_log in spoiler_logs {
