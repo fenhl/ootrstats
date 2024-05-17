@@ -33,6 +33,7 @@ use {
         },
         style::Print,
         terminal::{
+            self,
             Clear,
             ClearType,
             disable_raw_mode,
@@ -707,10 +708,26 @@ async fn cli(args: Args) -> Result<(), Error> {
         if let Ok(ref workers) = workers {
             for worker in workers {
                 if let Some(ref e) = worker.error {
-                    crossterm::execute!(stderr,
-                        Print(format_args!("\r\n{}: error: {e}", worker.name)),
-                        Clear(ClearType::UntilNewLine),
-                    ).at_unknown()?;
+                    let e = e.to_string();
+                    if_chain! {
+                        if let Ok((width, _)) = terminal::size();
+                        let mut prefix_end = usize::from(width) - worker.name.len() - 13;
+                        if prefix_end < e.len();
+                        then {
+                            while !e.is_char_boundary(prefix_end) {
+                                prefix_end -= 1;
+                            }
+                            crossterm::execute!(stderr,
+                                Print(format_args!("\r\n{}: error: {}[…]", worker.name, &e[..prefix_end])),
+                                Clear(ClearType::UntilNewLine),
+                            ).at_unknown()?;
+                        } else {
+                            crossterm::execute!(stderr,
+                                Print(format_args!("\r\n{}: error: {e}", worker.name)),
+                                Clear(ClearType::UntilNewLine),
+                            ).at_unknown()?;
+                        }
+                    }
                 } else if worker.stopped {
                     crossterm::execute!(stderr,
                         Print(format_args!("\r\n{}: done", worker.name)),
