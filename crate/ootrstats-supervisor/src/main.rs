@@ -498,7 +498,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                                     Some(seed_idx)
                                 },
                                 SubcommandData::Failures { ref mut error_logs, .. } => {
-                                    error_logs.push(fs::read(stats_dir.join(seed_idx.to_string())).await?.into());
+                                    error_logs.push(fs::read(stats_dir.join(seed_idx.to_string()).join("error.log")).await?.into());
                                     None
                                 }
                             }
