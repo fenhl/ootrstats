@@ -786,7 +786,7 @@ async fn cli(args: Args) -> Result<(), Error> {
                     if args.retry_failures {
                         String::default()
                     } else {
-                        format!(", {num_failures} failures ({}%)", if num_successes > 0 || num_failures > 0 { 100 * num_failures / (num_successes + num_failures) } else { 100 })
+                        format!(", {num_failures} failures ({}%)", if num_successes > 0 || num_failures > 0 { 100 * u32::from(num_failures) / u32::from(num_successes + num_failures) } else { 100 })
                     },
                     if completed > 0 {
                         (start_local + TimeDelta::from_std(start.elapsed().mul_f64((total - skipped) as f64 / completed as f64)).expect("ETA too long")).format("%Y-%m-%d %H:%M:%S").to_string()
