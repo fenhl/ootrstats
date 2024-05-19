@@ -136,34 +136,38 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 Command::new("git").arg("reset").arg("--hard").arg("FETCH_HEAD").current_dir(&repo_path).check("git reset").await?;
             }
             if fs::exists(repo_path.join("Cargo.toml")).await? {
-                //TODO update Rust
-                tx.send(Message::Init(format!("building Rust code"))).await?;
-                let mut cargo = if cfg!(target_os = "windows") && output_mode == OutputMode::Bench {
-                    let mut cargo = Command::new(crate::WSL);
-                    cargo.arg("cargo");
-                    cargo
-                } else {
-                    let mut cargo = Command::new("cargo");
-                    if let Some(base_dirs) = UserDirs::new() {
-                        cargo.env("PATH", format!("{}:{}", base_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
-                    }
-                    cargo
-                };
-                cargo.arg("build");
-                cargo.arg("--lib");
-                cargo.arg("--release");
-                cargo.current_dir(&repo_path);
-                cargo.check("cargo build").await?;
-                tx.send(Message::Init(format!("copying Rust module"))).await?;
-                #[cfg(target_os = "windows")] {
-                    if let OutputMode::Bench = output_mode {
-                        Command::new(crate::WSL).arg("cp").arg("target/release/librs.so").arg("rs.so").current_dir(&repo_path).check("wsl cp").await?;
+                #[cfg(target_os = "windows")] let rust_library_filename = if let OutputMode::Bench = output_mode { "rs.so" } else { "rs.dll" };
+                #[cfg(any(target_os = "linux", target_os = "macos"))] let rust_library_filename = "rs.so";
+                if output_mode == OutputMode::Bench || !fs::exists(repo_path.join(rust_library_filename)).await? {
+                    //TODO update Rust
+                    tx.send(Message::Init(format!("building Rust code"))).await?;
+                    let mut cargo = if cfg!(target_os = "windows") && output_mode == OutputMode::Bench {
+                        let mut cargo = Command::new(crate::WSL);
+                        cargo.arg("cargo");
+                        cargo
                     } else {
-                        fs::copy(repo_path.join("target").join("release").join("rs.dll"), repo_path.join("rs.pyd")).await?;
+                        let mut cargo = Command::new("cargo");
+                        if let Some(base_dirs) = UserDirs::new() {
+                            cargo.env("PATH", format!("{}:{}", base_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
+                        }
+                        cargo
+                    };
+                    cargo.arg("build");
+                    cargo.arg("--lib");
+                    cargo.arg("--release");
+                    cargo.current_dir(&repo_path);
+                    cargo.check("cargo build").await?;
+                    tx.send(Message::Init(format!("copying Rust module"))).await?;
+                    #[cfg(target_os = "windows")] {
+                        if let OutputMode::Bench = output_mode {
+                            Command::new(crate::WSL).arg("cp").arg("target/release/librs.so").arg("rs.so").current_dir(&repo_path).check("wsl cp").await?;
+                        } else {
+                            fs::copy(repo_path.join("target").join("release").join("rs.dll"), repo_path.join("rs.pyd")).await?;
+                        }
                     }
+                    #[cfg(target_os = "linux")] fs::copy(repo_path.join("target").join("release").join("librs.so"), repo_path.join("rs.so")).await?;
+                    #[cfg(target_os = "macos")] fs::copy(repo_path.join("target").join("release").join("librs.dylib"), repo_path.join("rs.so")).await?;
                 }
-                #[cfg(target_os = "linux")] fs::copy(repo_path.join("target").join("release").join("librs.so"), repo_path.join("rs.so")).await?;
-                #[cfg(target_os = "macos")] fs::copy(repo_path.join("target").join("release").join("librs.dylib"), repo_path.join("rs.so")).await?;
             }
             repo_path
         }
