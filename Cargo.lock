@@ -110,9 +110,9 @@ checksum = "b3d1d046238990b9cf5bcde22a3fb3584ee5cf65fb2765f454ed428c7a0063da"
 
 [[package]]
 name = "async-proto"
-version = "0.21.0"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38c4241a92b733c352068f239a36fa8b80f89d1ff0518ee63726519d3ed82b17"
+checksum = "f9249b0551dafc2c1ef4d0de6ee114e3903db191d540322a2845c700b1ef92c4"
 dependencies = [
  "async-proto-derive",
  "byteorder",
@@ -130,11 +130,11 @@ dependencies = [
 
 [[package]]
 name = "async-proto-derive"
-version = "0.21.0"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89a3fc10570dc620f131b63b5ff48c02e70950791fa8cacca2b49c8f3aa2d52c"
+checksum = "80e28a2e253e4d4f7fd8cce25a0f8611803b2cba81cd7603932f99e1cce2d98f"
 dependencies = [
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.64",
@@ -1396,13 +1396,13 @@ checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
 [[package]]
 name = "ootr-utils"
 version = "0.3.0"
-source = "git+https://github.com/midoshouse/rust-ootr-utils?branch=main#0706f2d3123370075f2ee47795df7e3d26620717"
+source = "git+https://github.com/midoshouse/rust-ootr-utils?branch=main#ca32fc8c03783faee8128443dca014ec9a7c2e0f"
 dependencies = [
  "async-proto",
  "directories",
  "enum-iterator",
  "git2",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "lazy-regex",
  "semver",
  "serde",
