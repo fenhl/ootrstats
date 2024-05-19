@@ -752,7 +752,11 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                     let state = if worker.stopped {
                         Cow::Borrowed("done")
                     } else if let Some(ref msg) = worker.msg {
-                        Cow::Borrowed(&**msg)
+                        if worker.running > 0 {
+                            Cow::Owned(format!("{} running, {msg}", worker.running))
+                        } else {
+                            Cow::Borrowed(&**msg)
+                        }
                     } else {
                         Cow::Owned(format!("{} running", worker.running))
                     };
