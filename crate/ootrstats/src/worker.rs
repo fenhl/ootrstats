@@ -10,10 +10,7 @@ use {
     },
     async_proto::Protocol,
     bytes::Bytes,
-    directories::{
-        BaseDirs,
-        UserDirs,
-    },
+    directories::UserDirs,
     either::Either,
     futures::{
         future::{
@@ -146,8 +143,8 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     cargo.arg("cargo");
                     cargo
                 } else {
-                    let mut cargo = Command::new(UserDirs::new().ok_or(Error::MissingHomeDir)?.home_dir().join(".cargo").join("bin").join("cargo"));
-                    if let Some(base_dirs) = BaseDirs::new() {
+                    let mut cargo = Command::new("cargo");
+                    if let Some(base_dirs) = UserDirs::new() {
                         cargo.env("PATH", format!("{}:{}", base_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
                     }
                     cargo
