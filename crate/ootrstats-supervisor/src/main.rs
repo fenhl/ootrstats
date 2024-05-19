@@ -1,5 +1,6 @@
 use {
     std::{
+        borrow::Cow,
         collections::{
             hash_map::{
                 self,
@@ -746,35 +747,30 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                             ).at_unknown()?;
                         }
                     }
-                } else if worker.stopped {
-                    crossterm::execute!(stderr,
-                        Print(format_args!("\r\n{}: done", worker.name)),
-                        Clear(ClearType::UntilNewLine),
-                    ).at_unknown()?;
-                } else if let Some(ref msg) = worker.msg {
-                    crossterm::execute!(stderr,
-                        Print(format_args!("\r\n{}: {msg}", worker.name)),
-                        Clear(ClearType::UntilNewLine),
-                    ).at_unknown()?;
                 } else {
                     let total = workers.iter().map(|worker| worker.completed).sum::<u16>();
+                    let state = if worker.stopped {
+                        Cow::Borrowed("done")
+                    } else if let Some(ref msg) = worker.msg {
+                        Cow::Borrowed(&**msg)
+                    } else {
+                        Cow::Owned(format!("{} running", worker.running))
+                    };
                     if total > 0 {
                         crossterm::execute!(stderr,
                             Print(format_args!(
-                                "\r\n{}: {} rolled ({}%), {} running",
+                                "\r\n{}: {} rolled ({}%), {state}",
                                 worker.name,
                                 worker.completed,
                                 100 * u32::from(worker.completed) / u32::from(total),
-                                worker.running,
                             )),
                             Clear(ClearType::UntilNewLine),
                         ).at_unknown()?;
                     } else {
                         crossterm::execute!(stderr,
                             Print(format_args!(
-                                "\r\n{}: 0 rolled, {} running",
+                                "\r\n{}: 0 rolled, {state}",
                                 worker.name,
-                                worker.running,
                             )),
                             Clear(ClearType::UntilNewLine),
                         ).at_unknown()?;
