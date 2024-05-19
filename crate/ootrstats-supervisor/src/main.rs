@@ -84,17 +84,12 @@ use {
         RandoSetup,
         SeedIdx,
         WSL,
+        gitdir,
     },
     crate::config::Config,
 };
-#[cfg(windows)] use directories::{
-    ProjectDirs,
-    UserDirs,
-};
-#[cfg(unix)] use {
-    std::path::Path,
-    xdg::BaseDirectories,
-};
+#[cfg(windows)] use directories::ProjectDirs;
+#[cfg(unix)] use xdg::BaseDirectories;
 
 mod config;
 mod worker;
@@ -322,8 +317,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
         rev
     } else {
         let repo_name = if args.rsl { "plando-random-settings" } else { "OoT-Randomizer" };
-        #[cfg(windows)] let mut dir_parent = UserDirs::new().ok_or(Error::MissingHomeDir)?.home_dir().join("git").join("github.com").join(&args.github_user).join(repo_name);
-        #[cfg(unix)] let mut dir_parent = Path::new("/opt/git/github.com").join(&args.github_user).join(repo_name); //TODO respect GITDIR envar and allow ~/git fallback
+        let mut dir_parent = gitdir().await?.join("github.com").join(&args.github_user).join(repo_name);
         let dir_name = if let Some(ref branch) = args.branch {
             dir_parent = dir_parent.join("branch");
             branch

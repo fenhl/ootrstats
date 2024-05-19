@@ -12,6 +12,7 @@ use {
     async_proto::Protocol,
     bytes::Bytes,
     collect_mac::collect,
+    directories::BaseDirs,
     if_chain::if_chain,
     itertools::Itertools as _,
     lazy_regex::regex_captures,
@@ -28,6 +29,7 @@ use {
         },
     },
 };
+#[cfg(unix)] use std::env;
 #[cfg(windows)] use directories::UserDirs;
 
 pub mod websocket;
@@ -108,6 +110,30 @@ pub enum RollError {
     RslScriptExit(std::process::Output),
     #[error("randomizer did not report spoiler log location")]
     SpoilerLogPath(std::process::Output),
+}
+
+pub async fn gitdir() -> wheel::Result<Cow<'static, Path>> {
+    Ok({
+        #[cfg(unix)] {
+            if let Some(var) = env::var_os("GITDIR") {
+                Cow::Owned(PathBuf::from(var))
+            } else if fs::exists("/opt/git").await? {
+                Cow::Borrowed(Path::new("/opt/git"))
+            } else {
+                if_chain! {
+                    if let Some(base_dirs) = BaseDirs::new();
+                    let path = base_dirs.home_dir().join("git");
+                    if fs::exists(&path).await?;
+                    then {
+                        Cow::Owned(path)
+                    } else {
+                        Cow::Borrowed(Path::new("/opt/git"))
+                    }
+                }
+            }
+        }
+        #[cfg(windows)] { Cow::Owned(BaseDirs::new().expect("could not determine home dir").home_dir().join("git")) }
+    })
 }
 
 fn python() -> Result<PathBuf, RollError> {

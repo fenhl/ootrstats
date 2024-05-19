@@ -40,9 +40,9 @@ use {
         RandoSetup,
         RollOutput,
         SeedIdx,
+        gitdir,
     },
 };
-#[cfg(unix)] use std::path::Path;
 #[cfg(feature = "videocore-gencmd")] use videocore_gencmd::prelude::*;
 #[cfg(any(windows, feature = "videocore-gencmd"))] use rand::prelude::*;
 #[cfg(not(any(windows, feature = "videocore-gencmd")))] use rand as _;
@@ -118,8 +118,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
     let repo_path = match setup {
         RandoSetup::Normal { ref github_user, .. } => {
             tx.send(Message::Init(format!("cloning randomizer: determining repo path"))).await?;
-            #[cfg(windows)] let repo_parent = UserDirs::new().ok_or(Error::MissingHomeDir)?.home_dir().join("git").join("github.com").join(github_user).join("OoT-Randomizer").join("rev");
-            #[cfg(unix)] let repo_parent = Path::new("/opt/git/github.com").join(github_user).join("OoT-Randomizer").join("rev"); //TODO respect GITDIR envar and allow ~/git fallback
+            let repo_parent = gitdir().await?.join("github.com").join(github_user).join("OoT-Randomizer").join("rev");
             let repo_path = repo_parent.join(rando_rev.to_string());
             tx.send(Message::Init(format!("checking if repo exists"))).await?;
             if !fs::exists(&repo_path).await? {
@@ -164,8 +163,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
         }
         RandoSetup::Rsl { ref github_user, .. } => {
             tx.send(Message::Init(format!("cloning random settings script: determining repo path"))).await?;
-            #[cfg(windows)] let repo_parent = UserDirs::new().ok_or(Error::MissingHomeDir)?.home_dir().join("git").join("github.com").join(github_user).join("plando-random-settings").join("rev");
-            #[cfg(unix)] let repo_parent = Path::new("/opt/git/github.com").join(github_user).join("plando-random-settings").join("rev"); //TODO respect GITDIR envar and allow ~/git fallback
+            let repo_parent = gitdir().await?.join("github.com").join(github_user).join("plando-random-settings").join("rev");
             let repo_path = repo_parent.join(rando_rev.to_string());
             tx.send(Message::Init(format!("checking if repo exists"))).await?;
             if !fs::exists(&repo_path).await? {
