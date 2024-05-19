@@ -250,37 +250,49 @@ enum Error {
     SuccessAndFailure,
     #[error("at most 255 seeds may be generated with the --world-counts option")]
     TooManyWorlds,
-    #[error("error in worker {worker}: {source}")]
-    Worker {
-        worker: String,
-        source: worker::Error,
-    },
+    #[error("error(s) in worker(s): {}", .0.iter().map(|(worker, source)| format!("{worker}: {source}")).format(", "))]
+    Worker(Vec<(String, worker::Error)>),
     #[error("received a message from an unknown worker")]
     WorkerNotFound,
 }
 
 impl wheel::CustomExit for Error {
     fn exit(self, cmd_name: &'static str) -> ! {
+        let mut debug = format!("{self:?}");
+        if debug.len() > 2000 && stderr().is_terminal() {
+            let mut prefix_end = 1000;
+            while !debug.is_char_boundary(prefix_end) {
+                prefix_end -= 1;
+            }
+            let mut suffix_start = debug.len() - 1000;
+            while !debug.is_char_boundary(suffix_start) {
+                suffix_start += 1;
+            }
+            debug = format!("{} […] {}", &debug[..prefix_end], &debug[suffix_start..]);
+        }
         eprintln!("\r");
         match self {
-            Self::Worker { worker, source: worker::Error::Local(ootrstats::worker::Error::Roll(ootrstats::RollError::PerfSyntax(stderr))) } => {
-                eprintln!("{cmd_name}: roll error in worker {worker}: failed to parse `perf` output\r");
-                eprintln!("stderr:\r");
-                eprintln!("{}\r", String::from_utf8_lossy(&stderr).lines().filter(|line| !regex_is_match!("^[0-9]+ files remaining$", line)).format("\r\n"));
-            }
-            _ => {
-                let mut debug = format!("{self:?}");
-                if debug.len() > 2000 && stderr().is_terminal() {
-                    let mut prefix_end = 1000;
-                    while !debug.is_char_boundary(prefix_end) {
-                        prefix_end -= 1;
-                    }
-                    let mut suffix_start = debug.len() - 1000;
-                    while !debug.is_char_boundary(suffix_start) {
-                        suffix_start += 1;
-                    }
-                    debug = format!("{} […] {}", &debug[..prefix_end], &debug[suffix_start..]);
+            Self::Worker(errors) => match errors.into_iter().exactly_one() {
+                Ok((worker, worker::Error::Local(ootrstats::worker::Error::Roll(ootrstats::RollError::PerfSyntax(stderr))))) => {
+                    eprintln!("{cmd_name}: roll error in worker {worker}: failed to parse `perf` output\r");
+                    eprintln!("stderr:\r");
+                    eprintln!("{}\r", String::from_utf8_lossy(&stderr).lines().filter(|line| !regex_is_match!("^[0-9]+ files remaining$", line)).format("\r\n"));
                 }
+                Ok((worker, source)) => {
+                    eprintln!("{cmd_name}: error in worker {worker}: {source}\r");
+                    eprintln!("debug info: {debug}\r");
+                }
+                Err(errors) => {
+                    eprintln!("{cmd_name}: errors in workers:\r");
+                    for (worker, source) in errors {
+                        eprintln!("\r");
+                        eprintln!("in worker {worker}: {source}\r");
+                    }
+                    eprintln!("\r");
+                    eprintln!("debug info: {debug}\r");
+                }
+            },
+            _ => {
                 eprintln!("{cmd_name}: {self}\r");
                 eprintln!("debug info: {debug}\r");
             }
@@ -289,7 +301,7 @@ impl wheel::CustomExit for Error {
     }
 }
 
-async fn cli(args: Args) -> Result<(), Error> {
+async fn cli(mut args: Args) -> Result<(), Error> {
     if args.world_counts && args.num_seeds > 255 {
         return Err(Error::TooManyWorlds)
     }
@@ -518,7 +530,15 @@ async fn cli(args: Args) -> Result<(), Error> {
                             worker.stopped = true;
                             match result? {
                                 Ok(()) => {}
-                                Err(e) => worker.error = Some(e),
+                                Err(e) => {
+                                    worker.error = Some(e);
+                                    // finish rolling seeds that are already in progress but don't start any more
+                                    args.retry_failures = false;
+                                    readers.clear();
+                                    completed_readers = available_parallelism;
+                                    reader_rx = mpsc::channel(1).1;
+                                    pending_seeds.clear();
+                                }
                             }
                             None
                         } else {
@@ -701,6 +721,7 @@ async fn cli(args: Args) -> Result<(), Error> {
             Some(res) = cli_rx.recv() => if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), modifiers, kind: KeyEventKind::Release, .. }) = res.at_unknown()? {
                 if modifiers.contains(KeyModifiers::CONTROL) {
                     // finish rolling seeds that are already in progress but don't start any more
+                    args.retry_failures = false;
                     readers.clear();
                     completed_readers = available_parallelism;
                     reader_rx = mpsc::channel(1).1;
@@ -911,10 +932,11 @@ async fn cli(args: Args) -> Result<(), Error> {
         }
     }
     if let Ok(workers) = workers {
-        for worker in workers {
-            if let Some(source) = worker.error {
-                return Err(Error::Worker { worker: worker.name, source })
-            }
+        let worker_errors = workers.into_iter()
+            .filter_map(|worker| Some((worker.name, worker.error?)))
+            .collect_vec();
+        if !worker_errors.is_empty() {
+            return Err(Error::Worker(worker_errors))
         }
     }
     Ok(())
