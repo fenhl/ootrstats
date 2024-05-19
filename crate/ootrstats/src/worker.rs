@@ -158,7 +158,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     }
                 }
                 #[cfg(target_os = "linux")] fs::copy(repo_path.join("target").join("release").join("librs.so"), repo_path.join("rs.so")).await?;
-                #[cfg(not(any(target_os = "windows", target_os = "linux")))] unimplemented!("copying Rust build artifacts on macOS"); //TODO
+                #[cfg(target_os = "macos")] fs::copy(repo_path.join("target").join("release").join("librs.dylib"), repo_path.join("rs.so")).await?;
             }
             repo_path
         }
