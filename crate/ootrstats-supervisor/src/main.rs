@@ -713,7 +713,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                 }
             },
             //TODO use signal-hook-tokio crate to handle interrupts on Unix?
-            Some(res) = cli_rx.recv() => if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), modifiers, kind: KeyEventKind::Release, .. }) = res.at_unknown()? {
+            Some(res) = cli_rx.recv() => if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), modifiers, kind: KeyEventKind::Press, .. }) = res.at_unknown()? {
                 if modifiers.contains(KeyModifiers::CONTROL) {
                     // finish rolling seeds that are already in progress but don't start any more
                     args.retry_failures = false;
