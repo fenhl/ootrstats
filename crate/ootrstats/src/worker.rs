@@ -66,7 +66,7 @@ pub enum Message {
     },
 }
 
-#[derive(Protocol)]
+#[derive(Debug, Protocol)]
 pub enum SupervisorMessage {
     Roll(SeedIdx),
 }
@@ -147,8 +147,8 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                         cargo
                     } else {
                         let mut cargo = Command::new("cargo");
-                        if let Some(base_dirs) = UserDirs::new() {
-                            cargo.env("PATH", format!("{}:{}", base_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
+                        if let Some(user_dirs) = UserDirs::new() {
+                            cargo.env("PATH", format!("{}:{}", user_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
                         }
                         cargo
                     };

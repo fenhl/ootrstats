@@ -90,6 +90,10 @@ pub(crate) enum Error {
     #[error(transparent)] Send(#[from] mpsc::error::SendError<(String, Message)>),
     #[error(transparent)] WebSocket(#[from] tungstenite::Error),
     #[error(transparent)] Write(#[from] async_proto::WriteError),
+    #[error("worker has stopped listening to commands")]
+    Receive {
+        message: SupervisorMessage,
+    },
     #[error("{display}")]
     Remote {
         debug: String,

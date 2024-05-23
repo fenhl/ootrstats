@@ -232,7 +232,6 @@ enum Error {
     #[error(transparent)] Task(#[from] JoinError),
     #[error(transparent)] ReaderSend(#[from] mpsc::error::SendError<ReaderMessage>),
     #[error(transparent)] Utf8(#[from] std::str::Utf8Error),
-    #[error(transparent)] WorkerSend(#[from] mpsc::error::SendError<ootrstats::worker::SupervisorMessage>),
     #[error(transparent)] Wheel(#[from] wheel::Error),
     #[cfg(unix)] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
     #[error("empty error log")]
@@ -446,6 +445,18 @@ async fn cli(mut args: Args) -> Result<(), Error> {
     let mut worker_tasks = FuturesUnordered::default();
     let mut workers = Err::<Vec<worker::State>, _>(worker_tx);
     let mut pending_seeds = VecDeque::default();
+
+    macro_rules! cancel {
+        () => {{
+            // finish rolling seeds that are already in progress but don't start any more
+            args.retry_failures = false;
+            readers.clear();
+            completed_readers = available_parallelism;
+            reader_rx = mpsc::channel(1).1;
+            pending_seeds.clear();
+        }};
+    }
+
     loop {
         enum Event {
             ReaderDone(Result<Result<(), Error>, JoinError>),
@@ -527,12 +538,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                 Ok(()) => {}
                                 Err(e) => {
                                     worker.error = Some(e);
-                                    // finish rolling seeds that are already in progress but don't start any more
-                                    args.retry_failures = false;
-                                    readers.clear();
-                                    completed_readers = available_parallelism;
-                                    reader_rx = mpsc::channel(1).1;
-                                    pending_seeds.clear();
+                                    cancel!();
                                 }
                             }
                             None
@@ -554,7 +560,10 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                     while worker.ready > 0 {
                                         worker.msg = None;
                                         let Some(seed_idx) = pending_seeds.pop_front() else { break };
-                                        worker.roll(seed_idx).await?;
+                                        if let Err(mpsc::error::SendError(message)) = worker.roll(seed_idx).await {
+                                            worker.error.get_or_insert(worker::Error::Receive { message });
+                                            cancel!();
+                                        }
                                     }
                                     None
                                 }
@@ -705,9 +714,14 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                             workers.as_mut().ok().expect("just inserted")
                         }
                     };
-                    if let Some(worker) = workers.iter_mut().find(|worker| worker.ready > 0) {
-                        worker.roll(seed_idx).await?;
-                    } else {
+                    let mut rolling = false;
+                    for worker in workers.iter_mut().filter(|worker| worker.ready > 0) {
+                        if worker.roll(seed_idx).await.is_ok() {
+                            rolling = true;
+                            break
+                        }
+                    }
+                    if !rolling {
                         pending_seeds.push_back(seed_idx);
                     }
                 }
@@ -715,12 +729,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
             //TODO use signal-hook-tokio crate to handle interrupts on Unix?
             Some(res) = cli_rx.recv() => if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), modifiers, kind: KeyEventKind::Press, .. }) = res.at_unknown()? {
                 if modifiers.contains(KeyModifiers::CONTROL) {
-                    // finish rolling seeds that are already in progress but don't start any more
-                    args.retry_failures = false;
-                    readers.clear();
-                    completed_readers = available_parallelism;
-                    reader_rx = mpsc::channel(1).1;
-                    pending_seeds.clear();
+                    cancel!();
                 }
             },
         }
@@ -826,8 +835,10 @@ async fn cli(mut args: Args) -> Result<(), Error> {
         if pending_seeds.is_empty() && completed_readers == available_parallelism {
             if let Ok(ref mut workers) = workers {
                 for worker in workers {
-                    // drop sender so the worker can shut down
-                    worker.supervisor_tx = mpsc::channel(1).0;
+                    if worker.error.is_some() || worker.running == 0 {
+                        // drop sender so the worker can shut down
+                        worker.supervisor_tx = mpsc::channel(1).0;
+                    }
                 }
             } else if worker_tasks.is_empty() {
                 // make sure worker_tx is dropped to prevent deadlock
