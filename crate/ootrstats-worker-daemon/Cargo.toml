@@ -10,14 +10,14 @@ workspace = true
 videocore-gencmd = ["ootrstats/videocore-gencmd"]
 
 [dependencies]
-async-proto = { version = "0.21", features = ["tokio-tungstenite"] }
+async-proto = { version = "0.22", features = ["tokio-tungstenite"] }
 either = "1.10.0"
 futures = "0.3.30"
 if_chain = "1.0.2"
 log-lock = { git = "https://github.com/fenhl/log-lock", branch = "main", version = "0.2.1" }
 ootrstats = { path = "../ootrstats" }
 rocket = "0.5.0"
-rocket_ws = "0.1.0"
+rocket_ws = "0.1.1"
 serde = { version = "1.0.197", features = ["derive"] }
 thiserror = "1.0.57"
 tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }

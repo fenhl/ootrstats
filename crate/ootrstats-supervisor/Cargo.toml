@@ -10,7 +10,7 @@ workspace = true
 videocore-gencmd = ["ootrstats/videocore-gencmd"]
 
 [dependencies]
-async-proto = { version = "0.21", features = ["tokio-tungstenite"] }
+async-proto = { version = "0.22", features = ["tokio-tungstenite"] }
 bytes = "1.5.0"
 chrono = { version = "0.4.34", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.5.1", features = ["derive"] }
@@ -28,7 +28,7 @@ serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0.114"
 thiserror = "1.0.57"
 tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }
-tokio-tungstenite = { version = "0.20", default-features = false }
+tokio-tungstenite = { version = "0.21", default-features = false }
 wheel = { git = "https://github.com/fenhl/wheel", branch = "main", features = ["serde", "serde_json"] }
 
 [target."cfg(windows)".dependencies]
