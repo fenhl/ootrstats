@@ -31,8 +31,9 @@
 
 * `workers`: An array of [worker configurations](#workers). You should specify at least one worker so seeds can be rolled.
 
-And the following optional entry:
+And the following optional entries:
 
+* `log`: If `true`, the supervisor will create a text file named `ootrstats.log` in the working directory with debug info. The default is `false`.
 * `statsDir`: A path to a directory where the statistics will be stored. Defaults to `$XDG_DATA_DIRS/ootrstats` on Unix, or `%APPDATA%\Fenhl\ootrstats\data` on Windows.
 
 ## Workers

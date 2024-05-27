@@ -88,8 +88,8 @@ pub enum OutputMode {
 }
 
 pub struct RollOutput {
-    /// present iff the `bench` parameter was set.
-    pub instructions: Option<u64>,
+    /// present if the `bench` parameter was set and `perf` output was parsed successfully.
+    pub instructions: Result<u64, Bytes>,
     /// `Ok`: spoiler log, `Err`: stderr
     pub log: Result<PathBuf, Bytes>,
     /// `(is_wsl, path)`
@@ -231,15 +231,18 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
         }
     }
     Ok(RollOutput {
-        instructions: if_chain! {
-            if let OutputMode::Bench = output_mode;
-            if let Some(instructions_line) = stderr.iter().rev().find(|line| line.contains("instructions:u"));
-            if let Some((_, instructions)) = regex_captures!("^ *([0-9,.]+) +instructions:u", instructions_line);
-            then {
-                Some(instructions.chars().filter(|&c| c != ',' && c != '.').collect::<String>().parse()?)
-            } else {
-                None
+        instructions: if let OutputMode::Bench = output_mode {
+            if_chain! {
+                if let Some(instructions_line) = stderr.iter().rev().find(|line| line.contains("instructions:u"));
+                if let Some((_, instructions)) = regex_captures!("^ *([0-9,.]+) +instructions:u", instructions_line);
+                then {
+                    Ok(instructions.chars().filter(|&c| c != ',' && c != '.').collect::<String>().parse()?)
+                } else {
+                    Err(output.stderr.clone().into())
+                }
             }
+        } else {
+            Err(Bytes::from_static(b"output mode"))
         },
         patch: if output.status.success() {
             if let Some(patch_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created patch file archive at: ")) {
@@ -299,9 +302,9 @@ pub async fn run_rsl(repo_path: &Path, bench: bool) -> Result<RollOutput, RollEr
             instructions: if bench {
                 let instructions_line = stderr.iter().rev().find(|line| line.contains("instructions:u")).ok_or_else(|| RollError::PerfSyntax(output.stderr.clone()))?;
                 let (_, instructions) = regex_captures!("^ *([0-9,.]+) +instructions:u", instructions_line).ok_or_else(|| RollError::PerfSyntax(output.stderr.clone()))?;
-                Some(instructions.chars().filter(|&c| c != ',' && c != '.').collect::<String>().parse()?)
-                } else {
-                None
+                Ok(instructions.chars().filter(|&c| c != ',' && c != '.').collect::<String>().parse()?)
+            } else {
+                Err(Bytes::from_static(b"output mode"))
             },
             log: if stdout.iter().rev().any(|line| line.starts_with("rsl_tools.RandomizerError")) {
                 Err(output.stdout.into())

@@ -31,15 +31,15 @@ pub enum ServerMessage {
     Ready(u8),
     Success {
         seed_idx: SeedIdx,
-        /// present iff the `bench` parameter was set.
-        instructions: Option<u64>,
+        /// present if the `bench` parameter was set and `perf` output was parsed successfully.
+        instructions: Result<u64, Bytes>,
         spoiler_log: Bytes,
         patch: Option<(String, Bytes)>,
     },
     Failure {
         seed_idx: SeedIdx,
-        /// present iff the `bench` parameter was set.
-        instructions: Option<u64>,
+        /// present if the `bench` parameter was set and `perf` output was parsed successfully.
+        instructions: Result<u64, Bytes>,
         error_log: Bytes,
     },
     Error {

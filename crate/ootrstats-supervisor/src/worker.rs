@@ -5,6 +5,7 @@ use {
             Pin,
             pin,
         },
+        sync::Arc,
         time::Duration,
     },
     either::Either,
@@ -44,6 +45,7 @@ use {
             SupervisorMessage,
         },
     },
+    crate::SeedState,
 };
 
 fn make_neg_one() -> i8 { -1 }
@@ -51,7 +53,7 @@ fn make_true() -> bool { true }
 
 #[derive(Deserialize)]
 pub(crate) struct Config {
-    pub(crate) name: String,
+    pub(crate) name: Arc<str>,
     #[serde(flatten)]
     pub(crate) kind: Kind,
     #[serde(default = "make_true")]
@@ -87,7 +89,7 @@ pub(crate) enum Error {
     #[error(transparent)] Local(#[from] ootrstats::worker::Error),
     #[error(transparent)] Read(#[from] async_proto::ReadError),
     #[error(transparent)] Semver(#[from] semver::Error),
-    #[error(transparent)] Send(#[from] mpsc::error::SendError<(String, Message)>),
+    #[error(transparent)] Send(#[from] mpsc::error::SendError<(Arc<str>, Message)>),
     #[error(transparent)] WebSocket(#[from] tungstenite::Error),
     #[error(transparent)] Write(#[from] async_proto::WriteError),
     #[error("worker has stopped listening to commands")]
@@ -102,7 +104,7 @@ pub(crate) enum Error {
 }
 
 impl Kind {
-    async fn run(self, name: String, tx: mpsc::Sender<(String, Message)>, mut rx: mpsc::Receiver<SupervisorMessage>, rando_rev: git2::Oid, setup: RandoSetup, output_mode: OutputMode) -> Result<(), Error> {
+    async fn run(self, name: Arc<str>, tx: mpsc::Sender<(Arc<str>, Message)>, mut rx: mpsc::Receiver<SupervisorMessage>, rando_rev: git2::Oid, setup: RandoSetup, output_mode: OutputMode) -> Result<(), Error> {
         match self {
             Self::Local { base_rom_path, wsl_base_rom_path, cores } => {
                 let base_rom_path = if_chain! {
@@ -195,18 +197,16 @@ impl Kind {
 }
 
 pub(crate) struct State {
-    pub(crate) name: String,
+    pub(crate) name: Arc<str>,
     pub(crate) msg: Option<String>,
     pub(crate) error: Option<Error>,
     pub(crate) ready: u8,
-    pub(crate) running: u8,
-    pub(crate) completed: u16,
     pub(crate) supervisor_tx: mpsc::Sender<SupervisorMessage>,
     pub(crate) stopped: bool,
 }
 
 impl State {
-    pub(crate) fn new(worker_tx: mpsc::Sender<(String, Message)>, name: String, kind: Kind, rando_rev: git2::Oid, setup: &RandoSetup, output_mode: OutputMode) -> (JoinHandle<Result<(), Error>>, Self) {
+    pub(crate) fn new(worker_tx: mpsc::Sender<(Arc<str>, Message)>, name: Arc<str>, kind: Kind, rando_rev: git2::Oid, setup: &RandoSetup, output_mode: OutputMode) -> (JoinHandle<Result<(), Error>>, Self) {
         let (supervisor_tx, supervisor_rx) = mpsc::channel(256);
         (
             tokio::spawn(kind.run(name.clone(), worker_tx, supervisor_rx, rando_rev, setup.clone(), output_mode)),
@@ -214,18 +214,18 @@ impl State {
                 msg: None,
                 error: None,
                 ready: 0,
-                running: 0,
-                completed: 0,
                 stopped: false,
                 name, supervisor_tx,
             }
         )
     }
 
-    pub(crate) async fn roll(&mut self, seed_idx: SeedIdx) -> Result<(), mpsc::error::SendError<SupervisorMessage>> {
+    pub(crate) async fn roll(&mut self, seed_states: &mut [SeedState], seed_idx: SeedIdx) -> Result<(), mpsc::error::SendError<SupervisorMessage>> {
         self.supervisor_tx.send(SupervisorMessage::Roll(seed_idx)).await?;
         self.ready -= 1;
-        self.running += 1;
+        seed_states[usize::from(seed_idx)] = SeedState::Rolling {
+            worker: self.name.clone(),
+        };
         Ok(())
     }
 }

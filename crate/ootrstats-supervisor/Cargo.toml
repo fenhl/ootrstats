@@ -24,7 +24,7 @@ lazy-regex = "3.1.0"
 ootr-utils = { git = "https://github.com/midoshouse/rust-ootr-utils", branch = "main" }
 ootrstats = { path = "../ootrstats" }
 semver = "1.0.22"
-serde = { version = "1.0.197", features = ["derive"] }
+serde = { version = "1.0.197", features = ["derive", "rc"] }
 serde_json = "1.0.114"
 thiserror = "1.0.57"
 tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }

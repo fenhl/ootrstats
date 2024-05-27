@@ -10,6 +10,8 @@ use {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Config {
+    #[serde(default)]
+    pub(crate) log: bool,
     pub(crate) stats_dir: Option<PathBuf>,
     pub(crate) workers: Vec<worker::Config>,
 }

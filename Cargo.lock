@@ -1426,7 +1426,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats"
-version = "5.0.0"
+version = "6.0.0"
 dependencies = [
  "async-proto",
  "bytes",
@@ -1448,7 +1448,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-supervisor"
-version = "5.0.0"
+version = "6.0.0"
 dependencies = [
  "async-proto",
  "bytes",
@@ -1476,7 +1476,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-daemon"
-version = "5.0.0"
+version = "6.0.0"
 dependencies = [
  "async-proto",
  "directories",

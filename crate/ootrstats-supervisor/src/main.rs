@@ -1,12 +1,9 @@
 use {
     std::{
         borrow::Cow,
-        collections::{
-            hash_map::{
-                self,
-                HashMap,
-            },
-            VecDeque,
+        collections::hash_map::{
+            self,
+            HashMap,
         },
         ffi::OsString,
         io::{
@@ -14,9 +11,12 @@ use {
             stderr,
             stdout,
         },
+        iter,
         mem,
         num::NonZeroUsize,
         path::PathBuf,
+        sync::Arc,
+        time::Duration,
     },
     bytes::Bytes,
     chrono::{
@@ -65,7 +65,10 @@ use {
         Serialize,
     },
     tokio::{
-        io,
+        io::{
+            self,
+            AsyncWriteExt as _,
+        },
         process::Command,
         select,
         sync::mpsc,
@@ -73,7 +76,10 @@ use {
         time::Instant,
     },
     wheel::{
-        fs,
+        fs::{
+            self,
+            File,
+        },
         traits::{
             AsyncCommandOutputExt as _,
             IoResultExt as _,
@@ -110,8 +116,29 @@ enum ReaderMessage {
 
 #[derive(Deserialize, Serialize)]
 struct Metadata {
-    /// present iff the `bench` parameter was set.
+    /// present if the `bench` parameter was set and `perf` output was parsed successfully.
     instructions: Option<u64>,
+}
+
+enum SeedState {
+    Unchecked,
+    Pending,
+    Rolling {
+        worker: Arc<str>,
+    },
+    Cancelled,
+    Success {
+        /// `None` means the seed was read from disk.
+        worker: Option<Arc<str>>,
+        instructions: Option<u64>,
+        spoiler_log: SpoilerLog,
+    },
+    Failure {
+        /// `None` means the seed was read from disk.
+        worker: Option<Arc<str>>,
+        instructions: Option<u64>,
+        error_log: Bytes,
+    },
 }
 
 fn parse_json_object(arg: &str) -> Result<serde_json::Map<String, serde_json::Value>, serde_json::Error> {
@@ -160,10 +187,10 @@ struct Args {
     retry_failures: bool,
     /// Only roll seeds on the given worker(s).
     #[clap(short = 'w', long = "worker", conflicts_with("exclude_workers"))]
-    include_workers: Vec<String>,
+    include_workers: Vec<Arc<str>>,
     /// Don't roll seeds on the given worker(s).
     #[clap(short = 'x', long = "exclude-worker", conflicts_with("include_workers"))]
-    exclude_workers: Vec<String>,
+    exclude_workers: Vec<Arc<str>>,
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
 }
@@ -183,53 +210,13 @@ enum Subcommand {
     },
 }
 
-enum SubcommandData {
-    None {
-        num_successes: u16,
-        num_failures: u16,
-    },
-    Bench {
-        instructions_success: Vec<u64>,
-        instructions_failure: Vec<u64>,
-        raw_data: bool,
-    },
-    Failures {
-        num_successes: u16,
-        error_logs: Vec<(SeedIdx, Bytes)>,
-    },
-    MidosHouse {
-        out_path: PathBuf,
-        spoiler_logs: Vec<SpoilerLog>,
-        num_failures: u16,
-    },
-}
-
-impl SubcommandData {
-    fn num_successes(&self) -> u16 {
-        match self {
-            Self::None { num_successes, .. } => *num_successes,
-            Self::Bench { instructions_success, .. } => instructions_success.len().try_into().expect("more than u16::MAX seeds rolled"),
-            Self::Failures { num_successes, .. } => *num_successes,
-            Self::MidosHouse { spoiler_logs, .. } => spoiler_logs.len().try_into().expect("more than u16::MAX seeds rolled"),
-        }
-    }
-
-    fn num_failures(&self) -> u16 {
-        match self {
-            Self::None { num_failures, .. } => *num_failures,
-            Self::Bench { instructions_failure, .. } => instructions_failure.len().try_into().expect("more than u16::MAX seeds rolled"),
-            Self::Failures { error_logs, .. } => error_logs.len().try_into().expect("more than u16::MAX seeds rolled"),
-            Self::MidosHouse { num_failures, .. } => *num_failures,
-        }
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 enum Error {
     #[error(transparent)] Config(#[from] config::Error),
     #[error(transparent)] Git(#[from] git2::Error),
     #[error(transparent)] Json(#[from] serde_json::Error),
     #[error(transparent)] Task(#[from] JoinError),
+    #[error(transparent)] TryFromInt(#[from] std::num::TryFromIntError),
     #[error(transparent)] ReaderSend(#[from] mpsc::error::SendError<ReaderMessage>),
     #[error(transparent)] Utf8(#[from] std::str::Utf8Error),
     #[error(transparent)] Wheel(#[from] wheel::Error),
@@ -246,7 +233,7 @@ enum Error {
     #[error("at most 255 seeds may be generated with the --world-counts option")]
     TooManyWorlds,
     #[error("error(s) in worker(s): {}", .0.iter().map(|(worker, source)| format!("{worker}: {source}")).format(", "))]
-    Worker(Vec<(String, worker::Error)>),
+    Worker(Vec<(Arc<str>, worker::Error)>),
     #[error("received a message from an unknown worker")]
     WorkerNotFound,
 }
@@ -313,6 +300,23 @@ async fn cli(mut args: Args) -> Result<(), Error> {
         Print("preparing..."),
     ).at_unknown()?;
     let mut config = Config::load().await?;
+    let mut log_file = if config.log {
+        Some(File::create("ootrstats.log").await?)
+    } else {
+        None
+    };
+
+    macro_rules! log {
+        ($($fmt:tt)*) => {{
+            if let Some(ref mut log_file) = log_file {
+                log_file.write_all(Local::now().format("%Y-%m-%d %H:%M:%S ").to_string().as_bytes()).await.at("ootrstats.log")?;
+                log_file.write_all(format!($($fmt)*).as_bytes()).await.at("ootrstats.log")?;
+                log_file.write_all(b"\n").await.at("ootrstats.log")?;
+                log_file.flush().await.at("ootrstats.log")?;
+            }
+        }};
+    }
+
     let rando_rev = if let Some(rev) = args.rev {
         rev
     } else {
@@ -377,26 +381,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
     let is_bench = matches!(args.subcommand, Some(Subcommand::Bench { .. }));
     let start = Instant::now();
     let start_local = Local::now();
-    let mut subcommand_data = match args.subcommand {
-        None => SubcommandData::None {
-            num_successes: 0,
-            num_failures: 0,
-        },
-        Some(Subcommand::Bench { raw_data }) => SubcommandData::Bench {
-            instructions_success: Vec::with_capacity(args.num_seeds.into()),
-            instructions_failure: Vec::with_capacity(args.num_seeds.into()),
-            raw_data,
-        },
-        Some(Subcommand::Failures) => SubcommandData::Failures {
-            num_successes: 0,
-            error_logs: Vec::with_capacity(args.num_seeds.into()),
-        },
-        Some(Subcommand::MidosHouse { out_path }) => SubcommandData::MidosHouse {
-            spoiler_logs: Vec::with_capacity(args.num_seeds.into()),
-            num_failures: 0,
-            out_path,
-        },
-    };
+    let mut seed_states = Vec::from_iter(iter::repeat_with(|| SeedState::Unchecked).take(args.num_seeds.into()));
     let (reader_tx, mut reader_rx) = mpsc::channel(args.num_seeds.min(256).into());
     let mut readers = (0..available_parallelism).map(|task_idx| {
         let stats_dir = stats_dir.clone();
@@ -444,16 +429,22 @@ async fn cli(mut args: Args) -> Result<(), Error> {
     let (worker_tx, mut worker_rx) = mpsc::channel(256);
     let mut worker_tasks = FuturesUnordered::default();
     let mut workers = Err::<Vec<worker::State>, _>(worker_tx);
-    let mut pending_seeds = VecDeque::default();
+    let mut cancelled = false;
 
     macro_rules! cancel {
         () => {{
             // finish rolling seeds that are already in progress but don't start any more
+            cancelled = true;
             args.retry_failures = false;
             readers.clear();
             completed_readers = available_parallelism;
             reader_rx = mpsc::channel(1).1;
-            pending_seeds.clear();
+            for seed_state in &mut seed_states {
+                match seed_state {
+                    SeedState::Unchecked | SeedState::Pending => *seed_state = SeedState::Cancelled,
+                    SeedState::Rolling { .. } | SeedState::Cancelled | SeedState::Success { .. } | SeedState::Failure { .. } => {}
+                }
+            }
         }};
     }
 
@@ -461,8 +452,8 @@ async fn cli(mut args: Args) -> Result<(), Error> {
         enum Event {
             ReaderDone(Result<Result<(), Error>, JoinError>),
             ReaderMessage(ReaderMessage),
-            WorkerDone(String, Result<Result<(), worker::Error>, JoinError>),
-            WorkerMessage(String, ootrstats::worker::Message),
+            WorkerDone(Arc<str>, Result<Result<(), worker::Error>, JoinError>),
+            WorkerMessage(Arc<str>, ootrstats::worker::Message),
             End,
         }
 
@@ -483,46 +474,32 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                     }
                     Event::ReaderMessage(msg) => match msg {
                         ReaderMessage::Pending(seed_idx) => Some(seed_idx),
-                        ReaderMessage::Success { seed_idx, instructions } => match subcommand_data {
-                            SubcommandData::None { ref mut num_successes, .. } | SubcommandData::Failures { ref mut num_successes, .. } => {
-                                *num_successes += 1;
-                                None
-                            }
-                            SubcommandData::Bench { ref mut instructions_success, .. } => if let Some(instructions) = instructions {
-                                instructions_success.push(instructions);
-                                None
-                            } else {
-                                // seed was already rolled but not benchmarked, roll a new seed instead
-                                fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
-                                Some(seed_idx)
-                            },
-                            SubcommandData::MidosHouse { ref mut spoiler_logs, .. } => {
-                                spoiler_logs.push(fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?);
-                                None
-                            }
+                        ReaderMessage::Success { seed_idx, instructions } => if is_bench && instructions.is_none() {
+                            // seed was already rolled but not benchmarked, roll a new seed instead
+                            fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                            Some(seed_idx)
+                        } else {
+                            seed_states[usize::from(seed_idx)] = SeedState::Success {
+                                worker: None,
+                                spoiler_log: fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?,
+                                instructions,
+                            };
+                            None
                         },
                         ReaderMessage::Failure { seed_idx, instructions } => if args.retry_failures {
                             fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
                             Some(seed_idx)
+                        } else if is_bench && instructions.is_none() {
+                            // seed was already rolled but not benchmarked, roll a new seed instead
+                            fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                            Some(seed_idx)
                         } else {
-                            match subcommand_data {
-                                SubcommandData::None { ref mut num_failures, .. } | SubcommandData::MidosHouse { ref mut num_failures, .. } => {
-                                    *num_failures += 1;
-                                    None
-                                }
-                                SubcommandData::Bench { ref mut instructions_failure, .. } => if let Some(instructions) = instructions {
-                                    instructions_failure.push(instructions);
-                                    None
-                                } else {
-                                    // seed was already rolled but not benchmarked, roll a new seed instead
-                                    fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
-                                    Some(seed_idx)
-                                },
-                                SubcommandData::Failures { ref mut error_logs, .. } => {
-                                    error_logs.push((seed_idx, fs::read(stats_dir.join(seed_idx.to_string()).join("error.log")).await?.into()));
-                                    None
-                                }
-                            }
+                            seed_states[usize::from(seed_idx)] = SeedState::Failure {
+                                worker: None,
+                                error_log: fs::read(stats_dir.join(seed_idx.to_string()).join("error.log")).await?.into(),
+                                instructions,
+                            };
+                            None
                         },
                         ReaderMessage::Done => {
                             completed_readers += 1;
@@ -559,8 +536,8 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                     worker.ready += ready;
                                     while worker.ready > 0 {
                                         worker.msg = None;
-                                        let Some(seed_idx) = pending_seeds.pop_front() else { break };
-                                        if let Err(mpsc::error::SendError(message)) = worker.roll(seed_idx).await {
+                                        let Some(seed_idx) = seed_states.iter().position(|state| matches!(state, SeedState::Pending)) else { break };
+                                        if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
                                             worker.error.get_or_insert(worker::Error::Receive { message });
                                             cancel!();
                                         }
@@ -568,8 +545,6 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                     None
                                 }
                                 ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log, patch } => {
-                                    worker.running -= 1;
-                                    worker.completed += 1;
                                     let seed_dir = stats_dir.join(seed_idx.to_string());
                                     fs::create_dir_all(&seed_dir).await?;
                                     let stats_spoiler_log_path = seed_dir.join("spoiler.json");
@@ -626,59 +601,59 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                         }
                                     }
                                     fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
-                                        instructions,
+                                        instructions: instructions.as_ref().ok().copied(),
                                     })?).await?;
-                                    match subcommand_data {
-                                        SubcommandData::None { ref mut num_successes, .. } | SubcommandData::Failures { ref mut num_successes, .. } => {
-                                            *num_successes += 1;
-                                            None
-                                        }
-                                        SubcommandData::Bench { ref mut instructions_success, .. } => if let Some(instructions) = instructions {
-                                            instructions_success.push(instructions);
-                                            None
-                                        } else {
+                                    if_chain! {
+                                        if !cancelled;
+                                        if is_bench;
+                                        if let Err(ref stderr) = instructions;
+                                        then {
                                             // perf sometimes doesn't output instruction count for whatever reason, retry if this happens
+                                            log!("worker {name} retrying seed {seed_idx} due to missing instruction count, stderr:");
+                                            log!("{}", String::from_utf8_lossy(stderr));
                                             fs::remove_dir_all(seed_dir).await?;
                                             Some(seed_idx)
-                                        },
-                                        SubcommandData::MidosHouse { ref mut spoiler_logs, .. } => {
-                                            spoiler_logs.push(match spoiler_log {
-                                                Either::Left(_) => fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?,
-                                                Either::Right(spoiler_log) => serde_json::from_slice(&spoiler_log)?,
-                                            });
+                                        } else {
+                                            seed_states[usize::from(seed_idx)] = SeedState::Success {
+                                                worker: Some(name),
+                                                spoiler_log: match spoiler_log {
+                                                    Either::Left(_) => fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?,
+                                                    Either::Right(spoiler_log) => serde_json::from_slice(&spoiler_log)?,
+                                                },
+                                                instructions: instructions.as_ref().ok().copied(),
+                                            };
                                             None
                                         }
                                     }
                                 }
                                 ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => {
-                                    worker.running -= 1;
                                     let seed_dir = stats_dir.join(seed_idx.to_string());
                                     if args.retry_failures {
                                         fs::remove_dir_all(seed_dir).await.missing_ok()?;
                                         Some(seed_idx)
                                     } else {
-                                        worker.completed += 1;
                                         fs::create_dir_all(&seed_dir).await?;
                                         let stats_error_log_path = seed_dir.join("error.log");
                                         fs::write(stats_error_log_path, &error_log).await?;
                                         fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
-                                            instructions,
+                                            instructions: instructions.as_ref().ok().copied(),
                                         })?).await?;
-                                        match subcommand_data {
-                                            SubcommandData::None { ref mut num_failures, .. } | SubcommandData::MidosHouse { ref mut num_failures, .. } => {
-                                                *num_failures += 1;
-                                                None
-                                            }
-                                            SubcommandData::Bench { ref mut instructions_failure, .. } => if let Some(instructions) = instructions {
-                                                instructions_failure.push(instructions);
-                                                None
-                                            } else {
+                                        if_chain! {
+                                            if !cancelled;
+                                            if is_bench;
+                                            if let Err(ref stderr) = instructions;
+                                            then {
                                                 // perf sometimes doesn't output instruction count for whatever reason, retry if this happens
+                                                log!("worker {name} retrying seed {seed_idx} due to missing instruction count, stderr:");
+                                                log!("{}", String::from_utf8_lossy(stderr));
                                                 fs::remove_dir_all(seed_dir).await?;
                                                 Some(seed_idx)
-                                            },
-                                            SubcommandData::Failures { ref mut error_logs, .. } => {
-                                                error_logs.push((seed_idx, error_log));
+                                            } else {
+                                                seed_states[usize::from(seed_idx)] = SeedState::Failure {
+                                                    worker: Some(name),
+                                                    instructions: instructions.as_ref().ok().copied(),
+                                                    error_log,
+                                                };
                                                 None
                                             }
                                         }
@@ -716,13 +691,13 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                     };
                     let mut rolling = false;
                     for worker in workers.iter_mut().filter(|worker| worker.ready > 0) {
-                        if worker.roll(seed_idx).await.is_ok() {
+                        if worker.roll(&mut seed_states, seed_idx).await.is_ok() {
                             rolling = true;
                             break
                         }
                     }
                     if !rolling {
-                        pending_seeds.push_back(seed_idx);
+                        seed_states[usize::from(seed_idx)] = SeedState::Pending;
                     }
                 }
             },
@@ -757,25 +732,41 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                         }
                     }
                 } else {
-                    let total = workers.iter().map(|worker| worker.completed).sum::<u16>();
+                    let mut running = 0u16;
+                    let mut completed = 0u16;
+                    let mut total_completed = 0u16;
+                    for state in &seed_states {
+                        match state {
+                            SeedState::Success { worker: Some(name), .. } | SeedState::Failure { worker: Some(name), .. } => {
+                                total_completed += 1;
+                                if *name == worker.name { completed += 1 }
+                            }
+                            SeedState::Rolling { worker: name } => if *name == worker.name { running += 1 },
+                            | SeedState::Unchecked
+                            | SeedState::Pending
+                            | SeedState::Success { worker: None, .. }
+                            | SeedState::Failure { worker: None, .. }
+                            | SeedState::Cancelled
+                                => {}
+                        }
+                    }
                     let state = if worker.stopped {
                         Cow::Borrowed("done")
                     } else if let Some(ref msg) = worker.msg {
-                        if worker.running > 0 {
-                            Cow::Owned(format!("{} running, {msg}", worker.running))
+                        if running > 0 {
+                            Cow::Owned(format!("{running} running, {msg}"))
                         } else {
                             Cow::Borrowed(&**msg)
                         }
                     } else {
-                        Cow::Owned(format!("{} running", worker.running))
+                        Cow::Owned(format!("{running} running"))
                     };
-                    if total > 0 {
+                    if total_completed > 0 {
                         crossterm::execute!(stderr,
                             Print(format_args!(
-                                "\r\n{}: {} rolled ({}%), {state}",
+                                "\r\n{}: {completed} rolled ({}%), {state}",
                                 worker.name,
-                                worker.completed,
-                                100 * u32::from(worker.completed) / u32::from(total),
+                                100 * u32::from(completed) / u32::from(total_completed),
                             )),
                             Clear(ClearType::UntilNewLine),
                         ).at_unknown()?;
@@ -798,16 +789,36 @@ async fn cli(mut args: Args) -> Result<(), Error> {
             MoveToColumn(0),
             Print(if completed_readers == available_parallelism {
                 // list of pending seeds fully initialized
-                let num_successes = subcommand_data.num_successes();
-                let num_failures = subcommand_data.num_failures();
+                let mut num_successes = 0u16;
+                let mut num_failures = 0u16;
+                let mut started = 0u16;
+                let mut total = 0u16;
+                let mut completed = 0u16;
+                let mut skipped = 0u16;
+                for state in &seed_states {
+                    match state {
+                        SeedState::Unchecked => unreachable!(),
+                        SeedState::Pending => total += 1,
+                        SeedState::Rolling { .. } => {
+                            total += 1;
+                            started += 1;
+                        }
+                        SeedState::Cancelled => {}
+                        SeedState::Success { worker, .. } => {
+                            total += 1;
+                            started += 1;
+                            num_successes += 1;
+                            if worker.is_some() { completed += 1 } else { skipped += 1 }
+                        }
+                        SeedState::Failure { worker, .. } => {
+                            total += 1;
+                            started += 1;
+                            num_failures += 1;
+                            if worker.is_some() { completed += 1 } else { skipped += 1 }
+                        }
+                    }
+                }
                 let rolled = num_successes + num_failures;
-                let started = rolled + workers.as_ref().map(|workers| workers.iter().map(|worker| u16::from(worker.running)).sum::<u16>()).unwrap_or_default();
-                let total = usize::from(started) + pending_seeds.len();
-                let completed = match workers {
-                    Ok(ref workers) => workers.iter().map(|worker| worker.completed).sum(),
-                    Err(_) => 0,
-                };
-                let skipped = usize::from(rolled - completed);
                 format!(
                     "{started}/{total} seeds started, {rolled} rolled{}, ETA {}",
                     if args.retry_failures {
@@ -815,30 +826,44 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                     } else {
                         format!(", {num_failures} failures ({}%)", if num_successes > 0 || num_failures > 0 { 100 * u32::from(num_failures) / u32::from(num_successes + num_failures) } else { 100 })
                     },
-                    if completed > 0 {
-                        (start_local + TimeDelta::from_std(start.elapsed().mul_f64((total - skipped) as f64 / completed as f64)).expect("ETA too long")).format("%Y-%m-%d %H:%M:%S").to_string()
-                    } else {
-                        format!("unknown")
+                    if_chain! {
+                        if completed > 0;
+                        let ratio = (total - skipped) as f64 / completed as f64;
+                        if let Ok(estimated_duration) = Duration::try_from_secs_f64(start.elapsed().as_secs_f64() * ratio);
+                        if let Ok(estimated_duration) = TimeDelta::from_std(estimated_duration);
+                        then {
+                            (start_local + estimated_duration).format("%Y-%m-%d %H:%M:%S").to_string()
+                        } else {
+                            format!("unknown")
+                        }
                     },
                 )
             } else {
-                let rolled = usize::from(subcommand_data.num_successes() + subcommand_data.num_failures());
-                let started = workers.as_ref().map(|workers| workers.iter().map(|worker| usize::from(worker.running)).sum::<usize>()).unwrap_or_default();
-                format!(
-                    "checking for existing seeds: {rolled} rolled, {started} running, {} pending, {} still being checked",
-                    pending_seeds.len(),
-                    usize::from(args.num_seeds) - pending_seeds.len() - started - rolled,
-                )
+                let mut rolled = 0u16;
+                let mut started = 0u16;
+                let mut pending = 0u16;
+                let mut unchecked = 0u16;
+                for state in &seed_states {
+                    match state {
+                        SeedState::Unchecked => unchecked += 1,
+                        SeedState::Pending => pending += 1,
+                        SeedState::Rolling { .. } => started += 1,
+                        SeedState::Cancelled => {}
+                        SeedState::Success { .. } | SeedState::Failure { .. } => rolled += 1,
+                    }
+                }
+                format!("checking for existing seeds: {rolled} rolled, {started} running, {pending} pending, {unchecked} still being checked")
             }),
             Clear(ClearType::UntilNewLine),
         ).at_unknown()?;
-        if pending_seeds.is_empty() && completed_readers == available_parallelism {
+        if completed_readers == available_parallelism && seed_states.iter().all(|state| match state {
+            SeedState::Cancelled | SeedState::Success { .. } | SeedState::Failure { .. } => true,
+            SeedState::Unchecked | SeedState::Pending | SeedState::Rolling { .. } => false,
+        }) {
             if let Ok(ref mut workers) = workers {
                 for worker in workers {
-                    if worker.error.is_some() || worker.running == 0 {
-                        // drop sender so the worker can shut down
-                        worker.supervisor_tx = mpsc::channel(1).0;
-                    }
+                    // drop sender so the worker can shut down
+                    worker.supervisor_tx = mpsc::channel(1).0;
                 }
             } else if worker_tasks.is_empty() {
                 // make sure worker_tx is dropped to prevent deadlock
@@ -855,51 +880,78 @@ async fn cli(mut args: Args) -> Result<(), Error> {
     crossterm::execute!(stderr,
         Print("\r\n"),
     ).at_unknown()?;
-    match subcommand_data {
-        SubcommandData::None { .. } => crossterm::execute!(stderr,
+    match args.subcommand {
+        None => crossterm::execute!(stderr,
             Print(format_args!("stats saved to {}\r\n", stats_dir.display())),
         ).at_unknown()?,
-        SubcommandData::Bench { instructions_success, instructions_failure, raw_data } => if raw_data {
-            for instructions in instructions_success {
-                crossterm::execute!(stdout,
-                    Print(format_args!("s {instructions}")),
-                ).at_unknown()?;
+        Some(Subcommand::Bench { raw_data: false }) => {
+            let mut num_successes = 0u16;
+            let mut num_failures = 0u16;
+            let mut instructions_success = 0u64;
+            let mut instructions_failure = 0u64;
+            for state in seed_states {
+                match state {
+                    SeedState::Unchecked | SeedState::Pending | SeedState::Rolling { .. } => unreachable!(),
+                    SeedState::Cancelled | SeedState::Success { instructions: None, .. } | SeedState::Failure { instructions: None, .. } => {}
+                    SeedState::Success { instructions: Some(instructions), .. } => {
+                        num_successes += 1;
+                        instructions_success += instructions;
+                    }
+                    SeedState::Failure { instructions: Some(instructions), .. } => {
+                        num_failures += 1;
+                        instructions_failure += instructions;
+                    }
+                }
             }
-            for instructions in instructions_failure {
-                crossterm::execute!(stdout,
-                    Print(format_args!("f {instructions}")),
-                ).at_unknown()?;
-            }
-        } else {
-            if instructions_success.is_empty() {
+            if num_successes == 0 {
                 crossterm::execute!(stdout,
                     Print("No successful seeds, so average instruction count is infinite\r\n"),
                 ).at_unknown()?;
             } else {
-                let success_rate = instructions_success.len() as f64 / (instructions_success.len() as f64 + instructions_failure.len() as f64);
-                let average_instructions_success = instructions_success.iter().sum::<u64>() / u64::try_from(instructions_success.len()).unwrap();
-                let average_instructions_failure = instructions_failure.iter().sum::<u64>().checked_div(u64::try_from(instructions_failure.len()).unwrap()).unwrap_or_default();
+                let success_rate = num_successes as f64 / (num_successes as f64 + num_failures as f64);
+                let average_instructions_success = instructions_success / u64::try_from(num_successes).unwrap();
+                let average_instructions_failure = instructions_failure.checked_div(u64::try_from(num_failures).unwrap()).unwrap_or_default();
                 let average_failure_count = (1.0 - success_rate) / success_rate; // mean of 0-support geometric distribution
                 let average_instructions = average_failure_count * average_instructions_failure as f64 + average_instructions_success as f64;
                 crossterm::execute!(stdout,
-                    Print(format_args!("success rate: {}/{} ({:.02}%)\r\n", instructions_success.len(), instructions_success.len() + instructions_failure.len(), success_rate * 100.0)),
+                    Print(format_args!("success rate: {num_successes}/{} ({:.02}%)\r\n", num_successes + num_failures, success_rate * 100.0)),
                     Print(format_args!("average instructions (success): {average_instructions_success} ({average_instructions_success:.3e})\r\n")),
-                    Print(format_args!("average instructions (failure): {}\r\n", if instructions_failure.is_empty() { format!("N/A") } else { format!("{average_instructions_failure} ({average_instructions_failure:.3e})") })),
+                    Print(format_args!("average instructions (failure): {}\r\n", if num_failures == 0 { format!("N/A") } else { format!("{average_instructions_failure} ({average_instructions_failure:.3e})") })),
                     Print(format_args!("average total instructions until success: {average_instructions} ({average_instructions:.3e})\r\n")),
                 ).at_unknown()?;
             }
-        },
-        SubcommandData::Failures { error_logs, .. } => {
+        }
+        Some(Subcommand::Bench { raw_data: true }) => {
+            for state in seed_states {
+                match state {
+                    SeedState::Unchecked | SeedState::Pending | SeedState::Rolling { .. } => unreachable!(),
+                    SeedState::Cancelled | SeedState::Success { instructions: None, .. } | SeedState::Failure { instructions: None, .. } => {}
+                    SeedState::Success { instructions: Some(instructions), .. } => {
+                        crossterm::execute!(stdout,
+                            Print(format_args!("s {instructions}")),
+                        ).at_unknown()?;
+                    }
+                    SeedState::Failure { instructions: Some(instructions), .. } => {
+                        crossterm::execute!(stdout,
+                            Print(format_args!("f {instructions}")),
+                        ).at_unknown()?;
+                    }
+                }
+            }
+        }
+        Some(Subcommand::Failures) => {
             let mut counts = HashMap::<_, HashMap<_, (SeedIdx, usize)>>::default();
-            for (seed_idx, error_log) in &error_logs {
-                let error_log = std::str::from_utf8(error_log)?;
-                let mut lines = error_log.trim().lines();
-                let msg = lines.next_back().ok_or(Error::EmptyErrorLog)?;
-                let _ = lines.next_back().ok_or(Error::MissingTraceback)?;
-                let location = lines.next_back().ok_or(Error::MissingTraceback)?;
-                match counts.entry(location).or_default().entry(msg) {
-                    hash_map::Entry::Occupied(mut entry) => entry.get_mut().1 += 1,
-                    hash_map::Entry::Vacant(entry) => { entry.insert((*seed_idx, 1)); }
+            for (seed_idx, state) in seed_states.iter().enumerate() {
+                if let SeedState::Failure { error_log, .. } = state {
+                    let error_log = std::str::from_utf8(error_log)?;
+                    let mut lines = error_log.trim().lines();
+                    let msg = lines.next_back().ok_or(Error::EmptyErrorLog)?;
+                    let _ = lines.next_back().ok_or(Error::MissingTraceback)?;
+                    let location = lines.next_back().ok_or(Error::MissingTraceback)?;
+                    match counts.entry(location).or_default().entry(msg) {
+                        hash_map::Entry::Occupied(mut entry) => entry.get_mut().1 += 1,
+                        hash_map::Entry::Vacant(entry) => { entry.insert((seed_idx.try_into()?, 1)); }
+                    }
                 }
             }
             crossterm::execute!(stdout,
@@ -922,11 +974,13 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                 }
             }
         }
-        SubcommandData::MidosHouse { out_path, spoiler_logs, .. } => {
+        Some(Subcommand::MidosHouse { out_path }) => {
             let mut counts = HashMap::<_, usize>::default();
-            for spoiler_log in spoiler_logs {
-                for appearances in spoiler_log.midos_house_chests() {
-                    *counts.entry(appearances).or_default() += 1;
+            for state in seed_states {
+                if let SeedState::Success { spoiler_log, .. } = state {
+                    for appearances in spoiler_log.midos_house_chests() {
+                        *counts.entry(appearances).or_default() += 1;
+                    }
                 }
             }
             let mut counts = counts.into_iter().collect_vec();
