@@ -24,7 +24,7 @@
     ```sh
     cargo install-update --all --git
     ```
-    
+
 # Configuration
 
 `ootrstats` requires a configuration file, which should be a [JSON](https://json.org/) object located at `$XDG_CONFIG_DIRS/ootrstats.json` on Unix, or `%APPDATA%\Fenhl\ootrstats\config\config.json` on Windows. It takes the following required entry:
