@@ -12,7 +12,7 @@ fig, axs = plt.subplots(1, 2, sharey=True, tight_layout=True)
 prev_success = []
 prev_failure = []
 for line in subprocess.run(
-    ['cargo', 'run', '--release', '--', f'--num-seeds={NUM_SEEDS}', '--github-user=fenhl', 'bench', '--raw-data'],
+    ['cargo', 'run', '--release', '--', f'--num-seeds={NUM_SEEDS}', '--github-user=fenhl', '--preset=mixed', 'bench', '--raw-data'],
     stdout=subprocess.PIPE, encoding='utf-8', check=True,
 ).stdout.splitlines():
     if line.startswith('s'):
@@ -23,7 +23,7 @@ for line in subprocess.run(
 latest_success = []
 latest_failure = []
 for line in subprocess.run(
-    ['cargo', 'run', '--release', '--', f'--num-seeds={NUM_SEEDS}', '--github-user=fenhl', '--branch=riir', 'bench', '--raw-data'],
+    ['cargo', 'run', '--release', '--', f'--num-seeds={NUM_SEEDS}', '--github-user=fenhl', '--branch=riir', '--preset=mixed', 'bench', '--raw-data'],
     stdout=subprocess.PIPE, encoding='utf-8', check=True,
 ).stdout.splitlines():
     if line.startswith('s'):

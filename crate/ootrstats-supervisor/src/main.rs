@@ -117,6 +117,8 @@ enum ReaderMessage {
 struct Metadata {
     /// present if the `bench` parameter was set and `perf` output was parsed successfully.
     instructions: Option<u64>,
+    /// always written by this version of ootrstats but may be absent in metadata from older ootrstats versions.
+    worker: Option<Arc<str>>,
 }
 
 enum SeedState {
@@ -601,6 +603,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                     }
                                     fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
                                         instructions: instructions.as_ref().ok().copied(),
+                                        worker: Some(name.clone()),
                                     })?).await?;
                                     if_chain! {
                                         if !cancelled;
@@ -636,6 +639,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                         fs::write(stats_error_log_path, &error_log).await?;
                                         fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
                                             instructions: instructions.as_ref().ok().copied(),
+                                            worker: Some(name.clone()),
                                         })?).await?;
                                         if_chain! {
                                             if !cancelled;
