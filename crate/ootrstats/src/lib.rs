@@ -183,7 +183,7 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
             };
             cmd.arg("stat");
             cmd.arg("--event=instructions:u");
-            cmd.arg("/usr/bin/python3");
+            cmd.arg(&python);
             cmd
         }
         #[cfg(not(any(target_os = "linux", target_os = "windows")))] { unimplemented!("`perf` is not available for macOS") }
