@@ -89,7 +89,7 @@ And the following optional entries:
 
 Run the `ootrstats-supervisor` command, followed by any options you would like to change from their defaults, followed by an optional subcommand. If no subcommand is given, the supervisor will simply generate the spoiler/error logs and place them in the [`statsDir`](#configuration).
 
-The supervisor can be interrupted cleanly using <kbd>Ctrl</kbd><kbd>C</kbd> or <kbd>Ctrl</kbd><kbd>D</kbd>. If this is used, the supervisor will wait for seeds currently being rolled to finish before exiting, but will no longer start rolling any new seeds.
+The supervisor can be interrupted cleanly using <kbd>C</kbd> or <kbd>D</kbd>. If this is used, the supervisor will wait for seeds currently being rolled to finish before exiting, but will no longer start rolling any new seeds.
 
 ## Options
 

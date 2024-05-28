@@ -33,7 +33,6 @@ use {
             KeyCode,
             KeyEvent,
             KeyEventKind,
-            KeyModifiers,
         },
         style::Print,
         terminal::{
@@ -702,10 +701,8 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                 }
             },
             //TODO use signal-hook-tokio crate to handle interrupts on Unix?
-            Some(res) = cli_rx.recv() => if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), modifiers, kind: KeyEventKind::Press, .. }) = res.at_unknown()? {
-                if modifiers.contains(KeyModifiers::CONTROL) {
-                    cancel!();
-                }
+            Some(res) = cli_rx.recv() => if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), kind: KeyEventKind::Press, .. }) = res.at_unknown()? {
+                cancel!();
             },
         }
         if let Ok(ref workers) = workers {
