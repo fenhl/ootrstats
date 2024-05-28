@@ -174,7 +174,7 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
                     Command::new("perf")
                 }
                 #[cfg(target_os = "windows")] {
-                    cmd_name = format!("{WSL} perf stat {cmd_name}");
+                    cmd_name = format!("{WSL} perf stat python3");
                     let mut cmd = Command::new(WSL);
                     // install using `apt-get install linux-tools-generic` and symlink from `/usr/lib/linux-tools/*-generic/perf`
                     cmd.arg("perf");
@@ -183,7 +183,8 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
             };
             cmd.arg("stat");
             cmd.arg("--event=instructions:u");
-            cmd.arg(&python);
+            #[cfg(target_os = "linux")] cmd.arg(&python);
+            #[cfg(target_os = "windows")] cmd.arg("python3");
             cmd
         }
         #[cfg(not(any(target_os = "linux", target_os = "windows")))] { unimplemented!("`perf` is not available for macOS") }
