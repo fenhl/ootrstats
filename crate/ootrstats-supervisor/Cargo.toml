@@ -21,6 +21,7 @@ git2 = "0.18.2"
 if_chain = "1.0.2"
 itertools = "0.13"
 lazy-regex = "3.1.0"
+nonempty-collections = "0.2.5"
 ootr-utils = { git = "https://github.com/midoshouse/rust-ootr-utils", branch = "main" }
 ootrstats = { path = "../ootrstats" }
 semver = "1.0.22"

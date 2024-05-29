@@ -58,6 +58,7 @@ use {
     if_chain::if_chain,
     itertools::Itertools as _,
     lazy_regex::regex_is_match,
+    nonempty_collections::NEVec,
     ootr_utils::spoiler::SpoilerLog,
     serde::{
         Deserialize,
@@ -125,7 +126,7 @@ enum SeedState {
     Unchecked,
     Pending,
     Rolling {
-        worker: Arc<str>,
+        workers: NEVec<Arc<str>>,
     },
     Cancelled,
     Success {
@@ -183,6 +184,9 @@ struct Args {
     /// Sample size — how many seeds to roll.
     #[clap(short, long, default_value = "16384", default_value_if("world_counts", "true", Some("255")))]
     num_seeds: SeedIdx,
+    /// If there are more available cores than remaining seeds, roll the same seed multiple times and keep the one that finishes first.
+    #[clap(long)]
+    race: bool,
     /// If the randomizer errors, retry instead of recording the failure.
     #[clap(long)]
     retry_failures: bool,
@@ -474,10 +478,14 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                         None
                     }
                     Event::ReaderMessage(msg) => match msg {
-                        ReaderMessage::Pending(seed_idx) => Some(seed_idx),
+                        ReaderMessage::Pending(seed_idx) => {
+                            seed_states[usize::from(seed_idx)] = SeedState::Pending;
+                            Some(seed_idx)
+                        }
                         ReaderMessage::Success { seed_idx, instructions } => if is_bench && instructions.is_none() {
                             // seed was already rolled but not benchmarked, roll a new seed instead
                             fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                            seed_states[usize::from(seed_idx)] = SeedState::Pending;
                             Some(seed_idx)
                         } else {
                             seed_states[usize::from(seed_idx)] = SeedState::Success {
@@ -489,10 +497,12 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                         },
                         ReaderMessage::Failure { seed_idx, instructions } => if args.retry_failures {
                             fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                            seed_states[usize::from(seed_idx)] = SeedState::Pending;
                             Some(seed_idx)
                         } else if is_bench && instructions.is_none() {
                             // seed was already rolled but not benchmarked, roll a new seed instead
                             fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                            seed_states[usize::from(seed_idx)] = SeedState::Pending;
                             Some(seed_idx)
                         } else {
                             seed_states[usize::from(seed_idx)] = SeedState::Failure {
@@ -517,24 +527,24 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                 Ok(()) => {}
                                 Err(e) => {
                                     worker.error = Some(e);
-                                    if workers.iter().all(|worker| worker.error.is_some()) {
-                                        for state in &mut seed_states {
-                                            if let SeedState::Rolling { worker } = state {
-                                                if *worker == name {
+                                    let should_cancel = workers.iter().all(|worker| worker.error.is_some());
+                                    for (seed_idx, state) in seed_states.iter_mut().enumerate() {
+                                        if let SeedState::Rolling { workers } = state {
+                                            if workers.contains(&name) {
+                                                let new_workers = workers.iter().into_iter().filter(|worker| **worker != name).cloned().collect();
+                                                if let Some(new_workers) = NEVec::from_vec(new_workers) {
+                                                    *workers = new_workers;
+                                                } else if should_cancel {
                                                     *state = SeedState::Cancelled;
-                                                }
-                                            }
-                                        }
-                                        cancel!();
-                                    } else {
-                                        for (seed_idx, state) in seed_states.iter_mut().enumerate() {
-                                            if let SeedState::Rolling { worker } = state {
-                                                if *worker == name {
+                                                } else {
                                                     *state = SeedState::Pending;
                                                     seed_to_reroll.get_or_insert(seed_idx.try_into()?);
                                                 }
                                             }
                                         }
+                                    }
+                                    if should_cancel {
+                                        cancel!();
                                     }
                                 }
                             }
@@ -556,15 +566,31 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                     worker.ready += ready;
                                     while worker.error.is_none() && worker.ready > 0 {
                                         worker.msg = None;
-                                        let Some(seed_idx) = seed_states.iter().position(|state| matches!(state, SeedState::Pending)) else { break };
-                                        if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
-                                            worker.error.get_or_insert(worker::Error::Receive { message });
-                                            cancel!();
+                                        if let Some(seed_idx) = seed_states.iter().position(|state| matches!(state, SeedState::Pending)) {
+                                            if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
+                                                worker.error.get_or_insert(worker::Error::Receive { message });
+                                                cancel!();
+                                            }
+                                        } else if args.race {
+                                            let seed_idx = seed_states.iter()
+                                                .enumerate()
+                                                .filter_map(|(seed_idx, state)| if let SeedState::Rolling { workers } = state { Some((seed_idx, workers.len())) } else { None })
+                                                .min_by_key(|&(_, num_workers)| num_workers);
+                                            if let Some((seed_idx, _)) = seed_idx {
+                                                if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
+                                                    worker.error.get_or_insert(worker::Error::Receive { message });
+                                                    cancel!();
+                                                }
+                                            } else {
+                                                break
+                                            }
+                                        } else {
+                                            break
                                         }
                                     }
                                     None
                                 }
-                                ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log, patch } => {
+                                ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log, patch } => if let SeedState::Rolling { ref mut workers } = seed_states[usize::from(seed_idx)] {
                                     let seed_dir = stats_dir.join(seed_idx.to_string());
                                     fs::create_dir_all(&seed_dir).await?;
                                     let stats_spoiler_log_path = seed_dir.join("spoiler.json");
@@ -633,6 +659,14 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                             log!("worker {name} retrying seed {seed_idx} due to missing instruction count, stderr:");
                                             log!("{}", String::from_utf8_lossy(stderr));
                                             fs::remove_dir_all(seed_dir).await?;
+                                            let mut new_workers = Vec::from(workers.clone());
+                                            let pos = new_workers.iter().position(|worker| *worker == name).expect("got success from a worker that wasn't rolling that seed");
+                                            new_workers.swap_remove(pos);
+                                            if let Some(new_workers) = NEVec::from_vec(new_workers) {
+                                                *workers = new_workers;
+                                            } else {
+                                                seed_states[usize::from(seed_idx)] = SeedState::Pending;
+                                            }
                                             Some(seed_idx)
                                         } else {
                                             seed_states[usize::from(seed_idx)] = SeedState::Success {
@@ -646,11 +680,22 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                             None
                                         }
                                     }
-                                }
-                                ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => {
+                                } else {
+                                    // seed was already rolled but this worker's instance of this seed didn't get cancelled in time so we just ignore it
+                                    None
+                                },
+                                ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => if let SeedState::Rolling { ref mut workers } = seed_states[usize::from(seed_idx)] {
                                     let seed_dir = stats_dir.join(seed_idx.to_string());
                                     if args.retry_failures {
                                         fs::remove_dir_all(seed_dir).await.missing_ok()?;
+                                        let mut new_workers = Vec::from(workers.clone());
+                                        let pos = new_workers.iter().position(|worker| *worker == name).expect("got success from a worker that wasn't rolling that seed");
+                                        new_workers.swap_remove(pos);
+                                        if let Some(new_workers) = NEVec::from_vec(new_workers) {
+                                            *workers = new_workers;
+                                        } else {
+                                            seed_states[usize::from(seed_idx)] = SeedState::Pending;
+                                        }
                                         Some(seed_idx)
                                     } else {
                                         fs::create_dir_all(&seed_dir).await?;
@@ -669,6 +714,14 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                                 log!("worker {name} retrying seed {seed_idx} due to missing instruction count, stderr:");
                                                 log!("{}", String::from_utf8_lossy(stderr));
                                                 fs::remove_dir_all(seed_dir).await?;
+                                                let mut new_workers = Vec::from(workers.clone());
+                                                let pos = new_workers.iter().position(|worker| *worker == name).expect("got success from a worker that wasn't rolling that seed");
+                                                new_workers.swap_remove(pos);
+                                                if let Some(new_workers) = NEVec::from_vec(new_workers) {
+                                                    *workers = new_workers;
+                                                } else {
+                                                    seed_states[usize::from(seed_idx)] = SeedState::Pending;
+                                                }
                                                 Some(seed_idx)
                                             } else {
                                                 seed_states[usize::from(seed_idx)] = SeedState::Failure {
@@ -680,7 +733,10 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                             }
                                         }
                                     }
-                                }
+                                } else {
+                                    // seed was already rolled but this worker's instance of this seed didn't get cancelled in time so we just ignore it
+                                    None
+                                },
                             }
                         } else {
                             return Err(Error::WorkerNotFound)
@@ -711,15 +767,10 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                             workers.as_mut().ok().expect("just inserted")
                         }
                     };
-                    let mut rolling = false;
                     for worker in workers.iter_mut().filter(|worker| worker.error.is_none() && worker.ready > 0) {
                         if worker.roll(&mut seed_states, seed_idx).await.is_ok() {
-                            rolling = true;
                             break
                         }
-                    }
-                    if !rolling {
-                        seed_states[usize::from(seed_idx)] = SeedState::Pending;
                     }
                 }
             },
@@ -761,7 +812,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                 total_completed += 1;
                                 if *name == worker.name { completed += 1 }
                             }
-                            SeedState::Rolling { worker: name } => if *name == worker.name { running += 1 },
+                            SeedState::Rolling { workers } => running += u16::try_from(workers.iter().into_iter().filter(|name| **name == worker.name).count())?,
                             | SeedState::Unchecked
                             | SeedState::Pending
                             | SeedState::Success { worker: None, .. }

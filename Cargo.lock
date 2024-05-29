@@ -1354,6 +1354,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "nonempty-collections"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce843257ad9150ef688ce56753ef461fb2de929fa980fd5692828d1df5fe6f4d"
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1462,6 +1468,7 @@ dependencies = [
  "if_chain",
  "itertools 0.13.0",
  "lazy-regex",
+ "nonempty-collections",
  "ootr-utils",
  "ootrstats",
  "semver",

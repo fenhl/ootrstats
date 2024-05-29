@@ -116,7 +116,8 @@ The supervisor can be interrupted cleanly using <kbd>C</kbd> or <kbd>D</kbd>. If
 ### `ootrstats` options
 
 * `-n`, `--num-seeds`: Specifies the sample size, i.e. how many seeds to roll. Any existing seeds will be reused. Defaults to 16384.
-* `--retry-failures`: If the randomizer errors, retry instead of recording as a failure. Care should be taken when using this command for statistics since it may skew results, but it can be useful when generating seeds for other purposes. Cannot be combined with the `failures` subcommand.
+* `--race`: If there are more available cores than remaining seeds, roll the same seed multiple times, racing the instances of the randomizer against each other to keep the one that finishes first. This option should not be used for statistics since it will skew results, but it can be useful when generating seeds for other purposes.
+* `--retry-failures`: If the randomizer errors, retry instead of recording as a failure. Care should be taken when using this option for statistics since it may skew results, but it can be useful when generating seeds for other purposes. Cannot be combined with the `failures` subcommand.
 * `-w`, `--worker`: Use only the specified worker(s). May be specified multiple times. Cannot be combined with `--exclude-worker`.
 * `-x`, `--exclude-worker`: Don't use the specified worker(s). May be specified multiple times. Cannot be combined with `--worker`.
 

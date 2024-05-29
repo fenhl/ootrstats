@@ -22,6 +22,7 @@ use {
         },
     },
     if_chain::if_chain,
+    nonempty_collections::nev,
     semver::Version,
     serde::Deserialize,
     tokio::{
@@ -223,9 +224,11 @@ impl State {
     pub(crate) async fn roll(&mut self, seed_states: &mut [SeedState], seed_idx: SeedIdx) -> Result<(), mpsc::error::SendError<SupervisorMessage>> {
         self.supervisor_tx.send(SupervisorMessage::Roll(seed_idx)).await?;
         self.ready -= 1;
-        seed_states[usize::from(seed_idx)] = SeedState::Rolling {
-            worker: self.name.clone(),
-        };
+        if let SeedState::Rolling { ref mut workers } = seed_states[usize::from(seed_idx)] {
+            workers.push(self.name.clone());
+        } else {
+            seed_states[usize::from(seed_idx)] = SeedState::Rolling { workers: nev![self.name.clone()] };
+        }
         Ok(())
     }
 }
