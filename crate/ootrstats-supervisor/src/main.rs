@@ -512,14 +512,33 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                         if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name);
                         then {
                             worker.stopped = true;
+                            let mut seed_to_reroll = None;
                             match result? {
                                 Ok(()) => {}
                                 Err(e) => {
                                     worker.error = Some(e);
-                                    cancel!();
+                                    if workers.iter().all(|worker| worker.error.is_some()) {
+                                        for state in &mut seed_states {
+                                            if let SeedState::Rolling { worker } = state {
+                                                if *worker == name {
+                                                    *state = SeedState::Cancelled;
+                                                }
+                                            }
+                                        }
+                                        cancel!();
+                                    } else {
+                                        for (seed_idx, state) in seed_states.iter_mut().enumerate() {
+                                            if let SeedState::Rolling { worker } = state {
+                                                if *worker == name {
+                                                    *state = SeedState::Pending;
+                                                    seed_to_reroll.get_or_insert(seed_idx.try_into()?);
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                            None
+                            seed_to_reroll
                         } else {
                             return Err(Error::WorkerNotFound)
                         }
@@ -535,7 +554,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                 }
                                 ootrstats::worker::Message::Ready(ready) => {
                                     worker.ready += ready;
-                                    while worker.ready > 0 {
+                                    while worker.error.is_none() && worker.ready > 0 {
                                         worker.msg = None;
                                         let Some(seed_idx) = seed_states.iter().position(|state| matches!(state, SeedState::Pending)) else { break };
                                         if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
@@ -693,7 +712,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                         }
                     };
                     let mut rolling = false;
-                    for worker in workers.iter_mut().filter(|worker| worker.ready > 0) {
+                    for worker in workers.iter_mut().filter(|worker| worker.error.is_none() && worker.ready > 0) {
                         if worker.roll(&mut seed_states, seed_idx).await.is_ok() {
                             rolling = true;
                             break
@@ -825,7 +844,11 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                     if args.retry_failures {
                         String::default()
                     } else {
-                        format!(", {num_failures} failures ({}%)", if num_successes > 0 || num_failures > 0 { 100 * u32::from(num_failures) / u32::from(num_successes + num_failures) } else { 100 })
+                        format!(
+                            ", {num_failures} failure{} ({}%)",
+                            if num_failures == 1 { "" } else { "s" },
+                            if num_successes > 0 || num_failures > 0 { 100 * u32::from(num_failures) / u32::from(num_successes + num_failures) } else { 100 },
+                        )
                     },
                     if_chain! {
                         if completed > 0;
