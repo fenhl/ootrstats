@@ -95,25 +95,30 @@ The supervisor can be interrupted cleanly using <kbd>C</kbd> or <kbd>D</kbd>. If
 
 ## Options
 
-* `-b`, `--branch`: Specifies the git branch of the randomizer (or of the random settings script if combined with `--rsl`) to clone. Defaults to the repository's default branch.
-* `-n`, `--num-seeds`: Specifies the sample size, i.e. how many seeds to roll. Any existing seeds will be reused. Defaults to 16384.
-* `-p`, `--preset`: The name of the settings preset to use. Defaults to the Default/Beginner preset. Cannot be combined with `--rsl`, `--settings`, or `--suite`.
-* `-u`, `--github-user`: Specifies the GitHub user or organization name from which to clone the randomizer (or the random settings script if combined with `--rsl`). Defaults to `OoTRandomizer` (or `matthewkirby` if combined with `--rsl`).
-* `-w`, `--worker`: Use only the specified worker(s). May be specified multiple times. Cannot be combined with `--exclude-worker`.
-* `-x`, `--exclude-worker`: Don't use the specified worker(s). May be specified multiple times. Cannot be combined with `--worker`.
-* `--json-settings`: Specifies a JSON object of settings on the command line that will override the given preset or settings string. Cannot be combined with `--rsl`.
-* `--patch`: Generate `.zpf`/`.zpfz` patch files and include them in the [`statsDir`](#configuration). Cannot be combined with `--rsl` or with the `bench` subcommand.
-* `--retry-failures`: If the randomizer errors, retry instead of recording as a failure. Care should be taken when using this command for statistics since it may skew results, but it can be useful when generating seeds for other purposes. Cannot be combined with the `failures` subcommand.
-* `--rev`: Specifies the git revision of the randomizer (or of the random settings script if combined with `--rsl`) to clone. Must be given as an unabbreviated git commit hash. Cannot be combined with `--branch`.
-* `--rsl`: Roll seeds using [the random settings script](https://github.com/matthewkirby/plando-random-settings).
-* `--settings`: The settings string to use for the randomizer. Cannot be combined with `--preset` or `--rsl`, or `--suite`.
+### Randomizer options
+
 * `--suite`: Runs the benchmarking suite. Should usually be combined with the `bench` subcommand. Cannot be combined with `--preset`, `--settings`, or `--rsl`. The benchmarking suite consists of:
     * the Default/Beginner preset
     * the current main tournament settings
     * the current multiworld tournament settings
     * Hell Mode
     * a version of the random settings script adjusted for compatibility with main Dev
+* `--rsl`: Roll seeds using [the random settings script](https://github.com/matthewkirby/plando-random-settings).
+* `-u`, `--github-user`: Specifies the GitHub user or organization name from which to clone the randomizer (or the random settings script if combined with `--rsl`). Defaults to `OoTRandomizer` (or `matthewkirby` if combined with `--rsl`).
+* `-b`, `--branch`: Specifies the git branch of the randomizer (or of the random settings script if combined with `--rsl`) to clone. Defaults to the repository's default branch.
+* `--rev`: Specifies the git revision of the randomizer (or of the random settings script if combined with `--rsl`) to clone. Must be given as an unabbreviated git commit hash. Cannot be combined with `--branch`.
+* `-p`, `--preset`: The name or an alias of the settings preset to use. Defaults to the Default/Beginner preset. Cannot be combined with `--rsl`, `--settings`, or `--suite`.
+* `--settings`: The settings string to use for the randomizer. Cannot be combined with `--preset` or `--rsl`, or `--suite`.
+* `--json-settings`: Specifies a JSON object of settings on the command line that will override the given preset or settings string. Cannot be combined with `--rsl`.
 * `--world-counts`: Each seed will override the value of the `world_count` setting to be equal to its seed ID (plus 1 because seed IDs start at 0). Restricts the `--num-seeds` option to a maximum of 255. Cannot be combined with `--rsl`.
+* `--patch`: Generate `.zpf`/`.zpfz` patch files and include them in the [`statsDir`](#configuration). Cannot be combined with `--rsl` or with the `bench` subcommand.
+
+### `ootrstats` options
+
+* `-n`, `--num-seeds`: Specifies the sample size, i.e. how many seeds to roll. Any existing seeds will be reused. Defaults to 16384.
+* `--retry-failures`: If the randomizer errors, retry instead of recording as a failure. Care should be taken when using this command for statistics since it may skew results, but it can be useful when generating seeds for other purposes. Cannot be combined with the `failures` subcommand.
+* `-w`, `--worker`: Use only the specified worker(s). May be specified multiple times. Cannot be combined with `--exclude-worker`.
+* `-x`, `--exclude-worker`: Don't use the specified worker(s). May be specified multiple times. Cannot be combined with `--worker`.
 
 ## Subcommands
 
@@ -125,7 +130,7 @@ This subcommand requires workers to have access to [`perf`](https://perf.wiki.ke
 
 Results will be displayed on stdout.
 
-If this subcommand is run with the `--raw-data` option, it will output the following data instead of displaying a summary. Each seed's data is printed on a separate line, starting with the character `s` for success or `f` for failure, followed by a space, followed by the number of instructions taken.
+If this subcommand is run with the `--raw-data` option, it will output the following data instead of displaying a summary: Each seed's data is printed on a separate line, starting with the character `s` for success or `f` for failure, followed by a space, followed by the number of instructions taken.
 
 ### `failures`
 
