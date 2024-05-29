@@ -929,12 +929,12 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                     SeedState::Cancelled | SeedState::Success { instructions: None, .. } | SeedState::Failure { instructions: None, .. } => {}
                     SeedState::Success { instructions: Some(instructions), .. } => {
                         crossterm::execute!(stdout,
-                            Print(format_args!("s {instructions}")),
+                            Print(format_args!("s {instructions}\r\n")),
                         ).at_unknown()?;
                     }
                     SeedState::Failure { instructions: Some(instructions), .. } => {
                         crossterm::execute!(stdout,
-                            Print(format_args!("f {instructions}")),
+                            Print(format_args!("f {instructions}\r\n")),
                         ).at_unknown()?;
                     }
                 }
