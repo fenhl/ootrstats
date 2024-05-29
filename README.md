@@ -29,7 +29,7 @@
 
 `ootrstats` requires a configuration file, which should be a [JSON](https://json.org/) object located at `$XDG_CONFIG_DIRS/ootrstats.json` on Unix, or `%APPDATA%\Fenhl\ootrstats\config\config.json` on Windows. It takes the following required entry:
 
-* `workers`: An array of [worker configurations](#workers). You should specify at least one worker so seeds can be rolled.
+* `workers`: An array of [worker configurations](#workers). You should specify at least one worker so seeds can be rolled. While ootrstats tries to make full use of all workers in the list, the order of the list serves as a priority (workers defined earlier in the list are preferred) in tiebreaker situations, such as when rolling fewer seeds than there are workers.
 
 And the following optional entries:
 
@@ -38,7 +38,7 @@ And the following optional entries:
 
 ## Workers
 
-Each worker configuration is a JSON object with the following required entries:
+A worker is a computer that rolls seeds. Each worker configuration is a JSON object with the following required entries:
 
 * `name`: A string which will be displayed on the progress display on the command line, as well as in error messages.
 * `kind`: One of the section headers listed below.
@@ -87,7 +87,9 @@ And the following optional entries:
 
 # Usage
 
-Run the `ootrstats-supervisor` command, followed by any options you would like to change from their defaults, followed by an optional subcommand. If no subcommand is given, the supervisor will simply generate the spoiler/error logs and place them in the [`statsDir`](#configuration).
+On the command line, run the `ootrstats-supervisor` command, followed by any options you would like to change from their defaults, followed by an optional subcommand. If no subcommand is given, the supervisor will simply generate the spoiler/error logs, place them in the [`statsDir`](#configuration), and display the path where they were placed.
+
+On Windows, it is recommended to use PowerShell to run `ootrstats-supervisor`, as the legacy Windows command prompt (`cmd`) may interpret options incorrectly.
 
 The supervisor can be interrupted cleanly using <kbd>C</kbd> or <kbd>D</kbd>. If this is used, the supervisor will wait for seeds currently being rolled to finish before exiting, but will no longer start rolling any new seeds.
 
