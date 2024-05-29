@@ -1,3 +1,5 @@
+import sys
+
 import subprocess
 
 import matplotlib as mpl
@@ -5,14 +7,12 @@ from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 import numpy as np
 
-NUM_SEEDS = 16384
-
 fig, axs = plt.subplots(1, 2, sharey=True, tight_layout=True)
 
 prev_success = []
 prev_failure = []
 for line in subprocess.run(
-    ['cargo', 'run', '--release', '--', f'--num-seeds={NUM_SEEDS}', '--github-user=fenhl', '--preset=mixed', 'bench', '--raw-data'],
+    ['cargo', 'run', '--release', '--', '--github-user=fenhl', *sys.argv[1:], 'bench', '--raw-data'],
     stdout=subprocess.PIPE, encoding='utf-8', check=True,
 ).stdout.splitlines():
     if line.startswith('s'):
@@ -23,7 +23,7 @@ for line in subprocess.run(
 latest_success = []
 latest_failure = []
 for line in subprocess.run(
-    ['cargo', 'run', '--release', '--', f'--num-seeds={NUM_SEEDS}', '--github-user=fenhl', '--branch=riir', '--preset=mixed', 'bench', '--raw-data'],
+    ['cargo', 'run', '--release', '--', '--github-user=fenhl', '--branch=riir', *sys.argv[1:], 'bench', '--raw-data'],
     stdout=subprocess.PIPE, encoding='utf-8', check=True,
 ).stdout.splitlines():
     if line.startswith('s'):
