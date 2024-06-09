@@ -1,9 +1,12 @@
 use {
     std::{
         borrow::Cow,
-        collections::hash_map::{
-            self,
-            HashMap,
+        collections::{
+            BTreeMap,
+            hash_map::{
+                self,
+                HashMap,
+            },
         },
         ffi::OsString,
         io::{
@@ -133,7 +136,7 @@ enum SeedState {
         /// `None` means the seed was read from disk.
         worker: Option<Arc<str>>,
         instructions: Option<u64>,
-        spoiler_log: SpoilerLog,
+        spoiler_log: serde_json::Value,
     },
     Failure {
         /// `None` means the seed was read from disk.
@@ -207,6 +210,10 @@ enum Subcommand {
         #[clap(long)]
         raw_data: bool,
     },
+    /// Categorize spoiler logs using a JSON query.
+    Categorize {
+        query: String,
+    },
     /// Display most common exceptions thrown by the randomizer.
     Failures,
     /// Count chest appearances in Mido's house for the midos.house favicon.
@@ -228,6 +235,8 @@ enum Error {
     #[cfg(unix)] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
     #[error("empty error log")]
     EmptyErrorLog,
+    #[error("failed to parse JSON query")]
+    Jaq,
     #[cfg(windows)]
     #[error("user folder not found")]
     MissingHomeDir,
@@ -1014,6 +1023,38 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                 }
             }
         }
+        Some(Subcommand::Categorize { query }) => {
+            let mut defs = jaq_interpret::ParseCtx::new(Vec::default());
+            defs.insert_natives(jaq_core::core());
+            defs.insert_defs(jaq_std::std());
+            if !defs.errs.is_empty() {
+                return Err(Error::Jaq)
+            }
+            let (filter, errs) = jaq_parse::parse(&query, jaq_parse::main());
+            if !errs.is_empty() {
+                return Err(Error::Jaq)
+            }
+            let filter = defs.compile(filter.unwrap());
+            if !defs.errs.is_empty() {
+                return Err(Error::Jaq)
+            }
+            let inputs = jaq_interpret::RcIter::new(iter::empty());
+            let mut outputs = BTreeMap::<jaq_interpret::Val, usize>::default();
+            for state in seed_states {
+                if let SeedState::Success { spoiler_log, .. } = state {
+                    for value in jaq_interpret::FilterT::run(&filter, (jaq_interpret::Ctx::new([], &inputs), jaq_interpret::Val::from(spoiler_log))) {
+                        *outputs.entry(value.map_err(|_| Error::Jaq)?).or_default() += 1;
+                    }
+                }
+            }
+            let mut outputs = outputs.into_iter().collect_vec();
+            outputs.sort_by(|(_, count1), (_, count2)| count2.cmp(count1));
+            for (output, count) in outputs {
+                crossterm::execute!(stdout,
+                    Print(format_args!("{count}x: {output}\r\n")),
+                ).at_unknown()?;
+            }
+        }
         Some(Subcommand::Failures) => {
             let mut counts = HashMap::<_, HashMap<_, (SeedIdx, usize)>>::default();
             for (seed_idx, state) in seed_states.iter().enumerate() {
@@ -1053,7 +1094,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
             let mut counts = HashMap::<_, usize>::default();
             for state in seed_states {
                 if let SeedState::Success { spoiler_log, .. } = state {
-                    for appearances in spoiler_log.midos_house_chests() {
+                    for appearances in serde_json::from_value::<SpoilerLog>(spoiler_log)?.midos_house_chests() {
                         *counts.entry(appearances).or_default() += 1;
                     }
                 }

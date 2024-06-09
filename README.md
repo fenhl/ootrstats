@@ -133,6 +133,10 @@ Results will be displayed on stdout.
 
 If this subcommand is run with the `--raw-data` option, it will output the following data instead of displaying a summary: Each seed's data is printed on a separate line, starting with the character `s` for success or `f` for failure, followed by a space, followed by the number of instructions taken.
 
+### `categorize`
+
+Runs the given [JQ](https://jqlang.github.io/jq/) filter (a required positional argument) on every spoiler log, and displays how many times each distinct value occurs in the outputs. Failed seeds are ignored. Results will be displayed on stdout.
+
 ### `failures`
 
 Displays the 10 most common exceptions returned by the randomizer, grouped by the location in the code where they were raised. Results will be displayed on stdout.
