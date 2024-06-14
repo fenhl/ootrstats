@@ -108,8 +108,9 @@ The supervisor can be interrupted cleanly using <kbd>C</kbd> or <kbd>D</kbd>. If
 * `-b`, `--branch`: Specifies the git branch of the randomizer (or of the random settings script if combined with `--rsl`) to clone. Defaults to the repository's default branch.
 * `--rev`: Specifies the git revision of the randomizer (or of the random settings script if combined with `--rsl`) to clone. Must be given as an unabbreviated git commit hash. Cannot be combined with `--branch`.
 * `-p`, `--preset`: The name or an alias of the settings preset to use. Defaults to the Default/Beginner preset. Cannot be combined with `--rsl`, `--settings`, or `--suite`.
-* `--settings`: The settings string to use for the randomizer. Cannot be combined with `--preset` or `--rsl`, or `--suite`.
-* `--json-settings`: Specifies a JSON object of settings on the command line that will override the given preset or settings string. Cannot be combined with `--rsl`.
+* `--settings`: The settings string to use for the randomizer. Cannot be combined with `--preset`, `--rsl`, or `--suite`.
+* `--draft`: Simulates a settings draft from the given file. See [`assets/draft`](/assets/draft) for examples. Cannot be combined with `--preset`, `--settings`, or `--rsl`.
+* `--json-settings`: Specifies a JSON object of settings on the command line that will override the given preset, settings string, or draft picks. Cannot be combined with `--rsl`.
 * `--world-counts`: Each seed will override the value of the `world_count` setting to be equal to its seed ID (plus 1 because seed IDs start at 0). Restricts the `--num-seeds` option to a maximum of 255. Cannot be combined with `--rsl`.
 * `--patch`: Generate `.zpf`/`.zpfz` patch files and include them in the [`statsDir`](#configuration). Cannot be combined with `--rsl` or with the `bench` subcommand.
 

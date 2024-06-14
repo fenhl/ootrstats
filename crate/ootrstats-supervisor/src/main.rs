@@ -63,6 +63,7 @@ use {
     lazy_regex::regex_is_match,
     nonempty_collections::NEVec,
     ootr_utils::spoiler::SpoilerLog,
+    proc_macro2 as _, // feature config required for Span::start used in CustomExit impl
     serde::{
         Deserialize,
         Serialize,
@@ -172,6 +173,9 @@ struct Args {
     /// Settings string for the randomizer.
     #[clap(long, conflicts_with("rsl"), conflicts_with("preset"))]
     settings: Option<String>,
+    /// Simulates a settings draft from the given file.
+    #[clap(long, conflicts_with("rsl"), conflicts_with("preset"), conflicts_with("settings"))]
+    draft: Option<PathBuf>,
     /// Specifies a JSON object of settings on the command line that will override the given preset or settings string.
     #[clap(long, conflicts_with("rsl"), default_value = "{}", value_parser = parse_json_object)]
     json_settings: serde_json::Map<String, serde_json::Value>,
@@ -233,6 +237,11 @@ enum Error {
     #[error(transparent)] Utf8(#[from] std::str::Utf8Error),
     #[error(transparent)] Wheel(#[from] wheel::Error),
     #[cfg(unix)] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
+    #[error("error parsing draft spec: {source}")]
+    DraftParse {
+        file: String,
+        source: syn::Error,
+    },
     #[error("empty error log")]
     EmptyErrorLog,
     #[error("failed to parse JSON query")]
@@ -268,6 +277,12 @@ impl wheel::CustomExit for Error {
         }
         eprintln!("\r");
         match self {
+            Self::DraftParse { file: _ /*TODO display the span of code? */, source } => {
+                eprintln!("{cmd_name}: error parsing draft spec: {source}\r");
+                let start = source.span().start();
+                eprintln!("line {}, column {}\r", start.line, start.column);
+                eprintln!("debug info: {debug}\r");
+            }
             Self::Worker(errors) => match errors.into_iter().exactly_one() {
                 Ok((worker, worker::Error::Local(ootrstats::worker::Error::Roll(ootrstats::RollError::PerfSyntax(stderr))))) => {
                     eprintln!("{cmd_name}: roll error in worker {worker}: failed to parse `perf` output\r");
@@ -374,6 +389,9 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                 RandoSettings::Preset(preset)
             } else if let Some(settings) = args.settings {
                 RandoSettings::String(settings)
+            } else if let Some(file) = args.draft {
+                let file = fs::read_to_string(file).await?;
+                RandoSettings::Draft(syn::parse_str(&file).map_err(|source| Error::DraftParse { file, source })?)
             } else {
                 RandoSettings::Default
             },

@@ -158,7 +158,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
     Ok(())
 }
 
-#[rocket::get("/v6")] //TODO ensure this matches the major crate version
+#[rocket::get("/v7")] //TODO ensure this matches the major crate version
 fn index(correct_password: &State<String>, ws: WebSocket) -> rocket_ws::Channel<'static> {
     let correct_password = (*correct_password).clone();
     ws.channel(move |stream| Box::pin(async move {

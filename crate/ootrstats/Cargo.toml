@@ -13,12 +13,13 @@ collect-mac = "0.1.0"
 directories = "5.0.1"
 either = "1.10.0"
 futures = "0.3.30"
-git2 = "0.18.2"
+git2 = "0.19"
 if_chain = "1.0.2"
 itertools = "0.13"
 lazy-regex = "3.1.0"
 rand = "0.8.5"
 serde_json = "1.0.114"
+syn = { version = "2.0.66", default-features = false, features = ["parsing"] }
 thiserror = "1.0.57"
 tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }
 videocore-gencmd = { version = "0.1.0", optional = true }

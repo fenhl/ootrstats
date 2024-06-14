@@ -32,6 +32,7 @@ use {
 #[cfg(unix)] use std::env;
 #[cfg(windows)] use directories::UserDirs;
 
+mod draft;
 pub mod websocket;
 pub mod worker;
 
@@ -68,6 +69,7 @@ pub enum RandoSettings {
     Default,
     Preset(String),
     String(String),
+    Draft(draft::Spec),
 }
 
 impl RandoSettings {
@@ -76,6 +78,7 @@ impl RandoSettings {
             Self::Default => Path::new("default").into(),
             Self::Preset(preset) => Path::new("preset").join(preset).into(),
             Self::String(settings) => Path::new("settings").join(settings).into(),
+            Self::Draft(_) => Path::new("draft").into(), //TODO add a hash of the draft spec as a subdirectory?
         }
     }
 }
@@ -98,6 +101,7 @@ pub struct RollOutput {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RollError {
+    #[error(transparent)] Draft(#[from] draft::ResolveError),
     #[error(transparent)] Json(#[from] serde_json::Error),
     #[error(transparent)] ParseInt(#[from] std::num::ParseIntError),
     #[error(transparent)] Wheel(#[from] wheel::Error),
@@ -203,9 +207,11 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
             cmd.arg("--settings_string");
             cmd.arg(settings);
         }
+        RandoSettings::Draft(spec) => resolved_settings.extend(spec.complete_randomly()?),
     }
     cmd.arg("--settings=-");
     cmd.stdin(Stdio::piped());
+    cmd.stdout(Stdio::null());
     cmd.stderr(Stdio::piped());
     cmd.current_dir(repo_path);
     let mut child = cmd.spawn().at_command(cmd_name.clone())?;
