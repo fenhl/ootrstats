@@ -288,7 +288,11 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 recheck_ready_at = None;
             },
             Some(res) = rando_tasks.next() => {
-                let () = res??;
+                match res {
+                    Ok(res) => { let () = res?; }
+                    Err(e) if e.is_cancelled() => {} // a seed task being cancelled is expected with --race
+                    Err(e) => return Err(e.into()),
+                }
                 let cores = if first_seed_rolled {
                     NonZeroU8::MIN
                 } else {
