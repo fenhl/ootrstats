@@ -630,7 +630,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                     }
                                     None
                                 }
-                                ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log, patch } => if let SeedState::Rolling { ref mut workers } = seed_states[usize::from(seed_idx)] {
+                                ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log, patch } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
                                     let seed_dir = stats_dir.join(seed_idx.to_string());
                                     fs::create_dir_all(&seed_dir).await?;
                                     let stats_spoiler_log_path = seed_dir.join("spoiler.json");
@@ -690,6 +690,9 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                         instructions: instructions.as_ref().ok().copied(),
                                         worker: Some(name.clone()),
                                     })?).await?;
+                                    let mut new_workers = Vec::from(worker_names.clone());
+                                    let pos = new_workers.iter().position(|worker| *worker == name).expect("got success from a worker that wasn't rolling that seed");
+                                    new_workers.swap_remove(pos);
                                     if_chain! {
                                         if !cancelled;
                                         if is_bench;
@@ -699,16 +702,21 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                             log!("worker {name} retrying seed {seed_idx} due to missing instruction count, stderr:");
                                             log!("{}", String::from_utf8_lossy(stderr));
                                             fs::remove_dir_all(seed_dir).await?;
-                                            let mut new_workers = Vec::from(workers.clone());
-                                            let pos = new_workers.iter().position(|worker| *worker == name).expect("got success from a worker that wasn't rolling that seed");
-                                            new_workers.swap_remove(pos);
                                             if let Some(new_workers) = NEVec::from_vec(new_workers) {
-                                                *workers = new_workers;
+                                                *worker_names = new_workers;
                                             } else {
                                                 seed_states[usize::from(seed_idx)] = SeedState::Pending;
                                             }
                                             Some(seed_idx)
                                         } else {
+                                            // cancel remaining raced copies of this seed
+                                            for name in new_workers {
+                                                if let Some(worker) = workers.iter().find(|worker| worker.name == name) {
+                                                    let _ = worker.supervisor_tx.send(ootrstats::worker::SupervisorMessage::Cancel(seed_idx)).await;
+                                                } else {
+                                                    return Err(Error::WorkerNotFound)
+                                                }
+                                            }
                                             seed_states[usize::from(seed_idx)] = SeedState::Success {
                                                 worker: Some(name),
                                                 spoiler_log: match spoiler_log {
@@ -724,15 +732,15 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                     // seed was already rolled but this worker's instance of this seed didn't get cancelled in time so we just ignore it
                                     None
                                 },
-                                ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => if let SeedState::Rolling { ref mut workers } = seed_states[usize::from(seed_idx)] {
+                                ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
                                     let seed_dir = stats_dir.join(seed_idx.to_string());
+                                    let mut new_workers = Vec::from(worker_names.clone());
+                                    let pos = new_workers.iter().position(|worker| *worker == name).expect("got failure from a worker that wasn't rolling that seed");
+                                    new_workers.swap_remove(pos);
                                     if args.retry_failures {
                                         fs::remove_dir_all(seed_dir).await.missing_ok()?;
-                                        let mut new_workers = Vec::from(workers.clone());
-                                        let pos = new_workers.iter().position(|worker| *worker == name).expect("got success from a worker that wasn't rolling that seed");
-                                        new_workers.swap_remove(pos);
                                         if let Some(new_workers) = NEVec::from_vec(new_workers) {
-                                            *workers = new_workers;
+                                            *worker_names = new_workers;
                                         } else {
                                             seed_states[usize::from(seed_idx)] = SeedState::Pending;
                                         }
@@ -754,16 +762,21 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                                 log!("worker {name} retrying seed {seed_idx} due to missing instruction count, stderr:");
                                                 log!("{}", String::from_utf8_lossy(stderr));
                                                 fs::remove_dir_all(seed_dir).await?;
-                                                let mut new_workers = Vec::from(workers.clone());
-                                                let pos = new_workers.iter().position(|worker| *worker == name).expect("got success from a worker that wasn't rolling that seed");
-                                                new_workers.swap_remove(pos);
                                                 if let Some(new_workers) = NEVec::from_vec(new_workers) {
-                                                    *workers = new_workers;
+                                                    *worker_names = new_workers;
                                                 } else {
                                                     seed_states[usize::from(seed_idx)] = SeedState::Pending;
                                                 }
                                                 Some(seed_idx)
                                             } else {
+                                                // cancel remaining raced copies of this seed
+                                                for name in new_workers {
+                                                    if let Some(worker) = workers.iter().find(|worker| worker.name == name) {
+                                                        let _ = worker.supervisor_tx.send(ootrstats::worker::SupervisorMessage::Cancel(seed_idx)).await;
+                                                    } else {
+                                                        return Err(Error::WorkerNotFound)
+                                                    }
+                                                }
                                                 seed_states[usize::from(seed_idx)] = SeedState::Failure {
                                                     worker: Some(name),
                                                     instructions: instructions.as_ref().ok().copied(),
