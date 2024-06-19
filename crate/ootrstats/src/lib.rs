@@ -214,6 +214,7 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
     cmd.stdout(Stdio::null());
     cmd.stderr(Stdio::piped());
     cmd.current_dir(repo_path);
+    cmd.kill_on_drop(true);
     let mut child = cmd.spawn().at_command(cmd_name.clone())?;
     child.stdin.as_mut().expect("configured").write_all(&serde_json::to_vec(&resolved_settings)?).await.at_command(cmd_name.clone())?;
     let output = child.wait_with_output().await.at_command(cmd_name.clone())?;
