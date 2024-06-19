@@ -1,5 +1,6 @@
 use {
     std::{
+        collections::HashMap,
         env,
         num::{
             NonZeroU8,
@@ -69,6 +70,7 @@ pub enum Message {
 #[derive(Debug, Protocol)]
 pub enum SupervisorMessage {
     Roll(SeedIdx),
+    Cancel(SeedIdx),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -221,41 +223,49 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
     }
     tx.send(Message::Ready(1)).await?; // on first roll, the randomizer decompresses the base rom, and the RSL script downloads and extracts the randomizer, neither of which are reentrant
     let mut rando_tasks = FuturesUnordered::default();
+    let mut abort_handles = HashMap::<_, Vec<_>>::default();
     let mut recheck_ready_at = None;
     let mut waiting_cores = 0;
-    let handle_msg = |msg| match msg {
-        SupervisorMessage::Roll(seed_idx) => {
-            let run_future = match setup {
-                RandoSetup::Normal { ref settings, ref json_settings, world_counts, .. } => {
-                    let base_rom_path = base_rom_path.clone();
-                    let repo_path = repo_path.clone();
-                    let settings = settings.clone();
-                    let json_settings = json_settings.clone();
-                    Either::Left(async move { crate::run_rando(&base_rom_path, &repo_path, &settings, &json_settings, world_counts, seed_idx, output_mode).await })
-                }
-                RandoSetup::Rsl { .. } => {
-                    let repo_path = repo_path.clone();
-                    Either::Right(async move { crate::run_rsl(&repo_path, output_mode == OutputMode::Bench).await })
-                }
-            };
-            let tx = tx.clone();
-            tokio::spawn(async move {
-                tx.send(match run_future.await? {
-                    RollOutput { instructions, log: Ok(spoiler_log_path), patch } => Message::Success {
-                        spoiler_log: Either::Left(spoiler_log_path),
-                        patch: patch.map(Either::Left),
-                        seed_idx, instructions,
-                    },
-                    RollOutput { instructions, log: Err(error_log), patch: _ } => Message::Failure {
-                        seed_idx, instructions, error_log,
-                    },
-                }).await?;
-                Ok::<_, Error>(())
-            })
-        }
+    let handle_seed = |seed_idx| {
+        let run_future = match setup {
+            RandoSetup::Normal { ref settings, ref json_settings, world_counts, .. } => {
+                let base_rom_path = base_rom_path.clone();
+                let repo_path = repo_path.clone();
+                let settings = settings.clone();
+                let json_settings = json_settings.clone();
+                Either::Left(async move { crate::run_rando(&base_rom_path, &repo_path, &settings, &json_settings, world_counts, seed_idx, output_mode).await })
+            }
+            RandoSetup::Rsl { .. } => {
+                let repo_path = repo_path.clone();
+                Either::Right(async move { crate::run_rsl(&repo_path, output_mode == OutputMode::Bench).await })
+            }
+        };
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            tx.send(match run_future.await? {
+                RollOutput { instructions, log: Ok(spoiler_log_path), patch } => Message::Success {
+                    spoiler_log: Either::Left(spoiler_log_path),
+                    patch: patch.map(Either::Left),
+                    seed_idx, instructions,
+                },
+                RollOutput { instructions, log: Err(error_log), patch: _ } => Message::Failure {
+                    seed_idx, instructions, error_log,
+                },
+            }).await?;
+            Ok::<_, Error>(())
+        })
     };
     for msg in msg_buf {
-        rando_tasks.push(handle_msg(msg));
+        match msg {
+            SupervisorMessage::Roll(seed_idx) => {
+                let rando_task = handle_seed(seed_idx);
+                abort_handles.entry(seed_idx).or_default().push(rando_task.abort_handle());
+                rando_tasks.push(rando_task);
+            }
+            SupervisorMessage::Cancel(seed_idx) => for abort_handle in abort_handles.get(&seed_idx).into_iter().flatten() {
+                abort_handle.abort();
+            },
+        }
     }
     loop {
         let rx_is_closed = rx.is_closed();
@@ -302,7 +312,16 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 first_seed_rolled = true;
             }
             msg = rx.recv(), if !rx_is_closed => if let Some(msg) = msg {
-                rando_tasks.push(handle_msg(msg));
+                match msg {
+                    SupervisorMessage::Roll(seed_idx) => {
+                        let rando_task = handle_seed(seed_idx);
+                        abort_handles.entry(seed_idx).or_default().push(rando_task.abort_handle());
+                        rando_tasks.push(rando_task);
+                    }
+                    SupervisorMessage::Cancel(seed_idx) => for abort_handle in abort_handles.get(&seed_idx).into_iter().flatten() {
+                        abort_handle.abort();
+                    },
+                }
             } else {
                 // stop awaiting recheck_ready
             },

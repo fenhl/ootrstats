@@ -464,17 +464,28 @@ async fn cli(mut args: Args) -> Result<(), Error> {
     let mut cancelled = false;
 
     macro_rules! cancel {
-        () => {{
+        ($workers:expr) => {{
             // finish rolling seeds that are already in progress but don't start any more
             cancelled = true;
             args.retry_failures = false;
             readers.clear();
             completed_readers = available_parallelism;
             reader_rx = mpsc::channel(1).1;
-            for seed_state in &mut seed_states {
+            for (seed_idx, seed_state) in seed_states.iter_mut().enumerate() {
                 match seed_state {
                     SeedState::Unchecked | SeedState::Pending => *seed_state = SeedState::Cancelled,
-                    SeedState::Rolling { .. } | SeedState::Cancelled | SeedState::Success { .. } | SeedState::Failure { .. } => {}
+                    SeedState::Rolling { workers: worker_names } => if args.race {
+                        // --race means the user is okay with randomizer instances being cancelled, so we do that here to speed up the exit
+                        for name in worker_names.iter() {
+                            if let Some(worker) = $workers.iter().find(|worker| worker.name == *name) {
+                                let _ = worker.supervisor_tx.send(ootrstats::worker::SupervisorMessage::Cancel(seed_idx.try_into()?)).await;
+                            } else {
+                                return Err(Error::WorkerNotFound)
+                            }
+                        }
+                        *seed_state = SeedState::Cancelled;
+                    },
+                    SeedState::Cancelled | SeedState::Success { .. } | SeedState::Failure { .. } => {}
                 }
             }
         }};
@@ -571,7 +582,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                         }
                                     }
                                     if should_cancel {
-                                        cancel!();
+                                        cancel!(workers);
                                     }
                                 }
                             }
@@ -596,7 +607,8 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                         if let Some(seed_idx) = seed_states.iter().position(|state| matches!(state, SeedState::Pending)) {
                                             if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
                                                 worker.error.get_or_insert(worker::Error::Receive { message });
-                                                cancel!();
+                                                cancel!(workers);
+                                                break
                                             }
                                         } else if args.race {
                                             let seed_idx = seed_states.iter()
@@ -606,7 +618,8 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                             if let Some((seed_idx, _)) = seed_idx {
                                                 if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
                                                     worker.error.get_or_insert(worker::Error::Receive { message });
-                                                    cancel!();
+                                                    cancel!(workers);
+                                                    break
                                                 }
                                             } else {
                                                 break
@@ -803,7 +816,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
             },
             //TODO use signal-hook-tokio crate to handle interrupts on Unix?
             Some(res) = cli_rx.recv() => if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), kind: KeyEventKind::Press, .. }) = res.at_unknown()? {
-                cancel!();
+                cancel!(workers.as_deref().unwrap_or_default());
             },
         }
         if let Ok(ref workers) = workers {
