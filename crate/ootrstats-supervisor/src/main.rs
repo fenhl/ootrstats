@@ -839,7 +839,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                     if_chain! {
                         if let Ok((width, _)) = terminal::size();
                         let mut prefix_end = usize::from(width) - worker.name.len() - 13;
-                        if prefix_end < e.len();
+                        if prefix_end + 3 < e.len();
                         then {
                             while !e.is_char_boundary(prefix_end) {
                                 prefix_end -= 1;
@@ -980,7 +980,20 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                         SeedState::Success { .. } | SeedState::Failure { .. } => rolled += 1,
                     }
                 }
-                format!("checking for existing seeds: {rolled} rolled, {started} running, {pending} pending, {unchecked} still being checked")
+                let summary = format!("checking for existing seeds: {rolled} rolled, {started} running, {pending} pending, {unchecked} still being checked");
+                if_chain! {
+                    if let Ok((width, _)) = terminal::size();
+                    let mut prefix_end = usize::from(width) - 4;
+                    if prefix_end + 3 < summary.len();
+                    then {
+                        while !summary.is_char_boundary(prefix_end) {
+                            prefix_end -= 1;
+                        }
+                        format!("{}[…]", &summary[..prefix_end])
+                    } else {
+                        summary
+                    }
+                }
             }),
             Clear(ClearType::UntilNewLine),
         ).at_unknown()?;
