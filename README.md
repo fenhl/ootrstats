@@ -121,6 +121,7 @@ The supervisor can be interrupted cleanly using <kbd>C</kbd> or <kbd>D</kbd>. If
 * `--retry-failures`: If the randomizer errors, retry instead of recording as a failure. Care should be taken when using this option for statistics since it may skew results, but it can be useful when generating seeds for other purposes. Cannot be combined with the `failures` subcommand.
 * `-w`, `--worker`: Use only the specified worker(s). May be specified multiple times. Cannot be combined with `--exclude-worker`.
 * `-x`, `--exclude-worker`: Don't use the specified worker(s). May be specified multiple times. Cannot be combined with `--worker`.
+* `--json-messages`: Produce status updates on stderr and command results on stdout in [JSON Lines](https://jsonlines.org/) format instead of the normal human-readable status display and command output.
 
 ## Subcommands
 

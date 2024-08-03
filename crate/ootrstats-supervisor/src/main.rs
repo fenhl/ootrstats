@@ -1,6 +1,5 @@
 use {
     std::{
-        borrow::Cow,
         collections::{
             BTreeMap,
             hash_map::{
@@ -19,19 +18,11 @@ use {
         num::NonZeroUsize,
         path::PathBuf,
         sync::Arc,
-        time::Duration,
     },
     bytes::Bytes,
-    chrono::{
-        TimeDelta,
-        prelude::*,
-    },
+    chrono::prelude::*,
     crossterm::{
-        cursor::{
-            MoveDown,
-            MoveToColumn,
-            MoveUp,
-        },
+        cursor::MoveDown,
         event::{
             KeyCode,
             KeyEvent,
@@ -39,9 +30,6 @@ use {
         },
         style::Print,
         terminal::{
-            self,
-            Clear,
-            ClearType,
             disable_raw_mode,
             enable_raw_mode,
         },
@@ -97,12 +85,16 @@ use {
         WSL,
         gitdir,
     },
-    crate::config::Config,
+    crate::{
+        config::Config,
+        msg::Message,
+    },
 };
 #[cfg(windows)] use directories::ProjectDirs;
 #[cfg(unix)] use xdg::BaseDirectories;
 
 mod config;
+mod msg;
 mod worker;
 
 enum ReaderMessage {
@@ -126,6 +118,7 @@ struct Metadata {
     worker: Option<Arc<str>>,
 }
 
+#[derive(Serialize)]
 enum SeedState {
     Unchecked,
     Pending,
@@ -203,6 +196,9 @@ struct Args {
     /// Don't roll seeds on the given worker(s).
     #[clap(short = 'x', long = "exclude-worker", conflicts_with("include_workers"))]
     exclude_workers: Vec<Arc<str>>,
+    /// Print status updates as machine-readable JSON.
+    #[clap(long)]
+    json_messages: bool,
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
 }
@@ -325,9 +321,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
     });
     let mut stdout = stdout();
     let mut stderr = stderr();
-    crossterm::execute!(stderr,
-        Print("preparing..."),
-    ).at_unknown()?;
+    Message::Preparing.print(args.json_messages, &mut stderr)?;
     let mut config = Config::load().await?;
     let mut log_file = if config.log {
         Some(File::create("ootrstats.log").await?)
@@ -832,171 +826,12 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                 cancel!(workers.as_deref().unwrap_or_default());
             },
         }
-        if let Ok(ref workers) = workers {
-            for worker in workers {
-                if let Some(ref e) = worker.error {
-                    let e = e.to_string();
-                    if_chain! {
-                        if let Ok((width, _)) = terminal::size();
-                        let mut prefix_end = usize::from(width) - worker.name.len() - 13;
-                        if prefix_end + 3 < e.len();
-                        then {
-                            while !e.is_char_boundary(prefix_end) {
-                                prefix_end -= 1;
-                            }
-                            crossterm::execute!(stderr,
-                                Print(format_args!("\r\n{}: error: {}[…]", worker.name, &e[..prefix_end])),
-                                Clear(ClearType::UntilNewLine),
-                            ).at_unknown()?;
-                        } else {
-                            crossterm::execute!(stderr,
-                                Print(format_args!("\r\n{}: error: {e}", worker.name)),
-                                Clear(ClearType::UntilNewLine),
-                            ).at_unknown()?;
-                        }
-                    }
-                } else {
-                    let mut running = 0u16;
-                    let mut completed = 0u16;
-                    let mut total_completed = 0u16;
-                    for state in &seed_states {
-                        match state {
-                            SeedState::Success { worker: Some(name), .. } | SeedState::Failure { worker: Some(name), .. } => {
-                                total_completed += 1;
-                                if *name == worker.name { completed += 1 }
-                            }
-                            SeedState::Rolling { workers } => running += u16::try_from(workers.iter().into_iter().filter(|name| **name == worker.name).count())?,
-                            | SeedState::Unchecked
-                            | SeedState::Pending
-                            | SeedState::Success { worker: None, .. }
-                            | SeedState::Failure { worker: None, .. }
-                            | SeedState::Cancelled
-                                => {}
-                        }
-                    }
-                    let state = if worker.stopped {
-                        Cow::Borrowed("done")
-                    } else if let Some(ref msg) = worker.msg {
-                        if running > 0 {
-                            Cow::Owned(format!("{running} running, {msg}"))
-                        } else {
-                            Cow::Borrowed(&**msg)
-                        }
-                    } else {
-                        Cow::Owned(format!("{running} running"))
-                    };
-                    if total_completed > 0 {
-                        crossterm::execute!(stderr,
-                            Print(format_args!(
-                                "\r\n{}: {completed} rolled ({}%), {state}",
-                                worker.name,
-                                100 * u32::from(completed) / u32::from(total_completed),
-                            )),
-                            Clear(ClearType::UntilNewLine),
-                        ).at_unknown()?;
-                    } else {
-                        crossterm::execute!(stderr,
-                            Print(format_args!(
-                                "\r\n{}: 0 rolled, {state}",
-                                worker.name,
-                            )),
-                            Clear(ClearType::UntilNewLine),
-                        ).at_unknown()?;
-                    }
-                }
-            }
-            crossterm::execute!(stderr,
-                MoveUp(workers.len() as u16),
-            ).at_unknown()?;
-        }
-        crossterm::execute!(stderr,
-            MoveToColumn(0),
-            Print(if completed_readers == available_parallelism {
-                // list of pending seeds fully initialized
-                let mut num_successes = 0u16;
-                let mut num_failures = 0u16;
-                let mut started = 0u16;
-                let mut total = 0u16;
-                let mut completed = 0u16;
-                let mut skipped = 0u16;
-                for state in &seed_states {
-                    match state {
-                        SeedState::Unchecked => unreachable!(),
-                        SeedState::Pending => total += 1,
-                        SeedState::Rolling { .. } => {
-                            total += 1;
-                            started += 1;
-                        }
-                        SeedState::Cancelled => {}
-                        SeedState::Success { worker, .. } => {
-                            total += 1;
-                            started += 1;
-                            num_successes += 1;
-                            if worker.is_some() { completed += 1 } else { skipped += 1 }
-                        }
-                        SeedState::Failure { worker, .. } => {
-                            total += 1;
-                            started += 1;
-                            num_failures += 1;
-                            if worker.is_some() { completed += 1 } else { skipped += 1 }
-                        }
-                    }
-                }
-                let rolled = num_successes + num_failures;
-                format!(
-                    "{started}/{total} seeds started, {rolled} rolled{}, ETA {}",
-                    if args.retry_failures {
-                        String::default()
-                    } else {
-                        format!(
-                            ", {num_failures} failure{} ({}%)",
-                            if num_failures == 1 { "" } else { "s" },
-                            if num_successes > 0 || num_failures > 0 { 100 * u32::from(num_failures) / u32::from(num_successes + num_failures) } else { 100 },
-                        )
-                    },
-                    if_chain! {
-                        if completed > 0;
-                        let ratio = (total - skipped) as f64 / completed as f64;
-                        if let Ok(estimated_duration) = Duration::try_from_secs_f64(start.elapsed().as_secs_f64() * ratio);
-                        if let Ok(estimated_duration) = TimeDelta::from_std(estimated_duration);
-                        then {
-                            (start_local + estimated_duration).format("%Y-%m-%d %H:%M:%S").to_string()
-                        } else {
-                            format!("unknown")
-                        }
-                    },
-                )
-            } else {
-                let mut rolled = 0u16;
-                let mut started = 0u16;
-                let mut pending = 0u16;
-                let mut unchecked = 0u16;
-                for state in &seed_states {
-                    match state {
-                        SeedState::Unchecked => unchecked += 1,
-                        SeedState::Pending => pending += 1,
-                        SeedState::Rolling { .. } => started += 1,
-                        SeedState::Cancelled => {}
-                        SeedState::Success { .. } | SeedState::Failure { .. } => rolled += 1,
-                    }
-                }
-                let summary = format!("checking for existing seeds: {rolled} rolled, {started} running, {pending} pending, {unchecked} still being checked");
-                if_chain! {
-                    if let Ok((width, _)) = terminal::size();
-                    let mut prefix_end = usize::from(width) - 4;
-                    if prefix_end + 3 < summary.len();
-                    then {
-                        while !summary.is_char_boundary(prefix_end) {
-                            prefix_end -= 1;
-                        }
-                        format!("{}[…]", &summary[..prefix_end])
-                    } else {
-                        summary
-                    }
-                }
-            }),
-            Clear(ClearType::UntilNewLine),
-        ).at_unknown()?;
+        Message::Status {
+            retry_failures: args.retry_failures,
+            seed_states: &seed_states,
+            workers: workers.as_deref().ok(),
+            available_parallelism, completed_readers, start, start_local,
+        }.print(args.json_messages, &mut stderr)?;
         if completed_readers == available_parallelism && seed_states.iter().all(|state| match state {
             SeedState::Cancelled | SeedState::Success { .. } | SeedState::Failure { .. } => true,
             SeedState::Unchecked | SeedState::Pending | SeedState::Rolling { .. } => false,
@@ -1013,18 +848,18 @@ async fn cli(mut args: Args) -> Result<(), Error> {
         }
     }
     drop(cli_rx);
-    if let Ok(ref workers) = workers {
+    if !args.json_messages {
+        if let Ok(ref workers) = workers {
+            crossterm::execute!(stderr,
+                MoveDown(workers.len() as u16),
+            ).at_unknown()?;
+        }
         crossterm::execute!(stderr,
-            MoveDown(workers.len() as u16),
+            Print("\r\n"),
         ).at_unknown()?;
     }
-    crossterm::execute!(stderr,
-        Print("\r\n"),
-    ).at_unknown()?;
     match args.subcommand {
-        None => crossterm::execute!(stderr,
-            Print(format_args!("stats saved to {}\r\n", stats_dir.display())),
-        ).at_unknown()?,
+        None => Message::Done { stats_dir }.print(args.json_messages, &mut stderr)?,
         Some(Subcommand::Bench { raw_data: false }) => {
             let mut num_successes = 0u16;
             let mut num_failures = 0u16;
@@ -1045,21 +880,14 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                 }
             }
             if num_successes == 0 {
-                crossterm::execute!(stdout,
-                    Print("No successful seeds, so average instruction count is infinite\r\n"),
-                ).at_unknown()?;
+                Message::InstructionsNoSuccesses.print(args.json_messages, &mut stdout)?;
             } else {
                 let success_rate = num_successes as f64 / (num_successes as f64 + num_failures as f64);
                 let average_instructions_success = instructions_success / u64::try_from(num_successes).unwrap();
                 let average_instructions_failure = instructions_failure.checked_div(u64::try_from(num_failures).unwrap()).unwrap_or_default();
                 let average_failure_count = (1.0 - success_rate) / success_rate; // mean of 0-support geometric distribution
                 let average_instructions = average_failure_count * average_instructions_failure as f64 + average_instructions_success as f64;
-                crossterm::execute!(stdout,
-                    Print(format_args!("success rate: {num_successes}/{} ({:.02}%)\r\n", num_successes + num_failures, success_rate * 100.0)),
-                    Print(format_args!("average instructions (success): {average_instructions_success} ({average_instructions_success:.3e})\r\n")),
-                    Print(format_args!("average instructions (failure): {}\r\n", if num_failures == 0 { format!("N/A") } else { format!("{average_instructions_failure} ({average_instructions_failure:.3e})") })),
-                    Print(format_args!("average total instructions until success: {average_instructions} ({average_instructions:.3e})\r\n")),
-                ).at_unknown()?;
+                Message::Instructions { num_successes, num_failures, success_rate, average_instructions_success, average_instructions_failure, average_failure_count, average_instructions }.print(args.json_messages, &mut stdout)?;
             }
         }
         Some(Subcommand::Bench { raw_data: true }) => {
@@ -1107,9 +935,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
             let mut outputs = outputs.into_iter().collect_vec();
             outputs.sort_by(|(_, count1), (_, count2)| count2.cmp(count1));
             for (output, count) in outputs {
-                crossterm::execute!(stdout,
-                    Print(format_args!("{count}x: {output}\r\n")),
-                ).at_unknown()?;
+                Message::Category { output: output.into(), count }.print(args.json_messages, &mut stdout)?;
             }
         }
         Some(Subcommand::Failures) => {
@@ -1127,24 +953,13 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                     }
                 }
             }
-            crossterm::execute!(stdout,
-                Print(format_args!("Output directory: {}\r\n", stats_dir.display())),
-                Print("Top failure reasons by last line:\r\n"),
-            ).at_unknown()?;
+            Message::FailuresHeader { stats_dir }.print(args.json_messages, &mut stdout)?;
             for msgs in counts.into_values().sorted_unstable_by_key(|msgs| -(msgs.values().map(|&(_, count)| count).sum::<usize>() as isize)).take(10) {
                 let count = msgs.values().map(|&(_, count)| count).sum::<usize>();
                 let mut msgs = msgs.into_iter().collect_vec();
                 msgs.sort_unstable_by_key(|&(_, (_, count))| count);
                 let (top_msg, (seed_idx, top_count)) = msgs.pop().expect("no error messages");
-                if msgs.is_empty() {
-                    crossterm::execute!(stdout,
-                        Print(format_args!("{count}x: {top_msg} (e.g. seed {seed_idx})\r\n")),
-                    ).at_unknown()?;
-                } else {
-                    crossterm::execute!(stdout,
-                        Print(format_args!("{count}x: {top_msg} ({top_count}x, e.g. seed {seed_idx}, and {} other variants)\r\n", msgs.len())),
-                    ).at_unknown()?;
-                }
+                Message::Failure { count, top_msg, top_count, seed_idx, msgs }.print(args.json_messages, &mut stdout)?;
             }
         }
         Some(Subcommand::MidosHouse { out_path }) => {
@@ -1176,7 +991,9 @@ async fn cli(mut args: Args) -> Result<(), Error> {
 
 #[wheel::main(custom_exit)]
 async fn main(args: Args) -> Result<(), Error> {
-    enable_raw_mode().at_unknown()?;
+    if !args.json_messages {
+        enable_raw_mode().at_unknown()?;
+    }
     let res = if args.suite {
         cli(args.clone())
             .and_then(|()| cli(Args { preset: Some(format!("tournament")), ..args.clone() }))

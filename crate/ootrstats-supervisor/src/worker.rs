@@ -24,7 +24,11 @@ use {
     if_chain::if_chain,
     nonempty_collections::nev,
     semver::Version,
-    serde::Deserialize,
+    serde::{
+        Deserialize,
+        Serialize,
+    },
+    serde_with::SerializeDisplay,
     tokio::{
         select,
         sync::mpsc,
@@ -84,7 +88,7 @@ pub(crate) enum Kind {
     },
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, SerializeDisplay)]
 pub(crate) enum Error {
     #[error(transparent)] Elapsed(#[from] tokio::time::error::Elapsed),
     #[error(transparent)] Local(#[from] ootrstats::worker::Error),
@@ -197,11 +201,13 @@ impl Kind {
     }
 }
 
+#[derive(Serialize)]
 pub(crate) struct State {
     pub(crate) name: Arc<str>,
     pub(crate) msg: Option<String>,
     pub(crate) error: Option<Error>,
     pub(crate) ready: u8,
+    #[serde(skip)]
     pub(crate) supervisor_tx: mpsc::Sender<SupervisorMessage>,
     pub(crate) stopped: bool,
 }

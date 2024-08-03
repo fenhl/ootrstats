@@ -11,7 +11,7 @@ videocore-gencmd = ["ootrstats/videocore-gencmd"]
 
 [dependencies]
 async-proto = { version = "0.22", features = ["tokio-tungstenite"] }
-bytes = "1.5.0"
+bytes = { version = "1.5.0", features = ["serde"] }
 chrono = { version = "0.4.34", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.5.1", features = ["derive"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
@@ -25,13 +25,14 @@ jaq-interpret = "1.4.0"
 jaq-parse = "1.0.2"
 jaq-std = "1.4.0"
 lazy-regex = "3.1.0"
-nonempty-collections = "0.2.5"
+nonempty-collections = { version = "0.2.5", features = ["serde"] }
 ootr-utils = { git = "https://github.com/midoshouse/rust-ootr-utils", branch = "main" }
 ootrstats = { path = "../ootrstats" }
 proc-macro2 = { version = "1.0.85", default-features = false, features = ["span-locations"] }
 semver = "1.0.22"
 serde = { version = "1.0.197", features = ["derive", "rc"] }
 serde_json = { package = "serde_json_path_to_error", version = "0.1" }
+serde_with = "3.9.0"
 syn = { version = "2.0.66", default-features = false, features = ["parsing"] }
 thiserror = "1.0.57"
 tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }
