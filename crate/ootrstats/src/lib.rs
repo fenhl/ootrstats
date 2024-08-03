@@ -31,6 +31,7 @@ use {
 };
 #[cfg(unix)] use std::env;
 #[cfg(windows)] use directories::UserDirs;
+#[cfg(target_os = "macos")] use xdg::BaseDirectories;
 
 mod draft;
 pub mod websocket;
@@ -105,6 +106,7 @@ pub enum RollError {
     #[error(transparent)] Json(#[from] serde_json::Error),
     #[error(transparent)] ParseInt(#[from] std::num::ParseIntError),
     #[error(transparent)] Wheel(#[from] wheel::Error),
+    #[cfg(target_os = "macos")] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
     #[cfg(windows)]
     #[error("user folder not found")]
     MissingHomeDir,
@@ -140,7 +142,7 @@ pub async fn gitdir() -> wheel::Result<Cow<'static, Path>> {
     })
 }
 
-fn python() -> Result<PathBuf, RollError> {
+async fn python() -> Result<PathBuf, RollError> {
     Ok({
         #[cfg(windows)] { UserDirs::new().ok_or(RollError::MissingHomeDir)?.home_dir().join("scoop").join("apps").join("python").join("current").join("python.exe") }
         #[cfg(target_os = "linux")] {
@@ -151,8 +153,17 @@ fn python() -> Result<PathBuf, RollError> {
                 PathBuf::from("python3")
             }
         }
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))] { PathBuf::from("/opt/homebrew/bin/python3") }
-        #[cfg(all(target_os = "macos", target_arch = "x86_64"))] { PathBuf::from("/usr/local/bin/python3") }
+        #[cfg(target_os = "macos")] {
+            let venv = BaseDirectories::new()?.place_data_file("ootrstats/venv").at_unknown()?;
+            if !fs::exists(&venv).await? {
+                let system_python = {
+                    #[cfg(target_arch = "aarch64")] { PathBuf::from("/opt/homebrew/bin/python3") }
+                    #[cfg(target_arch = "x86_64")] { PathBuf::from("/usr/local/bin/python3") }
+                };
+                Command::new(system_python).arg("-m").arg("venv").arg(&venv).check("python -m venv").await?;
+            }
+            venv.join("bin").join("python")
+        }
     })
 }
 
@@ -168,7 +179,7 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
     if world_counts {
         resolved_settings.insert(Cow::Borrowed("world_count"), json!(seed_idx + 1));
     }
-    let python = python()?;
+    let python = python().await?;
     #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(unused_mut))] let mut cmd_name = python.display().to_string();
     let mut cmd = if let OutputMode::Bench = output_mode {
         #[cfg(any(target_os = "linux", target_os = "windows"))] {
@@ -272,7 +283,7 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
 }
 
 pub async fn run_rsl(repo_path: &Path, bench: bool) -> Result<RollOutput, RollError> {
-    let python = python()?;
+    let python = python().await?;
     #[cfg_attr(not(target_os = "windows"), allow(unused_mut))] let mut cmd_name = python.display().to_string();
     let mut cmd = if bench {
         #[cfg(any(target_os = "linux", target_os = "windows"))] {
