@@ -45,7 +45,6 @@ use {
             StreamExt as _,
         },
     },
-    git2::Repository,
     if_chain::if_chain,
     itertools::Itertools as _,
     lazy_regex::regex_is_match,
@@ -160,7 +159,7 @@ struct Args {
     #[clap(short, long)]
     branch: Option<String>,
     #[clap(long, conflicts_with("branch"))]
-    rev: Option<git2::Oid>,
+    rev: Option<gix::ObjectId>,
     #[clap(short, long, conflicts_with("rsl"))]
     preset: Option<String>,
     /// Settings string for the randomizer.
@@ -225,7 +224,8 @@ enum Subcommand {
 #[derive(Debug, thiserror::Error)]
 enum Error {
     #[error(transparent)] Config(#[from] config::Error),
-    #[error(transparent)] Git(#[from] git2::Error),
+    #[error(transparent)] GitHeadId(#[from] gix::reference::head_id::Error),
+    #[error(transparent)] GitOpen(#[from] gix::open::Error),
     #[error(transparent)] Json(#[from] serde_json::Error),
     #[error(transparent)] Task(#[from] JoinError),
     #[error(transparent)] TryFromInt(#[from] std::num::TryFromIntError),
@@ -370,7 +370,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
             cmd.arg(dir_name);
             cmd.current_dir(dir_parent).check("git clone").await?;
         }
-        Repository::open(dir)?.head()?.peel_to_commit()?.id()
+        gix::open(dir)?.head_id()?.detach()
     };
     let setup = if args.rsl {
         RandoSetup::Rsl {

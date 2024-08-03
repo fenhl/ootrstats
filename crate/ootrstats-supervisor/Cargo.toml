@@ -17,7 +17,7 @@ clap = { version = "4.5.1", features = ["derive"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
 either = "1.10.0"
 futures = "0.3.30"
-git2 = "0.19"
+gix = "0.64.0"
 if_chain = "1.0.2"
 itertools = "0.13"
 jaq-core = "1.4.0"

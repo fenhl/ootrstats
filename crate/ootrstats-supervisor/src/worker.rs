@@ -109,7 +109,7 @@ pub(crate) enum Error {
 }
 
 impl Kind {
-    async fn run(self, name: Arc<str>, tx: mpsc::Sender<(Arc<str>, Message)>, mut rx: mpsc::Receiver<SupervisorMessage>, rando_rev: git2::Oid, setup: RandoSetup, output_mode: OutputMode) -> Result<(), Error> {
+    async fn run(self, name: Arc<str>, tx: mpsc::Sender<(Arc<str>, Message)>, mut rx: mpsc::Receiver<SupervisorMessage>, rando_rev: gix::ObjectId, setup: RandoSetup, output_mode: OutputMode) -> Result<(), Error> {
         match self {
             Self::Local { base_rom_path, wsl_base_rom_path, cores } => {
                 let base_rom_path = if_chain! {
@@ -213,7 +213,7 @@ pub(crate) struct State {
 }
 
 impl State {
-    pub(crate) fn new(worker_tx: mpsc::Sender<(Arc<str>, Message)>, name: Arc<str>, kind: Kind, rando_rev: git2::Oid, setup: &RandoSetup, output_mode: OutputMode) -> (JoinHandle<Result<(), Error>>, Self) {
+    pub(crate) fn new(worker_tx: mpsc::Sender<(Arc<str>, Message)>, name: Arc<str>, kind: Kind, rando_rev: gix::ObjectId, setup: &RandoSetup, output_mode: OutputMode) -> (JoinHandle<Result<(), Error>>, Self) {
         let (supervisor_tx, supervisor_rx) = mpsc::channel(256);
         (
             tokio::spawn(kind.run(name.clone(), worker_tx, supervisor_rx, rando_rev, setup.clone(), output_mode)),

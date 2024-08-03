@@ -15,7 +15,7 @@ pub enum ClientMessage {
         password: String,
         base_rom_path: String,
         wsl_base_rom_path: Option<String>,
-        rando_rev: git2::Oid,
+        rando_rev: gix_hash::ObjectId,
         setup: RandoSetup,
         output_mode: OutputMode,
         priority_users: Vec<String>,

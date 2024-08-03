@@ -55,7 +55,7 @@ pub enum RandoSetup {
 }
 
 impl RandoSetup {
-    pub fn stats_dir(&self, rando_rev: git2::Oid) -> PathBuf {
+    pub fn stats_dir(&self, rando_rev: gix_hash::ObjectId) -> PathBuf {
         match self {
             Self::Normal { github_user, settings, json_settings, world_counts: false } if json_settings.is_empty() => Path::new("rando").join(github_user).join(rando_rev.to_string()).join(settings.stats_dir()),
             Self::Normal { github_user, settings, .. } => Path::new("rando").join(github_user).join(rando_rev.to_string()).join("custom").join(settings.stats_dir()),

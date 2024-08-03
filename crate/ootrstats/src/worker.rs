@@ -118,7 +118,7 @@ async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[S
     Ok(if wait > Duration::default() { Some((wait, message)) } else { None })
 }
 
-pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, rando_rev: git2::Oid, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String]) -> Result<(), Error> {
+pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, rando_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String]) -> Result<(), Error> {
     let repo_path = match setup {
         RandoSetup::Normal { ref github_user, .. } => {
             tx.send(Message::Init(format!("cloning randomizer: determining repo path"))).await?;
