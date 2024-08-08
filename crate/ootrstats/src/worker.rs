@@ -75,6 +75,7 @@ pub enum SupervisorMessage {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error(transparent)] Decompress(#[from] decompress::Error),
     #[error(transparent)] Env(#[from] env::VarError),
     #[cfg(feature = "videocore-gencmd")] #[error(transparent)] GencmdCmd(#[from] GencmdCmdError),
     #[cfg(feature = "videocore-gencmd")] #[error(transparent)] GencmdInit(#[from] GencmdInitError),
@@ -136,6 +137,10 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 Command::new("git").arg("fetch").arg("origin").arg(rando_rev.to_string()).arg("--depth=1").current_dir(&repo_path).check("git fetch").await?;
                 tx.send(Message::Init(format!("cloning randomizer: resetting"))).await?;
                 Command::new("git").arg("reset").arg("--hard").arg("FETCH_HEAD").current_dir(&repo_path).check("git reset").await?;
+            }
+            if !fs::exists(repo_path.join("ZOOTDEC.z64")).await? {
+                tx.send(Message::Init(format!("decompressing base rom"))).await?;
+                fs::write(repo_path.join("ZOOTDEC.z64"), decompress::decompress(&mut fs::read(&base_rom_path).await?)?).await?;
             }
             if fs::exists(repo_path.join("Cargo.toml")).await? {
                 #[cfg(target_os = "windows")] let rust_library_filename = if let OutputMode::Bench = output_mode { "rs.so" } else { "rs.dll" };

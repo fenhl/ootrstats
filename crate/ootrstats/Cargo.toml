@@ -10,6 +10,7 @@ workspace = true
 async-proto = { version = "0.22", features = ["bytes", "gix-hash", "serde_json"] }
 bytes = "1.5.0"
 collect-mac = "0.1.0"
+decompress = { git = "https://github.com/fenhl/OoT_Decompressor", branch = "riir" }
 directories = "5.0.1"
 either = "1.10.0"
 futures = "0.3.30"
