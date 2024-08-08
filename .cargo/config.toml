@@ -1,2 +1,5 @@
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"] # to remove the runtime VS requirement
+rustflags = [
+    "-C", "target-feature=+crt-static", # to remove the runtime VS requirement
+    "-C", "target-cpu=native", # for performance
+]
