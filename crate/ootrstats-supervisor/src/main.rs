@@ -189,6 +189,9 @@ struct Args {
     /// If the randomizer errors, retry instead of recording the failure.
     #[clap(long)]
     retry_failures: bool,
+    /// Delete any existing stats instead of reusing them.
+    #[clap(long)]
+    clean: bool,
     /// Only roll seeds on the given worker(s).
     #[clap(short = 'w', long = "worker", conflicts_with("exclude_workers"))]
     include_workers: Vec<Arc<str>>,
@@ -403,6 +406,9 @@ async fn cli(mut args: Args) -> Result<(), Error> {
         };
         stats_root.join(setup.stats_dir(rando_rev))
     };
+    if args.clean {
+        fs::remove_dir_all(&stats_dir).await.missing_ok()?;
+    }
     let available_parallelism = std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN).get().try_into().unwrap_or(SeedIdx::MAX).min(args.num_seeds);
     let is_bench = matches!(args.subcommand, Some(Subcommand::Bench { .. }));
     let start = Instant::now();
@@ -685,7 +691,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                         worker: Some(name.clone()),
                                     })?).await?;
                                     let mut new_workers = Vec::from(worker_names.clone());
-                                    let pos = new_workers.iter().position(|worker| *worker == name).expect("got success from a worker that wasn't rolling that seed");
+                                    let Some(pos) = new_workers.iter().position(|worker| *worker == name) else { panic!("got success from a worker ({name}) that wasn't rolling that seed ({seed_idx})") };
                                     new_workers.swap_remove(pos);
                                     if_chain! {
                                         if !cancelled;

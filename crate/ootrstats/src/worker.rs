@@ -237,7 +237,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             }
             RandoSetup::Rsl { .. } => {
                 let repo_path = repo_path.clone();
-                Either::Right(async move { crate::run_rsl(&repo_path, output_mode == OutputMode::Bench).await })
+                Either::Right(async move { crate::run_rsl(&repo_path, seed_idx, output_mode == OutputMode::Bench).await })
             }
         };
         let tx = tx.clone();

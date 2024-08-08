@@ -16,6 +16,7 @@ use {
     if_chain::if_chain,
     itertools::Itertools as _,
     lazy_regex::regex_captures,
+    semver::Version,
     serde_json::json,
     tokio::{
         io::AsyncWriteExt as _,
@@ -105,6 +106,7 @@ pub enum RollError {
     #[error(transparent)] Draft(#[from] draft::ResolveError),
     #[error(transparent)] Json(#[from] serde_json::Error),
     #[error(transparent)] ParseInt(#[from] std::num::ParseIntError),
+    #[error(transparent)] Utf8(#[from] std::string::FromUtf8Error),
     #[error(transparent)] Wheel(#[from] wheel::Error),
     #[cfg(target_os = "macos")] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
     #[cfg(windows)]
@@ -282,9 +284,20 @@ pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoS
     })
 }
 
-pub async fn run_rsl(repo_path: &Path, bench: bool) -> Result<RollOutput, RollError> {
+pub async fn run_rsl(repo_path: &Path, seed_idx: SeedIdx, bench: bool) -> Result<RollOutput, RollError> {
     let python = python().await?;
     #[cfg_attr(not(target_os = "windows"), allow(unused_mut))] let mut cmd_name = python.display().to_string();
+    let rsl_version = Command::new(&python)
+        .arg("-c")
+        .arg("import rslversion; print(rslversion.__version__)")
+        .current_dir(repo_path)
+        .check(cmd_name.clone()).await?
+        .stdout;
+    let supports_plando_filename_base = if let Some((_, major, minor, patch, devmvp)) = regex_captures!(r"^([0-9]+)\.([0-9]+)\.([0-9]+) devmvp-([0-9]+)$", &String::from_utf8(rsl_version)?) {
+        (Version::new(major.parse()?, minor.parse()?, patch.parse()?), devmvp.parse()?) >= (Version::new(2, 6, 3), 4)
+    } else {
+        false
+    };
     let mut cmd = if bench {
         #[cfg(any(target_os = "linux", target_os = "windows"))] {
             let mut cmd = {
@@ -312,6 +325,9 @@ pub async fn run_rsl(repo_path: &Path, bench: bool) -> Result<RollOutput, RollEr
     cmd.arg("--no_log_errors");
     cmd.arg("--plando_retries=1");
     cmd.arg("--rando_retries=1");
+    if supports_plando_filename_base {
+        cmd.arg(format!("--plando_filename_base=ootrstats_{seed_idx}"));
+    }
     cmd.current_dir(repo_path);
     let output = cmd.output().await.at_command(cmd_name.clone())?;
     let stderr = BufRead::lines(&*output.stderr).try_collect::<_, Vec<_>, _>().at_command(cmd_name.clone())?;

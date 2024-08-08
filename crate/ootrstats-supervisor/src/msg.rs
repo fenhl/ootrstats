@@ -94,11 +94,15 @@ impl Message<'_> {
                                 let e = e.to_string();
                                 if_chain! {
                                     if let Ok((width, _)) = terminal::size();
-                                    let mut prefix_end = usize::from(width) - worker.name.len() - 13;
-                                    if prefix_end + 3 < e.len();
+                                    let mut prefix_end = e.len().min(usize::from(width) - worker.name.len() - 13);
+                                    if prefix_end + 3 < e.len() || e.contains('\n');
                                     then {
-                                        while !e.is_char_boundary(prefix_end) {
-                                            prefix_end -= 1;
+                                        if let Some(idx) = e[..prefix_end].find('\n') {
+                                            prefix_end = idx;
+                                        } else {
+                                            while !e.is_char_boundary(prefix_end) {
+                                                prefix_end -= 1;
+                                            }
                                         }
                                         crossterm::execute!(writer,
                                             Print(format_args!("\r\n{}: error: {}[…]", worker.name, &e[..prefix_end])),
