@@ -293,7 +293,7 @@ pub async fn run_rsl(repo_path: &Path, seed_idx: SeedIdx, bench: bool) -> Result
         .current_dir(repo_path)
         .check(cmd_name.clone()).await?
         .stdout;
-    let supports_plando_filename_base = if let Some((_, major, minor, patch, devmvp)) = regex_captures!(r"^([0-9]+)\.([0-9]+)\.([0-9]+) devmvp-([0-9]+)$", &String::from_utf8(rsl_version)?) {
+    let supports_plando_filename_base = if let Some((_, major, minor, patch, devmvp)) = regex_captures!(r"^([0-9]+)\.([0-9]+)\.([0-9]+) devmvp-([0-9]+)$", &String::from_utf8(rsl_version)?.trim()) {
         (Version::new(major.parse()?, minor.parse()?, patch.parse()?), devmvp.parse()?) >= (Version::new(2, 6, 3), 4)
     } else {
         false
