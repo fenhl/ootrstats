@@ -24,6 +24,7 @@ use {
         },
     },
     if_chain::if_chain,
+    rand::prelude::*,
     tokio::{
         select,
         process::Command,
@@ -45,9 +46,7 @@ use {
         gitdir,
     },
 };
-#[cfg(feature = "videocore-gencmd")] use videocore_gencmd::prelude::*;
-#[cfg(any(windows, feature = "videocore-gencmd"))] use rand::prelude::*;
-#[cfg(not(any(windows, feature = "videocore-gencmd")))] use rand as _;
+#[cfg(unix)] use std::io;
 
 pub enum Message {
     Init(String),
@@ -77,8 +76,7 @@ pub enum SupervisorMessage {
 pub enum Error {
     #[error(transparent)] Decompress(#[from] decompress::Error),
     #[error(transparent)] Env(#[from] env::VarError),
-    #[cfg(feature = "videocore-gencmd")] #[error(transparent)] GencmdCmd(#[from] GencmdCmdError),
-    #[cfg(feature = "videocore-gencmd")] #[error(transparent)] GencmdInit(#[from] GencmdInitError),
+    #[cfg(unix)] #[error(transparent)] ParseInt(#[from] std::num::ParseIntError),
     #[error(transparent)] Roll(#[from] crate::RollError),
     #[error(transparent)] Send(#[from] mpsc::error::SendError<Message>),
     #[error(transparent)] Task(#[from] tokio::task::JoinError),
@@ -92,15 +90,19 @@ pub enum Error {
 /// * The duration after which this function may be called again to recheck.
 /// * The reason for the wait as a human-readable string.
 async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[String]) -> Result<Option<(Duration, String)>, Error> {
-    #[cfg_attr(not(any(windows, feature = "videocore-gencmd")), allow(unused_mut))] let mut wait = Duration::default();
-    #[cfg_attr(not(any(windows, feature = "videocore-gencmd")), allow(unused_mut))] let mut message = String::default();
-    #[cfg(feature = "videocore-gencmd")] if GencmdGlobal::new()?.send_cmd::<CmdMeasureTemp>()? >= 80.0 {
-        let jitter = thread_rng().gen_range(0..10);
-        let new_wait = Duration::from_secs(55 + jitter);
-        if new_wait > wait {
-            wait = new_wait;
-            message = format!("waiting for CPU to cool down below 80°C");
+    let mut wait = Duration::default();
+    let mut message = String::default();
+    #[cfg(unix)] match fs::read_to_string("/sys/class/thermal/thermal_zone0/temp").await {
+        Ok(temp) => if temp.parse::<i32>()? >= 80000 {
+            let jitter = thread_rng().gen_range(0..10);
+            let new_wait = Duration::from_secs(55 + jitter);
+            if new_wait > wait {
+                wait = new_wait;
+                message = format!("waiting for CPU to cool down below 80°C");
+            }
         }
+        Err(wheel::Error::Io { inner, .. }) if inner.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
     }
     #[cfg(windows)] if !priority_users.is_empty() {
         // wait until no priority users are signed in

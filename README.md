@@ -66,7 +66,6 @@ A worker that listens to WebSocket connections from the supervisor. To set up, d
 
 1. Install Rust
 2. Run `cargo install --git=https://github.com/fenhl/ootrstats --branch=main ootrstats-worker-daemon`
-    * If the worker computer is a Raspberry Pi, adding `--features=videocore-gencmd` is recommended. It makes the worker wait to start generating new seeds while the CPU temperature is above 80°C.
 3. Create a JSON file at `$XDG_CONFIG_DIRS/ootrstats-worker-daemon.json` on Unix or `%APPDATA%\Fenhl\ootrstats\config\worker-daemon.json` on Windows, containing a JSON object with the following entries:
     * `password` (required): A password string that the supervisor will use to connect to this worker.
     * `address` (optional): The IP address on which the worker daemon will listen. Defaults to `127.0.0.1`, meaning only local connections will be accepted and you will need a reverse proxy like nginx. Change to `0.0.0.0` to accept connections from anywhere.
