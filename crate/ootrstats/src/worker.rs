@@ -93,7 +93,7 @@ async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[S
     let mut wait = Duration::default();
     let mut message = String::default();
     #[cfg(unix)] match fs::read_to_string("/sys/class/thermal/thermal_zone0/temp").await {
-        Ok(temp) => if temp.parse::<i32>()? >= 80000 {
+        Ok(temp) => if temp.trim().parse::<i32>()? >= 80000 {
             let jitter = thread_rng().gen_range(0..10);
             let new_wait = Duration::from_secs(55 + jitter);
             if new_wait > wait {
