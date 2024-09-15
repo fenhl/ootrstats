@@ -156,9 +156,9 @@ struct Args {
     rsl: bool,
     #[clap(short = 'u', long, default_value = "OoTRandomizer", default_value_if("rsl", "true", Some("matthewkirby")))]
     github_user: String,
-    #[clap(short, long)]
+    #[clap(short, long, conflicts_with("rev"))]
     branch: Option<String>,
-    #[clap(long, conflicts_with("branch"))]
+    #[clap(long)]
     rev: Option<gix::ObjectId>,
     #[clap(short, long, conflicts_with("rsl"))]
     preset: Option<String>,
