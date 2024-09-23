@@ -344,13 +344,13 @@ pub async fn run_rsl(repo_path: &Path, seed_idx: SeedIdx, bench: bool) -> Result
             log: if stdout.iter().rev().any(|line| line.starts_with("rsl_tools.RandomizerError")) {
                 Err(output.stdout.into())
             } else {
-                if let Some(distribution_file_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Copied distribution file to: ")) {
+                if let Some(distribution_file_path) = stdout.iter().rev().find_map(|line| line.strip_prefix("Copied distribution file to: ")) {
                     fs::remove_file(distribution_file_path).await?;
                 }
-                if let Some(patch_file_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Creating Patch File: ")) {
+                if let Some(patch_file_path) = stdout.iter().rev().find_map(|line| line.strip_prefix("Creating Patch File: ")) {
                     fs::remove_file(repo_path.join("patches").join(patch_file_path)).await?;
                 }
-                if let Some(cosmetics_log_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Creating Cosmetics Log: ")) {
+                if let Some(cosmetics_log_path) = stdout.iter().rev().find_map(|line| line.strip_prefix("Creating Cosmetics Log: ")) {
                     fs::remove_file(repo_path.join("patches").join(cosmetics_log_path)).await?;
                 }
                 Ok(repo_path.join("patches").join(stdout.iter().rev().find_map(|line| line.strip_prefix("Created spoiler log at: ")).ok_or_else(|| RollError::SpoilerLogPath(output))?))
