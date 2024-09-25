@@ -7,14 +7,14 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-async-proto = { version = "0.22", features = ["tokio-tungstenite"] }
+async-proto = { version = "0.23", features = ["tokio-tungstenite"] }
 bytes = { version = "1.5.0", features = ["serde"] }
 chrono = { version = "0.4.34", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.5.1", features = ["derive"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
 either = "1.10.0"
 futures = "0.3.30"
-gix = "0.64.0"
+gix = "0.66"
 if_chain = "1.0.2"
 itertools = "0.13"
 jaq-core = "1.4.0"

@@ -156,6 +156,8 @@ struct Args {
     rsl: bool,
     #[clap(short = 'u', long, default_value = "OoTRandomizer", default_value_if("rsl", "true", Some("matthewkirby")))]
     github_user: String,
+    #[clap(long, default_value = "OoT-Randomizer", default_value_if("rsl", "true", Some("plando-random-settings")))]
+    repo: String,
     #[clap(short, long, conflicts_with("rev"))]
     branch: Option<String>,
     #[clap(long)]
@@ -346,8 +348,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
     let rando_rev = if let Some(rev) = args.rev {
         rev
     } else {
-        let repo_name = if args.rsl { "plando-random-settings" } else { "OoT-Randomizer" };
-        let mut dir_parent = gitdir().await?.join("github.com").join(&args.github_user).join(repo_name);
+        let mut dir_parent = gitdir().await?.join("github.com").join(&args.github_user).join(&args.repo);
         let dir_name = if let Some(ref branch) = args.branch {
             dir_parent = dir_parent.join("branch");
             branch
@@ -365,7 +366,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
             let mut cmd = Command::new("git");
             cmd.arg("clone");
             cmd.arg("--depth=1");
-            cmd.arg(format!("https://github.com/{}/{repo_name}.git", args.github_user));
+            cmd.arg(format!("https://github.com/{}/{}.git", args.github_user, args.repo));
             if let Some(ref branch) = args.branch {
                 cmd.arg("--branch");
                 cmd.arg(branch);
@@ -378,10 +379,12 @@ async fn cli(mut args: Args) -> Result<(), Error> {
     let setup = if args.rsl {
         RandoSetup::Rsl {
             github_user: args.github_user,
+            repo: args.repo,
         }
     } else {
         RandoSetup::Normal {
             github_user: args.github_user,
+            repo: args.repo,
             settings: if let Some(preset) = args.preset {
                 RandoSettings::Preset(preset)
             } else if let Some(settings) = args.settings {

@@ -123,9 +123,9 @@ async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[S
 
 pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, rando_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String]) -> Result<(), Error> {
     let repo_path = match setup {
-        RandoSetup::Normal { ref github_user, .. } => {
+        RandoSetup::Normal { ref github_user, ref repo, .. } => {
             tx.send(Message::Init(format!("cloning randomizer: determining repo path"))).await?;
-            let repo_parent = gitdir().await?.join("github.com").join(github_user).join("OoT-Randomizer").join("rev");
+            let repo_parent = gitdir().await?.join("github.com").join(github_user).join(repo).join("rev");
             let repo_path = repo_parent.join(rando_rev.to_string());
             tx.send(Message::Init(format!("checking if repo exists"))).await?;
             if !fs::exists(&repo_path).await? {
@@ -134,7 +134,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 tx.send(Message::Init(format!("cloning randomizer: initializing repo"))).await?;
                 Command::new("git").arg("init").current_dir(&repo_path).check("git init").await?;
                 tx.send(Message::Init(format!("cloning randomizer: adding remote"))).await?;
-                Command::new("git").arg("remote").arg("add").arg("origin").arg(format!("https://github.com/{github_user}/OoT-Randomizer.git")).current_dir(&repo_path).check("git remote add").await?;
+                Command::new("git").arg("remote").arg("add").arg("origin").arg(format!("https://github.com/{github_user}/{repo}.git")).current_dir(&repo_path).check("git remote add").await?;
                 tx.send(Message::Init(format!("cloning randomizer: fetching"))).await?;
                 Command::new("git").arg("fetch").arg("origin").arg(rando_rev.to_string()).arg("--depth=1").current_dir(&repo_path).check("git fetch").await?;
                 tx.send(Message::Init(format!("cloning randomizer: resetting"))).await?;
@@ -180,9 +180,9 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             }
             repo_path
         }
-        RandoSetup::Rsl { ref github_user, .. } => {
+        RandoSetup::Rsl { ref github_user, ref repo, .. } => {
             tx.send(Message::Init(format!("cloning random settings script: determining repo path"))).await?;
-            let repo_parent = gitdir().await?.join("github.com").join(github_user).join("plando-random-settings").join("rev");
+            let repo_parent = gitdir().await?.join("github.com").join(github_user).join(repo).join("rev");
             let repo_path = repo_parent.join(rando_rev.to_string());
             tx.send(Message::Init(format!("checking if repo exists"))).await?;
             if !fs::exists(&repo_path).await? {
@@ -191,7 +191,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 tx.send(Message::Init(format!("cloning random settings script: initializing repo"))).await?;
                 Command::new("git").arg("init").current_dir(&repo_path).check("git init").await?;
                 tx.send(Message::Init(format!("cloning random settings script: adding remote"))).await?;
-                Command::new("git").arg("remote").arg("add").arg("origin").arg(format!("https://github.com/{github_user}/plando-random-settings.git")).current_dir(&repo_path).check("git remote add").await?;
+                Command::new("git").arg("remote").arg("add").arg("origin").arg(format!("https://github.com/{github_user}/{repo}.git")).current_dir(&repo_path).check("git remote add").await?;
                 tx.send(Message::Init(format!("cloning random settings script: fetching"))).await?;
                 Command::new("git").arg("fetch").arg("origin").arg(rando_rev.to_string()).arg("--depth=1").current_dir(&repo_path).check("git fetch").await?;
                 tx.send(Message::Init(format!("cloning random settings script: resetting"))).await?;

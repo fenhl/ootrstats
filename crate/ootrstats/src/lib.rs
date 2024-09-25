@@ -47,21 +47,23 @@ pub type SeedIdx = u16;
 pub enum RandoSetup {
     Normal {
         github_user: String,
+        repo: String,
         settings: RandoSettings,
         json_settings: serde_json::Map<String, serde_json::Value>,
         world_counts: bool,
     },
     Rsl {
         github_user: String,
+        repo: String,
     },
 }
 
 impl RandoSetup {
     pub fn stats_dir(&self, rando_rev: gix_hash::ObjectId) -> PathBuf {
         match self {
-            Self::Normal { github_user, settings, json_settings, world_counts: false } if json_settings.is_empty() => Path::new("rando").join(github_user).join(rando_rev.to_string()).join(settings.stats_dir()),
-            Self::Normal { github_user, settings, .. } => Path::new("rando").join(github_user).join(rando_rev.to_string()).join("custom").join(settings.stats_dir()),
-            Self::Rsl { github_user } => Path::new("rsl").join(github_user).join(rando_rev.to_string()),
+            Self::Normal { github_user, repo, settings, json_settings, world_counts: false } if json_settings.is_empty() => Path::new("rando").join(github_user).join(repo).join(rando_rev.to_string()).join(settings.stats_dir()),
+            Self::Normal { github_user, repo, settings, .. } => Path::new("rando").join(github_user).join(repo).join(rando_rev.to_string()).join("custom").join(settings.stats_dir()),
+            Self::Rsl { github_user, repo } => Path::new("rsl").join(github_user).join(repo).join(rando_rev.to_string()),
         }
     }
 }
