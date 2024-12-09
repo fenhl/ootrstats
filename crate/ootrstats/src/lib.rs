@@ -129,17 +129,10 @@ pub async fn gitdir() -> wheel::Result<Cow<'static, Path>> {
                 Cow::Owned(PathBuf::from(var))
             } else if fs::exists("/opt/git").await? {
                 Cow::Borrowed(Path::new("/opt/git"))
+            } else if let Some(base_dirs) = BaseDirs::new() {
+                Cow::Owned(base_dirs.home_dir().join("git"))
             } else {
-                if_chain! {
-                    if let Some(base_dirs) = BaseDirs::new();
-                    let path = base_dirs.home_dir().join("git");
-                    if fs::exists(&path).await?;
-                    then {
-                        Cow::Owned(path)
-                    } else {
-                        Cow::Borrowed(Path::new("/opt/git"))
-                    }
-                }
+                Cow::Borrowed(Path::new("/opt/git"))
             }
         }
         #[cfg(windows)] { Cow::Owned(BaseDirs::new().expect("could not determine home dir").home_dir().join("git")) }
