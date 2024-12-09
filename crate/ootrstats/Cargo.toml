@@ -7,14 +7,14 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-async-proto = { version = "0.23", features = ["bytes", "gix-hash", "serde_json"] }
+async-proto = { version = "0.24", features = ["bytes", "gix-hash", "serde_json"] }
 bytes = "1.5.0"
 collect-mac = "0.1.0"
 decompress = { git = "https://github.com/fenhl/OoT_Decompressor", branch = "riir" }
 directories = "5.0.1"
 either = "1.10.0"
 futures = "0.3.30"
-gix-hash = "0.14.2"
+gix-hash = "0.15"
 if_chain = "1.0.2"
 itertools = "0.13"
 lazy-regex = "3.1.0"
@@ -22,7 +22,7 @@ rand = "0.8.5"
 semver = "1.0.23"
 serde_json = { package = "serde_json_path_to_error", version = "0.1" }
 syn = { version = "2.0.66", default-features = false, features = ["parsing"] }
-thiserror = "1.0.57"
+thiserror = "2"
 tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }
 wheel = { git = "https://github.com/fenhl/wheel", branch = "main" }
 

@@ -7,14 +7,14 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-async-proto = { version = "0.23", features = ["tokio-tungstenite"] }
+async-proto = { version = "0.24", features = ["tokio-tungstenite024"] }
 bytes = { version = "1.5.0", features = ["serde"] }
 chrono = { version = "0.4.34", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.5.1", features = ["derive"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
 either = "1.10.0"
 futures = "0.3.30"
-gix = "0.66"
+gix = "0.68"
 if_chain = "1.0.2"
 itertools = "0.13"
 jaq-core = "1.4.0"
@@ -31,9 +31,9 @@ serde = { version = "1.0.197", features = ["derive", "rc"] }
 serde_json = { package = "serde_json_path_to_error", version = "0.1" }
 serde_with = "3.9.0"
 syn = { version = "2.0.66", default-features = false, features = ["parsing"] }
-thiserror = "1.0.57"
+thiserror = "2"
 tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }
-tokio-tungstenite = { version = "0.21", default-features = false }
+tokio-tungstenite = { version = "0.24", default-features = false }
 wheel = { git = "https://github.com/fenhl/wheel", branch = "main", features = ["serde", "serde_json"] }
 
 [target."cfg(windows)".dependencies]

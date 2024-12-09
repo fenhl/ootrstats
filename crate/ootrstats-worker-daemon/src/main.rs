@@ -56,7 +56,7 @@ enum Error {
 }
 
 async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::stream::DuplexStream, rocket_ws::Message>>>, stream: &mut SplitStream<rocket_ws::stream::DuplexStream>) -> Result<(), Error> {
-    let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_base_rom_path, rando_rev, setup, output_mode, priority_users } = websocket::ClientMessage::read_ws(stream).await? else { return Ok(()) };
+    let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_base_rom_path, rando_rev, setup, output_mode, priority_users } = websocket::ClientMessage::read_ws021(stream).await? else { return Ok(()) };
     if received_password != correct_password { return Ok(()) }
     let (worker_tx, mut worker_rx) = mpsc::channel(256);
     let (mut supervisor_tx, supervisor_rx) = mpsc::channel(256);
@@ -74,7 +74,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
     let mut work = pin!(ootrstats::worker::work(worker_tx, supervisor_rx, PathBuf::from(base_rom_path), 0, rando_rev, setup, output_mode, &priority_users));
     loop {
         let next_msg = if let Some(ref mut stream) = stream {
-            Either::Left(timeout(Duration::from_secs(60), websocket::ClientMessage::read_ws(*stream)))
+            Either::Left(timeout(Duration::from_secs(60), websocket::ClientMessage::read_ws021(*stream)))
         } else {
             Either::Right(future::pending())
         };
@@ -83,8 +83,8 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                 let () = res?;
                 while let Some(msg) = worker_rx.recv().await {
                     match msg {
-                        ootrstats::worker::Message::Init(msg) => lock!(sink = sink; websocket::ServerMessage::Init(msg).write_ws(&mut *sink).await)?,
-                        ootrstats::worker::Message::Ready(ready) => lock!(sink = sink; websocket::ServerMessage::Ready(ready).write_ws(&mut *sink).await)?,
+                        ootrstats::worker::Message::Init(msg) => lock!(sink = sink; websocket::ServerMessage::Init(msg).write_ws021(&mut *sink).await)?,
+                        ootrstats::worker::Message::Ready(ready) => lock!(sink = sink; websocket::ServerMessage::Ready(ready).write_ws021(&mut *sink).await)?,
                         ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log, patch } => {
                             let spoiler_log = match spoiler_log {
                                 Either::Left(spoiler_log_path) => {
@@ -107,16 +107,16 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                                 Some(Either::Right((ext, patch))) => Some((ext, patch)),
                                 None => None,
                             };
-                            lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, patch }.write_ws(&mut *sink).await)?;
+                            lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, patch }.write_ws021(&mut *sink).await)?;
                         }
-                        ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => lock!(sink = sink; websocket::ServerMessage::Failure { seed_idx, instructions, error_log }.write_ws(&mut *sink).await)?,
+                        ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => lock!(sink = sink; websocket::ServerMessage::Failure { seed_idx, instructions, error_log }.write_ws021(&mut *sink).await)?,
                     }
                 }
                 break
             }
             Some(msg) = worker_rx.recv() => match msg {
-                ootrstats::worker::Message::Init(msg) => lock!(sink = sink; websocket::ServerMessage::Init(msg).write_ws(&mut *sink).await)?,
-                ootrstats::worker::Message::Ready(ready) => lock!(sink = sink; websocket::ServerMessage::Ready(ready).write_ws(&mut *sink).await)?,
+                ootrstats::worker::Message::Init(msg) => lock!(sink = sink; websocket::ServerMessage::Init(msg).write_ws021(&mut *sink).await)?,
+                ootrstats::worker::Message::Ready(ready) => lock!(sink = sink; websocket::ServerMessage::Ready(ready).write_ws021(&mut *sink).await)?,
                 ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log, patch } => {
                     let spoiler_log = match spoiler_log {
                         Either::Left(spoiler_log_path) => {
@@ -139,9 +139,9 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                         Some(Either::Right((ext, patch))) => Some((ext, patch)),
                         None => None,
                     };
-                    lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, patch }.write_ws(&mut *sink).await)?;
+                    lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, patch }.write_ws021(&mut *sink).await)?;
                 }
-                ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => lock!(sink = sink; websocket::ServerMessage::Failure { seed_idx, instructions, error_log }.write_ws(&mut *sink).await)?,
+                ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => lock!(sink = sink; websocket::ServerMessage::Failure { seed_idx, instructions, error_log }.write_ws021(&mut *sink).await)?,
             },
             res = next_msg => match res?? {
                 websocket::ClientMessage::Handshake { .. } => break,
@@ -166,7 +166,7 @@ fn index(correct_password: &State<String>, ws: WebSocket) -> rocket_ws::Channel<
         let sink = Arc::new(Mutex::new(sink));
         let ping_sink = sink.clone();
         let ping_task = tokio::spawn(async move {
-            while lock!(sink = ping_sink; websocket::ServerMessage::Ping.write_ws(&mut *sink).await).is_ok() {
+            while lock!(sink = ping_sink; websocket::ServerMessage::Ping.write_ws021(&mut *sink).await).is_ok() {
                 sleep(Duration::from_secs(30)).await;
             }
         });
@@ -177,7 +177,7 @@ fn index(correct_password: &State<String>, ws: WebSocket) -> rocket_ws::Channel<
             Err(e) => lock!(sink = sink; websocket::ServerMessage::Error {
                 display: e.to_string(),
                 debug: format!("{e:?}"),
-            }.write_ws(&mut *sink).await).map_err(io::Error::from)?,
+            }.write_ws021(&mut *sink).await).map_err(io::Error::from)?,
         }
         Ok(())
     }))
