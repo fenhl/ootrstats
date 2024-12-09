@@ -16,7 +16,6 @@ use {
             StreamExt as _,
         },
     },
-    if_chain::if_chain,
     log_lock::*,
     rocket::State,
     rocket_ws::WebSocket,
@@ -34,7 +33,6 @@ use {
         traits::AsyncCommandOutputExt as _,
     },
     ootrstats::{
-        OutputMode,
         WSL,
         websocket,
     },
@@ -60,18 +58,8 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
     if received_password != correct_password { return Ok(()) }
     let (worker_tx, mut worker_rx) = mpsc::channel(256);
     let (mut supervisor_tx, supervisor_rx) = mpsc::channel(256);
-    let base_rom_path = if_chain! {
-        if cfg!(windows);
-        if let OutputMode::Bench = output_mode;
-        if let Some(wsl_base_rom_path) = wsl_base_rom_path;
-        then {
-            wsl_base_rom_path
-        } else {
-            base_rom_path
-        }
-    };
     let mut stream = Some(stream);
-    let mut work = pin!(ootrstats::worker::work(worker_tx, supervisor_rx, PathBuf::from(base_rom_path), 0, rando_rev, setup, output_mode, &priority_users));
+    let mut work = pin!(ootrstats::worker::work(worker_tx, supervisor_rx, PathBuf::from(base_rom_path.clone()), PathBuf::from(wsl_base_rom_path.unwrap_or(base_rom_path)), 0, rando_rev, setup, output_mode, &priority_users));
     loop {
         let next_msg = if let Some(ref mut stream) = stream {
             Either::Left(timeout(Duration::from_secs(60), websocket::ClientMessage::read_ws021(*stream)))

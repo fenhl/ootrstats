@@ -51,6 +51,7 @@ use {
     nonempty_collections::NEVec,
     ootr_utils::spoiler::SpoilerLog,
     proc_macro2 as _, // feature config required for Span::start used in CustomExit impl
+    rustls as _, // feature ring required for WebSocket connections to work
     serde::{
         Deserialize,
         Serialize,

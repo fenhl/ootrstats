@@ -21,7 +21,6 @@ use {
             StreamExt as _,
         },
     },
-    if_chain::if_chain,
     nonempty_collections::nev,
     semver::Version,
     serde::{
@@ -112,18 +111,8 @@ impl Kind {
     async fn run(self, name: Arc<str>, tx: mpsc::Sender<(Arc<str>, Message)>, mut rx: mpsc::Receiver<SupervisorMessage>, rando_rev: gix::ObjectId, setup: RandoSetup, output_mode: OutputMode) -> Result<(), Error> {
         match self {
             Self::Local { base_rom_path, wsl_base_rom_path, cores } => {
-                let base_rom_path = if_chain! {
-                    if cfg!(windows);
-                    if let OutputMode::Bench = output_mode;
-                    if let Some(wsl_base_rom_path) = wsl_base_rom_path;
-                    then {
-                        wsl_base_rom_path
-                    } else {
-                        base_rom_path
-                    }
-                };
                 let (inner_tx, mut inner_rx) = mpsc::channel(256);
-                let mut work = pin!(ootrstats::worker::work(inner_tx, rx, base_rom_path, cores, rando_rev, setup, output_mode, &[]));
+                let mut work = pin!(ootrstats::worker::work(inner_tx, rx, base_rom_path.clone(), wsl_base_rom_path.unwrap_or(base_rom_path), cores, rando_rev, setup, output_mode, &[]));
                 loop {
                     select! {
                         res = &mut work => {

@@ -26,6 +26,7 @@ nonempty-collections = { version = "0.2.5", features = ["serde"] }
 ootr-utils = { git = "https://github.com/midoshouse/rust-ootr-utils", branch = "main" }
 ootrstats = { path = "../ootrstats" }
 proc-macro2 = { version = "1.0.85", default-features = false, features = ["span-locations"] }
+rustls = { version = "0.23.19", default-features = false, features = ["ring"] }
 semver = "1.0.22"
 serde = { version = "1.0.197", features = ["derive", "rc"] }
 serde_json = { package = "serde_json_path_to_error", version = "0.1" }
@@ -33,7 +34,7 @@ serde_with = "3.9.0"
 syn = { version = "2.0.66", default-features = false, features = ["parsing"] }
 thiserror = "2"
 tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }
-tokio-tungstenite = { version = "0.24", default-features = false }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-webpki-roots"] }
 wheel = { git = "https://github.com/fenhl/wheel", branch = "main", features = ["serde", "serde_json"] }
 
 [target."cfg(windows)".dependencies]

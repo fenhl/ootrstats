@@ -2509,9 +2509,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
-version = "0.2.167"
+version = "0.2.168"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09d6582e104315a817dff97f75133544b2e094ee22447d2acf4a74e189ba06fc"
+checksum = "5aaeb2981e0606ca11d79718f8bb01164f1d6ed75080182d3abf017e6d244b6d"
 
 [[package]]
 name = "libm"
@@ -2804,6 +2804,7 @@ dependencies = [
  "ootr-utils",
  "ootrstats",
  "proc-macro2",
+ "rustls 0.23.19",
  "semver",
  "serde",
  "serde_json_path_to_error",
@@ -2824,7 +2825,6 @@ dependencies = [
  "directories",
  "either",
  "futures",
- "if_chain",
  "log-lock",
  "ootrstats",
  "rocket",
@@ -3288,6 +3288,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "934b404430bb06b3fae2cba809eb45a1ab1aecd64491213d7c3301b88393f8d1"
 dependencies = [
  "once_cell",
+ "ring",
  "rustls-pki-types",
  "rustls-webpki",
  "subtle",

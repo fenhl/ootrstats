@@ -10,7 +10,6 @@ workspace = true
 async-proto = { version = "0.24", features = ["tokio-tungstenite021"] }
 either = "1.10.0"
 futures = "0.3.30"
-if_chain = "1.0.2"
 log-lock = { git = "https://github.com/fenhl/log-lock", branch = "main", version = "0.2.1" }
 ootrstats = { path = "../ootrstats" }
 rocket = "0.5.0"

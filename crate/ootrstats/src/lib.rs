@@ -171,9 +171,8 @@ async fn python() -> Result<PathBuf, RollError> {
     })
 }
 
-pub async fn run_rando(base_rom_path: &Path, repo_path: &Path, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
+pub async fn run_rando(repo_path: &Path, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let mut resolved_settings = collect![as HashMap<_, _>:
-        Cow::Borrowed("rom") => json!(base_rom_path),
         Cow::Borrowed("create_spoiler") => json!(true),
         Cow::Borrowed("create_cosmetics_log") => json!(output_mode == OutputMode::Bench),
         Cow::Borrowed("create_patch_file") => json!(output_mode == OutputMode::Patch),
