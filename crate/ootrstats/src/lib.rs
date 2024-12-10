@@ -200,7 +200,16 @@ pub async fn run_rando(repo_path: &Path, settings: &RandoSettings, json_settings
             #[cfg(target_os = "windows")] cmd.arg("python3");
             cmd
         }
-        #[cfg(not(any(target_os = "linux", target_os = "windows")))] { unimplemented!("`perf` is not available for macOS") }
+        #[cfg(target_os = "macos")] {
+            cmd_name = format!("time {cmd_name}");
+            let mut cmd = Command::new("/usr/bin/time");
+            cmd.arg("-l");
+            cmd.arg(&python);
+            cmd
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))] {
+            unimplemented!("`bench` subcommand not yet implemented for this OS")
+        }
     } else {
         Command::new(&python)
     };
@@ -249,14 +258,30 @@ pub async fn run_rando(repo_path: &Path, settings: &RandoSettings, json_settings
     }
     Ok(RollOutput {
         instructions: if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
-            if_chain! {
-                if let Some(instructions_line) = stderr.iter().rev().find(|line| line.contains("instructions:u"));
-                if let Some((_, instructions)) = regex_captures!("^ *([0-9,.]+) +instructions:u", instructions_line);
-                then {
-                    Ok(instructions.chars().filter(|&c| c != ',' && c != '.').collect::<String>().parse()?)
-                } else {
-                    Err(output.stderr.clone().into())
+            #[cfg(any(target_os = "linux", target_os = "windows"))] {
+                if_chain! {
+                    if let Some(instructions_line) = stderr.iter().rev().find(|line| line.contains("instructions:u"));
+                    if let Some((_, instructions)) = regex_captures!("^ *([0-9,.]+) +instructions:u", instructions_line);
+                    then {
+                        Ok(instructions.chars().filter(|&c| c != ',' && c != '.').collect::<String>().parse()?)
+                    } else {
+                        Err(output.stderr.clone().into())
+                    }
                 }
+            }
+            #[cfg(target_os = "macos")] {
+                if_chain! {
+                    if let Some(instructions_line) = stderr.iter().rev().find(|line| line.contains("instructions retired"));
+                    if let Some((_, instructions)) = regex_captures!("^ *([0-9]+) +instructions retired", instructions_line);
+                    then {
+                        Ok(instructions.parse()?)
+                    } else {
+                        Err(output.stderr.clone().into())
+                    }
+                }
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))] {
+                unimplemented!("`bench` subcommand not yet implemented for this OS")
             }
         } else {
             Err(Bytes::from_static(b"output mode"))
@@ -331,9 +356,31 @@ pub async fn run_rsl(repo_path: &Path, seed_idx: SeedIdx, bench: bool) -> Result
         let stdout = BufRead::lines(&*output.stdout).try_collect::<_, Vec<_>, _>().at_command(cmd_name)?;
         Ok(RollOutput {
             instructions: if bench {
-                let instructions_line = stderr.iter().rev().find(|line| line.contains("instructions:u")).ok_or_else(|| RollError::PerfSyntax(output.stderr.clone()))?;
-                let (_, instructions) = regex_captures!("^ *([0-9,.]+) +instructions:u", instructions_line).ok_or_else(|| RollError::PerfSyntax(output.stderr.clone()))?;
-                Ok(instructions.chars().filter(|&c| c != ',' && c != '.').collect::<String>().parse()?)
+                #[cfg(any(target_os = "linux", target_os = "windows"))] {
+                    if_chain! {
+                        if let Some(instructions_line) = stderr.iter().rev().find(|line| line.contains("instructions:u"));
+                        if let Some((_, instructions)) = regex_captures!("^ *([0-9,.]+) +instructions:u", instructions_line);
+                        then {
+                            Ok(instructions.chars().filter(|&c| c != ',' && c != '.').collect::<String>().parse()?)
+                        } else {
+                            Err(output.stderr.clone().into())
+                        }
+                    }
+                }
+                #[cfg(target_os = "macos")] {
+                    if_chain! {
+                        if let Some(instructions_line) = stderr.iter().rev().find(|line| line.contains("instructions retired"));
+                        if let Some((_, instructions)) = regex_captures!("^ *([0-9]+) +instructions retired", instructions_line);
+                        then {
+                            Ok(instructions.parse()?)
+                        } else {
+                            Err(output.stderr.clone().into())
+                        }
+                    }
+                }
+                #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))] {
+                    unimplemented!("`bench` subcommand not yet implemented for this OS")
+                }
             } else {
                 Err(Bytes::from_static(b"output mode"))
             },

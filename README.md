@@ -130,7 +130,7 @@ The supervisor can be interrupted cleanly using <kbd>C</kbd> or <kbd>D</kbd>. If
 
 Benchmarks the randomizer by measuring the average number of CPU instructions required to successfully generate a seed, taking into account the failure rate of the randomizer.
 
-This subcommand requires workers to have access to [`perf`](https://perf.wiki.kernel.org/), which is only available for Linux. Workers running on Windows will attempt to use [WSL](https://learn.microsoft.com/windows/wsl/about). To install `perf` on an Ubuntu or Debian distro running inside WSL, run `apt-get install linux-tools-generic` and copy/symlink `/usr/lib/linux-tools/*-generic/perf` into your `PATH`.
+This subcommand requires workers to either run on macOS or have access to [`perf`](https://perf.wiki.kernel.org/) for Linux. Workers running on Windows will attempt to use [WSL](https://learn.microsoft.com/windows/wsl/about). To install `perf` on an Ubuntu or Debian distro running inside WSL, run `apt-get install linux-tools-generic` and copy/symlink `/usr/lib/linux-tools/*-generic/perf` into your `PATH`.
 
 Results will be displayed on stdout.
 
