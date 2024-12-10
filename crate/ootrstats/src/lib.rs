@@ -243,9 +243,6 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, settings: &Ra
     let stderr = BufRead::lines(&*output.stderr).try_collect::<_, Vec<_>, _>().at_command(cmd_name)?;
     if output.status.success() {
         if let Some(distribution_file_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Copied distribution file to: ")) {
-            fs::remove_file(distribution_file_path).await?;
-        }
-        if let Some(uncompressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Saving Uncompressed ROM: ")) {
             if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
                 let mut cmd = Command::new(WSL);
                 if let Some(wsl_distro) = wsl_distro {
@@ -253,11 +250,14 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, settings: &Ra
                     cmd.arg(wsl_distro);
                 }
                 cmd.arg("rm");
-                cmd.arg(repo_path.join("Output").join(uncompressed_rom_path));
+                cmd.arg(distribution_file_path);
                 cmd.check("wsl rm").await?;
             } else {
-                fs::remove_file(repo_path.join("Output").join(uncompressed_rom_path)).await?;
+                fs::remove_file(distribution_file_path).await?;
             }
+        }
+        if let Some(uncompressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Saving Uncompressed ROM: ")) {
+            fs::remove_file(repo_path.join("Output").join(uncompressed_rom_path)).await?;
         }
         if let Some(compressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created compressed ROM at: ")) {
             if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
