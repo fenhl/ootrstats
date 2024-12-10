@@ -119,11 +119,19 @@ impl Message<'_> {
                                 let mut running = 0u16;
                                 let mut completed = 0u16;
                                 let mut total_completed = 0u16;
+                                let mut failures = 0u16;
                                 for state in seed_states {
                                     match state {
-                                        SeedState::Success { worker: Some(name), .. } | SeedState::Failure { worker: Some(name), .. } => {
+                                        SeedState::Success { worker: Some(name), .. } => {
                                             total_completed += 1;
                                             if *name == worker.name { completed += 1 }
+                                        }
+                                        SeedState::Failure { worker: Some(name), .. } => {
+                                            total_completed += 1;
+                                            if *name == worker.name {
+                                                completed += 1;
+                                                failures += 1;
+                                            }
                                         }
                                         SeedState::Rolling { workers } => running += u16::try_from(workers.iter().into_iter().filter(|name| **name == worker.name).count())?,
                                         | SeedState::Unchecked
@@ -146,14 +154,26 @@ impl Message<'_> {
                                     Cow::Owned(format!("{running} running"))
                                 };
                                 if total_completed > 0 {
-                                    crossterm::execute!(writer,
-                                        Print(format_args!(
-                                            "\r\n{}: {completed} rolled ({}%), {state}",
-                                            worker.name,
-                                            100 * u32::from(completed) / u32::from(total_completed),
-                                        )),
-                                        Clear(ClearType::UntilNewLine),
-                                    ).at_unknown()?;
+                                    if failures > 0 {
+                                        crossterm::execute!(writer,
+                                            Print(format_args!(
+                                                "\r\n{}: {completed} rolled ({}%), failure rate {}%, {state}",
+                                                worker.name,
+                                                100 * u32::from(completed) / u32::from(total_completed),
+                                                100 * u32::from(failures) / u32::from(completed),
+                                            )),
+                                            Clear(ClearType::UntilNewLine),
+                                        ).at_unknown()?;
+                                    } else {
+                                        crossterm::execute!(writer,
+                                            Print(format_args!(
+                                                "\r\n{}: {completed} rolled ({}%), {state}",
+                                                worker.name,
+                                                100 * u32::from(completed) / u32::from(total_completed),
+                                            )),
+                                            Clear(ClearType::UntilNewLine),
+                                        ).at_unknown()?;
+                                    }
                                 } else {
                                     crossterm::execute!(writer,
                                         Print(format_args!(
