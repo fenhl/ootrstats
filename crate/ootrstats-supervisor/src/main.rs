@@ -112,8 +112,8 @@ enum ReaderMessage {
 
 #[derive(Deserialize, Serialize)]
 struct Metadata {
-    /// present if the `bench` parameter was set and `perf` output was parsed successfully.
-    instructions: Option<u64>,
+    /// present if the `bench` parameter was set.
+    instructions: Option<Result<u64, String>>,
     /// always written by this version of ootrstats but may be absent in metadata from older ootrstats versions.
     worker: Option<Arc<str>>,
 }
@@ -434,7 +434,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                     (false, true) => {
                         let instructions = if is_bench {
                             match fs::read_json::<Metadata>(seed_path.join("metadata.json")).await {
-                                Ok(metadata) => metadata.instructions,
+                                Ok(metadata) => metadata.instructions.and_then(Result::ok),
                                 Err(wheel::Error::Io { inner, .. }) if inner.kind() == io::ErrorKind::NotFound => None,
                                 Err(e) => return Err(e.into()),
                             }
@@ -446,7 +446,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                     (true, false) => {
                         let instructions = if is_bench {
                             match fs::read_json::<Metadata>(seed_path.join("metadata.json")).await {
-                                Ok(metadata) => metadata.instructions,
+                                Ok(metadata) => metadata.instructions.and_then(Result::ok),
                                 Err(wheel::Error::Io { inner, .. }) if inner.kind() == io::ErrorKind::NotFound => None,
                                 Err(e) => return Err(e.into()),
                             }
@@ -692,10 +692,10 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                             }
                                         }
                                     }
-                                    fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
-                                        instructions: instructions.as_ref().ok().copied(),
+                                    fs::write_json(seed_dir.join("metadata.json"), Metadata {
+                                        instructions: Some(instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
                                         worker: Some(name.clone()),
-                                    })?).await?;
+                                    }).await?;
                                     let mut new_workers = Vec::from(worker_names.clone());
                                     let Some(pos) = new_workers.iter().position(|worker| *worker == name) else { panic!("got success from a worker ({name}) that wasn't rolling that seed ({seed_idx})") };
                                     new_workers.swap_remove(pos);
@@ -755,10 +755,10 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                         fs::create_dir_all(&seed_dir).await?;
                                         let stats_error_log_path = seed_dir.join("error.log");
                                         fs::write(stats_error_log_path, &error_log).await?;
-                                        fs::write(seed_dir.join("metadata.json"), serde_json::to_vec_pretty(&Metadata {
-                                            instructions: instructions.as_ref().ok().copied(),
+                                        fs::write_json(seed_dir.join("metadata.json"), Metadata {
+                                            instructions: Some(instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
                                             worker: Some(name.clone()),
-                                        })?).await?;
+                                        }).await?;
                                         if_chain! {
                                             if !cancelled;
                                             if is_bench;
@@ -985,9 +985,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
             }
             let mut counts = counts.into_iter().collect_vec();
             counts.sort_unstable();
-            let mut buf = serde_json::to_vec_pretty(&counts)?;
-            buf.push(b'\n');
-            fs::write(out_path, buf).await?;
+            fs::write_json(out_path, counts).await?;
         }
     }
     if let Ok(workers) = workers {
