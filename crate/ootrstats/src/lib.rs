@@ -92,6 +92,7 @@ pub enum OutputMode {
     Normal,
     Bench,
     Patch,
+    BenchUncompressed,
 }
 
 pub struct RollOutput {
@@ -167,8 +168,9 @@ async fn python() -> Result<PathBuf, RollError> {
 pub async fn run_rando(repo_path: &Path, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let mut resolved_settings = collect![as HashMap<_, _>:
         Cow::Borrowed("create_spoiler") => json!(true),
-        Cow::Borrowed("create_cosmetics_log") => json!(output_mode == OutputMode::Bench),
+        Cow::Borrowed("create_cosmetics_log") => json!(matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed)),
         Cow::Borrowed("create_patch_file") => json!(output_mode == OutputMode::Patch),
+        Cow::Borrowed("create_uncompressed_rom") => json!(output_mode == OutputMode::BenchUncompressed),
         Cow::Borrowed("create_compressed_rom") => json!(output_mode == OutputMode::Bench),
     ];
     resolved_settings.extend(json_settings.iter().map(|(name, value)| (Cow::<str>::Borrowed(name), value.clone())));
@@ -177,7 +179,7 @@ pub async fn run_rando(repo_path: &Path, settings: &RandoSettings, json_settings
     }
     let python = python().await?;
     #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(unused_mut))] let mut cmd_name = python.display().to_string();
-    let mut cmd = if let OutputMode::Bench = output_mode {
+    let mut cmd = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
         #[cfg(any(target_os = "linux", target_os = "windows"))] {
             let mut cmd = {
                 #[cfg(target_os = "linux")] {
@@ -231,14 +233,14 @@ pub async fn run_rando(repo_path: &Path, settings: &RandoSettings, json_settings
             fs::remove_file(distribution_file_path).await?;
         }
         if let Some(compressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created compressed ROM at: ")) {
-            if cfg!(target_os = "windows") && output_mode == OutputMode::Bench {
+            if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
                 Command::new(WSL).arg("rm").arg(compressed_rom_path).check("wsl rm").await?;
             } else {
                 fs::remove_file(compressed_rom_path).await?;
             }
         }
         if let Some(cosmetics_log_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created cosmetic log at: ")) {
-            if cfg!(target_os = "windows") && output_mode == OutputMode::Bench {
+            if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
                 Command::new(WSL).arg("rm").arg(cosmetics_log_path).check("wsl rm").await?;
             } else {
                 fs::remove_file(cosmetics_log_path).await?;
@@ -246,7 +248,7 @@ pub async fn run_rando(repo_path: &Path, settings: &RandoSettings, json_settings
         }
     }
     Ok(RollOutput {
-        instructions: if let OutputMode::Bench = output_mode {
+        instructions: if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
             if_chain! {
                 if let Some(instructions_line) = stderr.iter().rev().find(|line| line.contains("instructions:u"));
                 if let Some((_, instructions)) = regex_captures!("^ *([0-9,.]+) +instructions:u", instructions_line);
@@ -261,7 +263,7 @@ pub async fn run_rando(repo_path: &Path, settings: &RandoSettings, json_settings
         },
         patch: if output.status.success() {
             if let Some(patch_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created patch file archive at: ")) {
-                Some((cfg!(target_os = "windows") && output_mode == OutputMode::Bench, PathBuf::from(patch_path)))
+                Some((cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed), PathBuf::from(patch_path)))
             } else if let Some(patch_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Creating Patch File: ")) {
                 Some((false, repo_path.join("Output").join(patch_path)))
             } else {

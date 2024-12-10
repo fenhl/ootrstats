@@ -145,12 +145,12 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 fs::write(repo_path.join("ZOOTDEC.z64"), decompress::decompress(&mut fs::read(&base_rom_path).await?)?).await?;
             }
             if fs::exists(repo_path.join("Cargo.toml")).await? {
-                #[cfg(target_os = "windows")] let rust_library_filename = if let OutputMode::Bench = output_mode { "rs.so" } else { "rs.dll" };
+                #[cfg(target_os = "windows")] let rust_library_filename = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode { "rs.so" } else { "rs.dll" };
                 #[cfg(any(target_os = "linux", target_os = "macos"))] let rust_library_filename = "rs.so";
-                if output_mode == OutputMode::Bench || !fs::exists(repo_path.join(rust_library_filename)).await? {
+                if matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) || !fs::exists(repo_path.join(rust_library_filename)).await? {
                     //TODO update Rust
                     tx.send(Message::Init(format!("building Rust code"))).await?;
-                    let mut cargo = if cfg!(target_os = "windows") && output_mode == OutputMode::Bench {
+                    let mut cargo = if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
                         let mut cargo = Command::new(crate::WSL);
                         cargo.arg("cargo");
                         cargo
@@ -168,7 +168,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     cargo.check("cargo build").await?;
                     tx.send(Message::Init(format!("copying Rust module"))).await?;
                     #[cfg(target_os = "windows")] {
-                        if let OutputMode::Bench = output_mode {
+                        if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
                             Command::new(crate::WSL).arg("cp").arg("target/release/librs.so").arg("rs.so").current_dir(&repo_path).check("wsl cp").await?;
                         } else {
                             fs::copy(repo_path.join("target").join("release").join("rs.dll"), repo_path.join("rs.pyd")).await?;
@@ -200,7 +200,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             tx.send(Message::Init(format!("copying base rom to RSL repo"))).await?;
             let rsl_data_dir = repo_path.join("data");
             let rsl_base_rom_path = rsl_data_dir.join("oot-ntscu-1.0.z64");
-            if cfg!(target_os = "windows") && output_mode == OutputMode::Bench {
+            if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
                 Command::new(crate::WSL).arg("mkdir").arg("-p").arg("data").current_dir(&repo_path).check("wsl mkdir").await?;
                 Command::new(crate::WSL).arg("cp").arg(&wsl_base_rom_path).arg("data/oot-ntscu-1.0.z64").current_dir(&repo_path).check("wsl cp").await?;
             } else {
@@ -243,7 +243,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             }
             RandoSetup::Rsl { .. } => {
                 let repo_path = repo_path.clone();
-                Either::Right(async move { crate::run_rsl(&repo_path, seed_idx, output_mode == OutputMode::Bench).await })
+                Either::Right(async move { crate::run_rsl(&repo_path, seed_idx, matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed)).await })
             }
         };
         let tx = tx.clone();

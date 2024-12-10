@@ -134,7 +134,10 @@ This subcommand requires workers to have access to [`perf`](https://perf.wiki.ke
 
 Results will be displayed on stdout.
 
-If this subcommand is run with the `--raw-data` option, it will output the following data instead of displaying a summary: Each seed's data is printed on a separate line, starting with the character `s` for success or `f` for failure, followed by a space, followed by the number of instructions taken.
+This subcommand takes the following options:
+
+* `--raw-data`: Instead of displaying a summary, the command will output the following data: Each seed's data is printed on a separate line, starting with the character `s` for success or `f` for failure, followed by a space, followed by the number of instructions taken.
+* `--uncompressed`: Instruct the randomizer to skip compressing the rom. This removes the large compressor overhead, which can be useful for benchmarking the remaining parts of the randomizer. It also allows workers running on NixOS to succeed (see [OoTRandomizer/OoT-Randomizer#2229](https://github.com/OoTRandomizer/OoT-Randomizer/pull/2229)).
 
 ### `categorize`
 

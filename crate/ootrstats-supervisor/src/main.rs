@@ -214,6 +214,8 @@ enum Subcommand {
     Bench {
         #[clap(long)]
         raw_data: bool,
+        #[clap(long)]
+        uncompressed: bool,
     },
     /// Categorize spoiler logs using a JSON query.
     Categorize {
@@ -810,11 +812,11 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                 .filter(|worker::Config { name, .. }| !args.exclude_workers.contains(name))
                                 .filter(|&worker::Config { bench, .. }| bench || !is_bench)
                                 .map(|worker::Config { name, kind, .. }| {
-                                    let (task, state) = worker::State::new(worker_tx.clone(), name.clone(), kind, rando_rev, &setup, match (is_bench, args.patch) {
-                                        (false, false) => OutputMode::Normal,
-                                        (false, true) => OutputMode::Patch,
-                                        (true, false) => OutputMode::Bench,
-                                        (true, true) => unimplemented!("The `bench` subcommand currently cannot generate patch files"),
+                                    let (task, state) = worker::State::new(worker_tx.clone(), name.clone(), kind, rando_rev, &setup, if let Some(Subcommand::Bench { uncompressed, .. }) = args.subcommand {
+                                        if args.patch { unimplemented!("The `bench` subcommand currently cannot generate patch files") }
+                                        if uncompressed { OutputMode::BenchUncompressed } else { OutputMode::Bench }
+                                    } else {
+                                        if args.patch { OutputMode::Patch } else { OutputMode::Normal }
                                     });
                                     (task.map(move |res| (name, res)), state)
                                 })
@@ -870,7 +872,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
     }
     match args.subcommand {
         None => Message::Done { stats_dir }.print(args.json_messages, &mut stderr)?,
-        Some(Subcommand::Bench { raw_data: false }) => {
+        Some(Subcommand::Bench { raw_data: false, uncompressed: _ }) => {
             let mut num_successes = 0u16;
             let mut num_failures = 0u16;
             let mut instructions_success = 0u64;
@@ -900,7 +902,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                 Message::Instructions { num_successes, num_failures, success_rate, average_instructions_success, average_instructions_failure, average_failure_count, average_instructions }.print(args.json_messages, &mut stdout)?;
             }
         }
-        Some(Subcommand::Bench { raw_data: true }) => {
+        Some(Subcommand::Bench { raw_data: true, uncompressed: _ }) => {
             for state in seed_states {
                 match state {
                     SeedState::Unchecked | SeedState::Pending | SeedState::Rolling { .. } => unreachable!(),
