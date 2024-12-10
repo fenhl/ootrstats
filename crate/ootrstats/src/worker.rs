@@ -56,7 +56,7 @@ pub enum Message {
         /// present if the `bench` parameter was set and `perf` output was parsed successfully.
         instructions: Result<u64, Bytes>,
         spoiler_log: Either<PathBuf, Bytes>,
-        patch: Option<Either<(bool, PathBuf), (String, Bytes)>>,
+        patch: Option<Either<(Option<Option<String>>, PathBuf), (String, Bytes)>>,
     },
     Failure {
         seed_idx: SeedIdx,
@@ -121,7 +121,7 @@ async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[S
     Ok(if wait > Duration::default() { Some((wait, message)) } else { None })
 }
 
-pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, wsl_base_rom_path: PathBuf, cores: i8, rando_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String]) -> Result<(), Error> {
+pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, wsl_base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, rando_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String]) -> Result<(), Error> {
     let repo_path = match setup {
         RandoSetup::Normal { ref github_user, ref repo, .. } => {
             tx.send(Message::Init(format!("cloning randomizer: determining repo path"))).await?;
@@ -236,22 +236,25 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
     let handle_seed = |seed_idx| {
         let run_future = match setup {
             RandoSetup::Normal { ref settings, ref json_settings, world_counts, .. } => {
+                let wsl_distro = wsl_distro.clone();
                 let repo_path = repo_path.clone();
                 let settings = settings.clone();
                 let json_settings = json_settings.clone();
-                Either::Left(async move { crate::run_rando(&repo_path, &settings, &json_settings, world_counts, seed_idx, output_mode).await })
+                Either::Left(async move { crate::run_rando(wsl_distro.as_deref(), &repo_path, &settings, &json_settings, world_counts, seed_idx, output_mode).await })
             }
             RandoSetup::Rsl { .. } => {
+                let wsl_distro = wsl_distro.clone();
                 let repo_path = repo_path.clone();
-                Either::Right(async move { crate::run_rsl(&repo_path, seed_idx, matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed)).await })
+                Either::Right(async move { crate::run_rsl(wsl_distro.as_deref(), &repo_path, seed_idx, matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed)).await })
             }
         };
         let tx = tx.clone();
+        let wsl_distro = wsl_distro.clone();
         tokio::spawn(async move {
             tx.send(match run_future.await? {
                 RollOutput { instructions, log: Ok(spoiler_log_path), patch } => Message::Success {
                     spoiler_log: Either::Left(spoiler_log_path),
-                    patch: patch.map(Either::Left),
+                    patch: patch.map(|(is_wsl, patch)| Either::Left((is_wsl.then(|| wsl_distro.clone()), patch))),
                     seed_idx, instructions,
                 },
                 RollOutput { instructions, log: Err(error_log), patch: _ } => Message::Failure {

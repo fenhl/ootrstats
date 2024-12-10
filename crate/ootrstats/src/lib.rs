@@ -165,7 +165,7 @@ async fn python() -> Result<PathBuf, RollError> {
     })
 }
 
-pub async fn run_rando(repo_path: &Path, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
+pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let mut resolved_settings = collect![as HashMap<_, _>:
         Cow::Borrowed("create_spoiler") => json!(true),
         Cow::Borrowed("create_cosmetics_log") => json!(matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed)),
@@ -189,6 +189,10 @@ pub async fn run_rando(repo_path: &Path, settings: &RandoSettings, json_settings
                 #[cfg(target_os = "windows")] {
                     cmd_name = format!("{WSL} perf stat python3");
                     let mut cmd = Command::new(WSL);
+                    if let Some(wsl_distro) = wsl_distro {
+                        cmd.arg("--distribution");
+                        cmd.arg(wsl_distro);
+                    }
                     // install using `apt-get install linux-tools-generic` and symlink from `/usr/lib/linux-tools/*-generic/perf`
                     cmd.arg("perf");
                     cmd
@@ -243,14 +247,28 @@ pub async fn run_rando(repo_path: &Path, settings: &RandoSettings, json_settings
         }
         if let Some(compressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created compressed ROM at: ")) {
             if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
-                Command::new(WSL).arg("rm").arg(compressed_rom_path).check("wsl rm").await?;
+                let mut cmd = Command::new(WSL);
+                if let Some(wsl_distro) = wsl_distro {
+                    cmd.arg("--distribution");
+                    cmd.arg(wsl_distro);
+                }
+                cmd.arg("rm");
+                cmd.arg(compressed_rom_path);
+                cmd.check("wsl rm").await?;
             } else {
                 fs::remove_file(compressed_rom_path).await?;
             }
         }
         if let Some(cosmetics_log_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created cosmetic log at: ")) {
             if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
-                Command::new(WSL).arg("rm").arg(cosmetics_log_path).check("wsl rm").await?;
+                let mut cmd = Command::new(WSL);
+                if let Some(wsl_distro) = wsl_distro {
+                    cmd.arg("--distribution");
+                    cmd.arg(wsl_distro);
+                }
+                cmd.arg("rm");
+                cmd.arg(cosmetics_log_path);
+                cmd.check("wsl rm").await?;
             } else {
                 fs::remove_file(cosmetics_log_path).await?;
             }
@@ -305,7 +323,7 @@ pub async fn run_rando(repo_path: &Path, settings: &RandoSettings, json_settings
     })
 }
 
-pub async fn run_rsl(repo_path: &Path, seed_idx: SeedIdx, bench: bool) -> Result<RollOutput, RollError> {
+pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, seed_idx: SeedIdx, bench: bool) -> Result<RollOutput, RollError> {
     let python = python().await?;
     #[cfg_attr(not(target_os = "windows"), allow(unused_mut))] let mut cmd_name = python.display().to_string();
     let rsl_version = Command::new(&python)
@@ -328,6 +346,10 @@ pub async fn run_rsl(repo_path: &Path, seed_idx: SeedIdx, bench: bool) -> Result
                 #[cfg(target_os = "windows")] {
                     cmd_name = format!("{WSL} {cmd_name}");
                     let mut cmd = Command::new(WSL);
+                    if let Some(wsl_distro) = wsl_distro {
+                        cmd.arg("--distribution");
+                        cmd.arg(wsl_distro);
+                    }
                     // install using `apt-get install linux-tools-generic` and symlink from `/usr/lib/linux-tools/*-generic/perf`
                     cmd.arg("perf");
                     cmd

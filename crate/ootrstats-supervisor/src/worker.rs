@@ -71,6 +71,7 @@ pub(crate) enum Kind {
     Local {
         base_rom_path: PathBuf,
         wsl_base_rom_path: Option<PathBuf>,
+        wsl_distro: Option<String>,
         #[serde(default = "make_neg_one")] // default to keeping one core free to avoid slowing down the supervisor too much
         cores: i8,
     },
@@ -82,6 +83,7 @@ pub(crate) enum Kind {
         password: String,
         base_rom_path: String,
         wsl_base_rom_path: Option<String>,
+        wsl_distro: Option<String>,
         #[serde(default)]
         priority_users: Vec<String>,
     },
@@ -110,9 +112,9 @@ pub(crate) enum Error {
 impl Kind {
     async fn run(self, name: Arc<str>, tx: mpsc::Sender<(Arc<str>, Message)>, mut rx: mpsc::Receiver<SupervisorMessage>, rando_rev: gix::ObjectId, setup: RandoSetup, output_mode: OutputMode) -> Result<(), Error> {
         match self {
-            Self::Local { base_rom_path, wsl_base_rom_path, cores } => {
+            Self::Local { base_rom_path, wsl_base_rom_path, wsl_distro, cores } => {
                 let (inner_tx, mut inner_rx) = mpsc::channel(256);
-                let mut work = pin!(ootrstats::worker::work(inner_tx, rx, base_rom_path.clone(), wsl_base_rom_path.unwrap_or(base_rom_path), cores, rando_rev, setup, output_mode, &[]));
+                let mut work = pin!(ootrstats::worker::work(inner_tx, rx, base_rom_path.clone(), wsl_base_rom_path.unwrap_or(base_rom_path), cores, wsl_distro, rando_rev, setup, output_mode, &[]));
                 loop {
                     select! {
                         res = &mut work => {
@@ -132,13 +134,13 @@ impl Kind {
                     }
                 }
             }
-            Self::WebSocket { tls, hostname, password, base_rom_path, wsl_base_rom_path, priority_users } => {
+            Self::WebSocket { tls, hostname, password, base_rom_path, wsl_base_rom_path, wsl_distro, priority_users } => {
                 tx.send((name.clone(), Message::Init(format!("connecting WebSocket")))).await?;
                 let (sink, stream) = async_proto::websocket024(format!("{}://{hostname}/v{}", if tls { "wss" } else { "ws" }, Version::parse(env!("CARGO_PKG_VERSION"))?.major)).await?;
                 let mut sink = pin!(sink);
                 let mut stream = Box::pin(stream.fuse()) as Pin<Box<dyn FusedStream<Item = _> + Send>>;
                 tx.send((name.clone(), Message::Init(format!("handshaking")))).await?;
-                sink.send(websocket::ClientMessage::Handshake { password, base_rom_path, wsl_base_rom_path, rando_rev, setup, output_mode, priority_users }).await?;
+                sink.send(websocket::ClientMessage::Handshake { password, base_rom_path, wsl_base_rom_path, wsl_distro, rando_rev, setup, output_mode, priority_users }).await?;
                 tx.send((name.clone(), Message::Init(format!("waiting for reply from worker")))).await?;
                 let mut ping_interval = interval(Duration::from_secs(30));
                 ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);

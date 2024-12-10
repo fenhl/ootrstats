@@ -58,6 +58,7 @@ A worker that runs on the same computer as the supervisor program. It takes the 
 And the following optional entries:
 
 * `wslBaseRomPath`: An absolute path to the vanilla OoT rom that will be used if the randomizer is run inside [WSL](https://learn.microsoft.com/windows/wsl/about), i.e. for the `bench` subcommand if this worker is running on Windows. Defaults to `baseRomPath` if not specified.
+* `wslDistro`: The distribution name to use if the randomizer is run inside [WSL](https://learn.microsoft.com/windows/wsl/about), i.e. for the `bench` subcommand if this worker is running on Windows. Defaults to the distribution configured as the default in WSL.
 * `cores`: The maximum number of instances of the randomizer to run in parallel. If this number is 0 or negative, it will be added to the number of available CPU cores, e.g. if 6 cores are detected and a number of `-2` is given, 4 cores will be used. Defaults to `-1`.
 
 ### `webSocket`
@@ -82,6 +83,7 @@ And the following optional entries:
 
 * `tls`: Whether to use a secure WebSocket connection. If enabled, the worker needs a TLS certificate. The default is `true`.
 * `wslBaseRomPath`: An absolute path to the vanilla OoT rom that will be used if the randomizer is run inside [WSL](https://learn.microsoft.com/windows/wsl/about), i.e. for the `bench` subcommand if this worker is running on Windows. Defaults to `baseRomPath` if not specified.
+* `wslDistro`: The distribution name to use if the randomizer is run inside [WSL](https://learn.microsoft.com/windows/wsl/about), i.e. for the `bench` subcommand if this worker is running on Windows. Defaults to the distribution configured as the default in WSL.
 * `priorityUsers`: A list of usernames. The worker will not start rolling any new seeds while any of these users are signed in. Only supported by workers running on Windows.
 
 # Usage

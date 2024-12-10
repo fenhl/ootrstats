@@ -19,6 +19,7 @@ pub enum ClientMessage {
         setup: RandoSetup,
         output_mode: OutputMode,
         priority_users: Vec<String>,
+        wsl_distro: Option<String>,
     },
     Supervisor(SupervisorMessage),
     Ping,

@@ -666,10 +666,24 @@ async fn cli(mut args: Args) -> Result<(), Error> {
                                                     patch_filename.push(ext);
                                                 }
                                                 let stats_patch_path = seed_dir.join(patch_filename);
-                                                if wsl {
-                                                    let patch = Command::new(WSL).arg("cat").arg(&patch_path).check("wsl cat").await?.stdout;
+                                                if let Some(wsl_distro) = wsl {
+                                                    let mut cmd = Command::new(WSL);
+                                                    if let Some(wsl_distro) = &wsl_distro {
+                                                        cmd.arg("--distribution");
+                                                        cmd.arg(wsl_distro);
+                                                    }
+                                                    cmd.arg("cat");
+                                                    cmd.arg(&patch_path);
+                                                    let patch = cmd.check("wsl cat").await?.stdout;
                                                     fs::write(stats_patch_path, patch).await?;
-                                                    Command::new(WSL).arg("rm").arg(patch_path).check("wsl rm").await?;
+                                                    let mut cmd = Command::new(WSL);
+                                                    if let Some(wsl_distro) = &wsl_distro {
+                                                        cmd.arg("--distribution");
+                                                        cmd.arg(wsl_distro);
+                                                    }
+                                                    cmd.arg("rm");
+                                                    cmd.arg(patch_path);
+                                                    cmd.check("wsl rm").await?;
                                                 } else {
                                                     let is_same_drive = {
                                                         #[cfg(windows)] {

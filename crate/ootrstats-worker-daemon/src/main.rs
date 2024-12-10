@@ -54,12 +54,12 @@ enum Error {
 }
 
 async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::stream::DuplexStream, rocket_ws::Message>>>, stream: &mut SplitStream<rocket_ws::stream::DuplexStream>) -> Result<(), Error> {
-    let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_base_rom_path, rando_rev, setup, output_mode, priority_users } = websocket::ClientMessage::read_ws021(stream).await? else { return Ok(()) };
+    let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_base_rom_path, wsl_distro, rando_rev, setup, output_mode, priority_users } = websocket::ClientMessage::read_ws021(stream).await? else { return Ok(()) };
     if received_password != correct_password { return Ok(()) }
     let (worker_tx, mut worker_rx) = mpsc::channel(256);
     let (mut supervisor_tx, supervisor_rx) = mpsc::channel(256);
     let mut stream = Some(stream);
-    let mut work = pin!(ootrstats::worker::work(worker_tx, supervisor_rx, PathBuf::from(base_rom_path.clone()), PathBuf::from(wsl_base_rom_path.unwrap_or(base_rom_path)), 0, rando_rev, setup, output_mode, &priority_users));
+    let mut work = pin!(ootrstats::worker::work(worker_tx, supervisor_rx, PathBuf::from(base_rom_path.clone()), PathBuf::from(wsl_base_rom_path.unwrap_or(base_rom_path)), 0, wsl_distro, rando_rev, setup, output_mode, &priority_users));
     loop {
         let next_msg = if let Some(ref mut stream) = stream {
             Either::Left(timeout(Duration::from_secs(60), websocket::ClientMessage::read_ws021(*stream)))
@@ -83,9 +83,23 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                                 Either::Right(spoiler_log) => spoiler_log,
                             };
                             let patch = match patch {
-                                Some(Either::Left((wsl, patch_path))) => Some((patch_path.extension().ok_or(Error::PatchFilename)?.to_str().ok_or(Error::PatchFilename)?.to_owned(), if wsl {
-                                    let patch = Command::new(WSL).arg("cat").arg(&patch_path).check("wsl cat").await?.stdout.into();
-                                    Command::new(WSL).arg("rm").arg(patch_path).check("wsl rm").await?;
+                                Some(Either::Left((wsl, patch_path))) => Some((patch_path.extension().ok_or(Error::PatchFilename)?.to_str().ok_or(Error::PatchFilename)?.to_owned(), if let Some(wsl_distro) = wsl {
+                                    let mut cmd = Command::new(WSL);
+                                    if let Some(wsl_distro) = &wsl_distro {
+                                        cmd.arg("--distribution");
+                                        cmd.arg(wsl_distro);
+                                    }
+                                    cmd.arg("cat");
+                                    cmd.arg(&patch_path);
+                                    let patch = cmd.check("wsl cat").await?.stdout.into();
+                                    let mut cmd = Command::new(WSL);
+                                    if let Some(wsl_distro) = &wsl_distro {
+                                        cmd.arg("--distribution");
+                                        cmd.arg(wsl_distro);
+                                    }
+                                    cmd.arg("rm");
+                                    cmd.arg(patch_path);
+                                    cmd.check("wsl rm").await?;
                                     patch
                                 } else {
                                     let patch = fs::read(&patch_path).await?.into();
@@ -115,9 +129,23 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                         Either::Right(spoiler_log) => spoiler_log,
                     };
                     let patch = match patch {
-                        Some(Either::Left((wsl, patch_path))) => Some((patch_path.extension().ok_or(Error::PatchFilename)?.to_str().ok_or(Error::PatchFilename)?.to_owned(), if wsl {
-                            let patch = Command::new(WSL).arg("cat").arg(&patch_path).check("wsl cat").await?.stdout.into();
-                            Command::new(WSL).arg("rm").arg(patch_path).check("wsl rm").await?;
+                        Some(Either::Left((wsl, patch_path))) => Some((patch_path.extension().ok_or(Error::PatchFilename)?.to_str().ok_or(Error::PatchFilename)?.to_owned(), if let Some(wsl_distro) = wsl {
+                            let mut cmd = Command::new(WSL);
+                            if let Some(wsl_distro) = &wsl_distro {
+                                cmd.arg("--distribution");
+                                cmd.arg(wsl_distro);
+                            }
+                            cmd.arg("cat");
+                            cmd.arg(&patch_path);
+                            let patch = cmd.check("wsl cat").await?.stdout.into();
+                            let mut cmd = Command::new(WSL);
+                            if let Some(wsl_distro) = &wsl_distro {
+                                cmd.arg("--distribution");
+                                cmd.arg(wsl_distro);
+                            }
+                            cmd.arg("rm");
+                            cmd.arg(patch_path);
+                            cmd.check("wsl rm").await?;
                             patch
                         } else {
                             let patch = fs::read(&patch_path).await?.into();
@@ -146,7 +174,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
     Ok(())
 }
 
-#[rocket::get("/v10")] //TODO ensure this matches the major crate version
+#[rocket::get("/v11")] //TODO ensure this matches the major crate version
 fn index(correct_password: &State<String>, ws: WebSocket) -> rocket_ws::Channel<'static> {
     let correct_password = (*correct_password).clone();
     ws.channel(move |stream| Box::pin(async move {
