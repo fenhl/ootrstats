@@ -1,5 +1,6 @@
 use {
     std::{
+        borrow::Cow,
         collections::{
             BTreeMap,
             hash_map::{
@@ -157,8 +158,8 @@ struct Args {
     rsl: bool,
     #[clap(short = 'u', long, default_value = "OoTRandomizer", default_value_if("rsl", "true", Some("matthewkirby")))]
     github_user: String,
-    #[clap(long, default_value = "OoT-Randomizer", default_value_if("rsl", "true", Some("plando-random-settings")))]
-    repo: String,
+    #[clap(long)]
+    repo: Option<String>,
     #[clap(short, long, conflicts_with("rev"))]
     branch: Option<String>,
     #[clap(long)]
@@ -348,10 +349,17 @@ async fn cli(mut args: Args) -> Result<(), Error> {
         }};
     }
 
+    let repo = if let Some(repo) = args.repo {
+        Cow::Owned(repo)
+    } else if args.rsl {
+        Cow::Borrowed("plando-random-settings")
+    } else {
+        Cow::Borrowed("OoT-Randomizer")
+    };
     let rando_rev = if let Some(rev) = args.rev {
         rev
     } else {
-        let mut dir_parent = gitdir().await?.join("github.com").join(&args.github_user).join(&args.repo);
+        let mut dir_parent = gitdir().await?.join("github.com").join(&args.github_user).join(&*repo);
         let dir_name = if let Some(ref branch) = args.branch {
             dir_parent = dir_parent.join("branch");
             branch
@@ -369,7 +377,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
             let mut cmd = Command::new("git");
             cmd.arg("clone");
             cmd.arg("--depth=1");
-            cmd.arg(format!("https://github.com/{}/{}.git", args.github_user, args.repo));
+            cmd.arg(format!("https://github.com/{}/{repo}.git", args.github_user));
             if let Some(ref branch) = args.branch {
                 cmd.arg("--branch");
                 cmd.arg(branch);
@@ -382,12 +390,12 @@ async fn cli(mut args: Args) -> Result<(), Error> {
     let setup = if args.rsl {
         RandoSetup::Rsl {
             github_user: args.github_user,
-            repo: args.repo,
+            repo: repo.into_owned(),
         }
     } else {
         RandoSetup::Normal {
             github_user: args.github_user,
-            repo: args.repo,
+            repo: repo.into_owned(),
             settings: if let Some(preset) = args.preset {
                 RandoSettings::Preset(preset)
             } else if let Some(settings) = args.settings {
