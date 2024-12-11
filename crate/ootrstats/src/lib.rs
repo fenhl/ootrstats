@@ -355,10 +355,11 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
         #[cfg(any(target_os = "linux", target_os = "windows"))] {
             let mut cmd = {
                 #[cfg(target_os = "linux")] {
+                    cmd_name = format!("perf stat {cmd_name}");
                     Command::new("perf")
                 }
                 #[cfg(target_os = "windows")] {
-                    cmd_name = format!("{WSL} {cmd_name}");
+                    cmd_name = format!("{WSL} perf stat python3");
                     let mut cmd = Command::new(WSL);
                     if let Some(wsl_distro) = wsl_distro {
                         cmd.arg("--distribution");
@@ -371,10 +372,20 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
             };
             cmd.arg("stat");
             cmd.arg("--event=instructions:u");
-            cmd.arg("/usr/bin/python3");
+            #[cfg(target_os = "linux")] cmd.arg(&python);
+            #[cfg(target_os = "windows")] cmd.arg("python3");
             cmd
         }
-        #[cfg(not(any(target_os = "linux", target_os = "windows")))] { unimplemented!("`perf` is not available for macOS") }
+        #[cfg(target_os = "macos")] {
+            cmd_name = format!("time {cmd_name}");
+            let mut cmd = Command::new("/usr/bin/time");
+            cmd.arg("-l");
+            cmd.arg(&python);
+            cmd
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))] {
+            unimplemented!("`bench` subcommand not yet implemented for this OS")
+        }
     } else {
         Command::new(&python)
     };

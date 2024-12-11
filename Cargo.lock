@@ -4296,6 +4296,7 @@ name = "wheel"
 version = "0.14.4"
 source = "git+https://github.com/fenhl/wheel?branch=main#57ae5ee58fb93e438887dd221338749027580236"
 dependencies = [
+ "async-proto",
  "async-trait",
  "clap",
  "console-subscriber",
@@ -4306,6 +4307,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "tungstenite 0.24.0",
  "wheel-derive",
 ]
 

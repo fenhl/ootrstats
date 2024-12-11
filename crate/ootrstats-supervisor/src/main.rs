@@ -37,10 +37,7 @@ use {
     },
     either::Either,
     futures::{
-        future::{
-            FutureExt as _,
-            TryFutureExt as _,
-        },
+        future::FutureExt as _,
         stream::{
             FuturesUnordered,
             StreamExt as _,
@@ -76,6 +73,7 @@ use {
         traits::{
             AsyncCommandOutputExt as _,
             IoResultExt as _,
+            IsNetworkError,
         },
     },
     ootrstats::{
@@ -266,6 +264,33 @@ enum Error {
     WorkerNotFound,
 }
 
+impl IsNetworkError for Error {
+    fn is_network_error(&self) -> bool {
+        match self {
+            | Self::Config(_)
+            | Self::GitHeadId(_)
+            | Self::GitOpen(_)
+            | Self::Json(_)
+            | Self::Task(_)
+            | Self::TryFromInt(_)
+            | Self::ReaderSend(_)
+            | Self::Utf8(_)
+            | Self::DraftParse { .. }
+            | Self::EmptyErrorLog
+            | Self::Jaq
+            | Self::MissingTraceback
+            | Self::SuccessAndFailure
+            | Self::TooManyWorlds
+            | Self::WorkerNotFound
+                => false,
+            #[cfg(unix)] Self::Xdg(_) => false,
+            #[cfg(windows)] Self::MissingHomeDir => false,
+            Self::Wheel(e) => e.is_network_error(),
+            Self::Worker(errors) => errors.iter().all(|(_, e)| e.is_network_error()),
+        }
+    }
+}
+
 impl wheel::CustomExit for Error {
     fn exit(self, cmd_name: &'static str) -> ! {
         let mut debug = format!("{self:?}");
@@ -317,7 +342,7 @@ impl wheel::CustomExit for Error {
     }
 }
 
-async fn cli(mut args: Args) -> Result<(), Error> {
+async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
     if args.world_counts && args.num_seeds > 255 {
         return Err(Error::TooManyWorlds)
     }
@@ -330,7 +355,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
     });
     let mut stdout = stdout();
     let mut stderr = stderr();
-    Message::Preparing.print(args.json_messages, &mut stderr)?;
+    Message::Preparing(label).print(args.json_messages, &mut stderr)?;
     let mut config = Config::load().await?;
     let mut log_file = if config.log {
         Some(File::create("ootrstats.log").await?)
@@ -864,7 +889,7 @@ async fn cli(mut args: Args) -> Result<(), Error> {
             retry_failures: args.retry_failures,
             seed_states: &seed_states,
             workers: workers.as_deref().ok(),
-            available_parallelism, completed_readers, start, start_local,
+            label, available_parallelism, completed_readers, start, start_local,
         }.print(args.json_messages, &mut stderr)?;
         if completed_readers == available_parallelism && seed_states.iter().all(|state| match state {
             SeedState::Cancelled | SeedState::Success { .. } | SeedState::Failure { .. } => true,
@@ -1026,15 +1051,32 @@ async fn main(args: Args) -> Result<(), Error> {
     if !args.json_messages {
         enable_raw_mode().at_unknown()?;
     }
-    let res = if args.suite {
-        cli(args.clone())
-            .and_then(|()| cli(Args { preset: Some(format!("tournament")), ..args.clone() }))
-            .and_then(|()| cli(Args { preset: Some(format!("mw")), ..args.clone() }))
-            .and_then(|()| cli(Args { preset: Some(format!("hell")), ..args.clone() }))
-            .and_then(|()| cli(Args { rsl: true, github_user: format!("fenhl"), branch: Some(format!("dev-mvp")), ..args.clone() })) //TODO check to make sure plando-random-settings branch is up to date with matthewkirby:master and the randomizer commit specified in rslversion.py is equal to the specified randomizer commit
-            .await
-    } else {
-        cli(args).await
+    let res = 'res: {
+        if args.suite {
+            let mut first_network_error = None;
+            for (label, args) in [
+                ("Default / Beginner", args.clone()),
+                ("Tournament", Args { preset: Some(format!("tournament")), ..args.clone() }),
+                ("Multiworld", Args { preset: Some(format!("mw")), ..args.clone() }),
+                ("Hell Mode", Args { preset: Some(format!("hell")), ..args.clone() }),
+                ("Random Settings", Args { rsl: true, github_user: format!("fenhl"), branch: Some(format!("dev-mvp")), ..args }), //TODO check to make sure plando-random-settings branch is up to date with matthewkirby:master and the randomizer commit specified in rslversion.py is equal to the specified randomizer commit
+            ] {
+                if let Err(e) = cli(Some(label), args).await {
+                    if e.is_network_error() {
+                        first_network_error.get_or_insert(e);
+                    } else {
+                        break 'res Err(e)
+                    }
+                }
+            }
+            if let Some(e) = first_network_error {
+                Err(e)
+            } else {
+                Ok(())
+            }
+        } else {
+            cli(None, args).await
+        }
     };
     disable_raw_mode().at_unknown()?;
     res

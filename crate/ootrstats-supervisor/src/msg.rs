@@ -36,8 +36,9 @@ use {
 
 #[derive(Serialize)]
 pub(crate) enum Message<'a> {
-    Preparing,
+    Preparing(Option<&'static str>),
     Status {
+        label: Option<&'static str>,
         available_parallelism: u16,
         completed_readers: u16,
         retry_failures: bool,
@@ -84,10 +85,13 @@ impl Message<'_> {
             eprintln!();
         } else {
             match self {
-                Self::Preparing => crossterm::execute!(writer,
+                Self::Preparing(None) => crossterm::execute!(writer,
                     Print("preparing..."),
                 ).at_unknown()?,
-                Self::Status { available_parallelism, completed_readers, retry_failures, seed_states, start, start_local, workers } => {
+                Self::Preparing(Some(label)) => crossterm::execute!(writer,
+                    Print(format_args!("{label}: preparing...")),
+                ).at_unknown()?,
+                Self::Status { label, available_parallelism, completed_readers, retry_failures, seed_states, start, start_local, workers } => {
                     if let Some(workers) = workers {
                         for worker in workers {
                             if let Some(ref e) = worker.error {
@@ -224,7 +228,8 @@ impl Message<'_> {
                             }
                             let rolled = num_successes + num_failures;
                             format!(
-                                "{started}/{total} seeds started, {rolled} rolled{}, ETA {}",
+                                "{}{started}/{total} seeds started, {rolled} rolled{}, ETA {}",
+                                if let Some(label) = label { format!("{label}: ") } else { String::default() },
                                 if retry_failures {
                                     String::default()
                                 } else {
@@ -260,7 +265,10 @@ impl Message<'_> {
                                     SeedState::Success { .. } | SeedState::Failure { .. } => rolled += 1,
                                 }
                             }
-                            let summary = format!("checking for existing seeds: {rolled} rolled, {started} running, {pending} pending, {unchecked} still being checked");
+                            let summary = format!(
+                                "{}checking for existing seeds: {rolled} rolled, {started} running, {pending} pending, {unchecked} still being checked",
+                                if let Some(label) = label { format!("{label}: ") } else { String::default() },
+                            );
                             if_chain! {
                                 if let Ok((width, _)) = terminal::size();
                                 let mut prefix_end = usize::from(width) - 4;

@@ -39,6 +39,7 @@ use {
         },
     },
     tokio_tungstenite::tungstenite,
+    wheel::traits::IsNetworkError,
     ootrstats::{
         OutputMode,
         RandoSetup,
@@ -107,6 +108,23 @@ pub(crate) enum Error {
         debug: String,
         display: String,
     },
+}
+
+impl IsNetworkError for Error {
+    fn is_network_error(&self) -> bool {
+        match self {
+            | Self::Local(_)
+            | Self::Semver(_)
+            | Self::Send(_)
+            | Self::Receive { .. }
+            | Self::Remote { .. }
+                => false,
+            Self::Elapsed(_) => true,
+            Self::Read(e) => e.is_network_error(),
+            Self::WebSocket(e) => e.is_network_error(),
+            Self::Write(e) => e.is_network_error(),
+        }
+    }
 }
 
 impl Kind {
