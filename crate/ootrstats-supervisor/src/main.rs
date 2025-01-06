@@ -12,7 +12,6 @@ use {
         io::{
             IsTerminal as _,
             stderr,
-            stdout,
         },
         iter,
         mem,
@@ -23,13 +22,11 @@ use {
     bytes::Bytes,
     chrono::prelude::*,
     crossterm::{
-        cursor::MoveDown,
         event::{
             KeyCode,
             KeyEvent,
             KeyEventKind,
         },
-        style::Print,
         terminal::{
             disable_raw_mode,
             enable_raw_mode,
@@ -93,6 +90,7 @@ use {
 #[cfg(unix)] use xdg::BaseDirectories;
 
 mod config;
+mod gui;
 mod msg;
 mod worker;
 
@@ -117,7 +115,7 @@ struct Metadata {
     worker: Option<Arc<str>>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 enum SeedState {
     Unchecked,
     Pending,
@@ -182,6 +180,9 @@ struct Args {
 
     // ootrstats settings
 
+    /// Display progress graphically in a window.
+    #[clap(long, hide = true, conflicts_with("json_messages"))]
+    gui: bool,
     /// Sample size — how many seeds to roll.
     #[clap(short, long, default_value = "16384", default_value_if("world_counts", "true", Some("255")))]
     num_seeds: SeedIdx,
@@ -233,10 +234,12 @@ enum Error {
     #[error(transparent)] Config(#[from] config::Error),
     #[error(transparent)] GitHeadId(#[from] gix::reference::head_id::Error),
     #[error(transparent)] GitOpen(#[from] gix::open::Error),
+    #[error(transparent)] Iced(#[from] iced::Error),
     #[error(transparent)] Json(#[from] serde_json::Error),
+    #[error(transparent)] MessageSend(#[from] mpsc::error::SendError<Message>),
+    #[error(transparent)] ReaderSend(#[from] mpsc::error::SendError<ReaderMessage>),
     #[error(transparent)] Task(#[from] JoinError),
     #[error(transparent)] TryFromInt(#[from] std::num::TryFromIntError),
-    #[error(transparent)] ReaderSend(#[from] mpsc::error::SendError<ReaderMessage>),
     #[error(transparent)] Utf8(#[from] std::str::Utf8Error),
     #[error(transparent)] Wheel(#[from] wheel::Error),
     #[cfg(unix)] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
@@ -259,7 +262,7 @@ enum Error {
     #[error("at most 255 seeds may be generated with the --world-counts option")]
     TooManyWorlds,
     #[error("error(s) in worker(s): {}", .0.iter().map(|(worker, source)| format!("{worker}: {source}")).format(", "))]
-    Worker(Vec<(Arc<str>, worker::Error)>),
+    Worker(Vec<(Arc<str>, Arc<worker::Error>)>),
     #[error("received a message from an unknown worker")]
     WorkerNotFound,
 }
@@ -270,10 +273,12 @@ impl IsNetworkError for Error {
             | Self::Config(_)
             | Self::GitHeadId(_)
             | Self::GitOpen(_)
+            | Self::Iced(_)
             | Self::Json(_)
+            | Self::MessageSend(_)
+            | Self::ReaderSend(_)
             | Self::Task(_)
             | Self::TryFromInt(_)
-            | Self::ReaderSend(_)
             | Self::Utf8(_)
             | Self::DraftParse { .. }
             | Self::EmptyErrorLog
@@ -314,15 +319,14 @@ impl wheel::CustomExit for Error {
                 eprintln!("debug info: {debug}\r");
             }
             Self::Worker(errors) => match errors.into_iter().exactly_one() {
-                Ok((worker, worker::Error::Local(ootrstats::worker::Error::Roll(ootrstats::RollError::PerfSyntax(stderr))))) => {
+                Ok((worker, source)) => if let worker::Error::Local(ootrstats::worker::Error::Roll(ootrstats::RollError::PerfSyntax(ref stderr))) = *source {
                     eprintln!("{cmd_name}: roll error in worker {worker}: failed to parse `perf` output\r");
                     eprintln!("stderr:\r");
                     eprintln!("{}\r", String::from_utf8_lossy(&stderr).lines().filter(|line| !regex_is_match!("^[0-9]+ files remaining$", line)).format("\r\n"));
-                }
-                Ok((worker, source)) => {
+                } else {
                     eprintln!("{cmd_name}: error in worker {worker}: {source}\r");
                     eprintln!("debug info: {debug}\r");
-                }
+                },
                 Err(errors) => {
                     eprintln!("{cmd_name}: errors in workers:\r");
                     for (worker, source) in errors {
@@ -342,10 +346,28 @@ impl wheel::CustomExit for Error {
     }
 }
 
-async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
-    if args.world_counts && args.num_seeds > 255 {
-        return Err(Error::TooManyWorlds)
+async fn cli(label: Option<&'static str>, args: Args) -> Result<(), Error> {
+    let json_messages = args.json_messages;
+    let mut stderr = stderr();
+    let (tx, mut rx) = mpsc::channel(256);
+    let mut join_handle = tokio::spawn(run_inner(label, args, tx));
+    loop {
+        select! {
+            Some(msg) = rx.recv() => msg.print(json_messages, &mut stderr)?,
+            res = &mut join_handle => {
+                let () = res??;
+                while let Some(msg) = rx.recv().await {
+                    msg.print(json_messages, &mut stderr)?;
+                }
+                break
+            }
+        }
     }
+    Ok(())
+}
+
+async fn run_inner(label: Option<&'static str>, mut args: Args, tx: mpsc::Sender<Message>) -> Result<(), Error> {
+    tx.send(Message::Preparing(label)).await?;
     let (cli_tx, mut cli_rx) = mpsc::channel(256);
     tokio::spawn(async move {
         let mut cli_events = crossterm::event::EventStream::default();
@@ -353,9 +375,6 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
             if cli_tx.send(event).await.is_err() { break }
         }
     });
-    let mut stdout = stdout();
-    let mut stderr = stderr();
-    Message::Preparing(label).print(args.json_messages, &mut stderr)?;
     let mut config = Config::load().await?;
     let mut log_file = if config.log {
         Some(File::create("ootrstats.log").await?)
@@ -374,6 +393,9 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
         }};
     }
 
+    if args.world_counts && args.num_seeds > 255 {
+        return Err(Error::TooManyWorlds)
+    }
     let repo = if let Some(repo) = args.repo {
         Cow::Owned(repo)
     } else if args.rsl {
@@ -452,7 +474,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
     let is_bench = matches!(args.subcommand, Some(Subcommand::Bench { .. }));
     let start = Instant::now();
     let start_local = Local::now();
-    let mut seed_states = Vec::from_iter(iter::repeat_with(|| SeedState::Unchecked).take(args.num_seeds.into()));
+    let mut seed_states = iter::repeat_with(|| SeedState::Unchecked).take(args.num_seeds.into()).collect_vec();
     let (reader_tx, mut reader_rx) = mpsc::channel(args.num_seeds.min(256).into());
     let mut readers = (0..available_parallelism).map(|task_idx| {
         let stats_dir = stats_dir.clone();
@@ -603,7 +625,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                             match result? {
                                 Ok(()) => {}
                                 Err(e) => {
-                                    worker.error = Some(e);
+                                    worker.error = Some(Arc::new(e));
                                     let should_cancel = workers.iter().all(|worker| worker.error.is_some());
                                     for (seed_idx, state) in seed_states.iter_mut().enumerate() {
                                         if let SeedState::Rolling { workers } = state {
@@ -645,7 +667,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                                         worker.msg = None;
                                         if let Some(seed_idx) = seed_states.iter().position(|state| matches!(state, SeedState::Pending)) {
                                             if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
-                                                worker.error.get_or_insert(worker::Error::Receive { message });
+                                                worker.error.get_or_insert(Arc::new(worker::Error::Receive { message }));
                                                 cancel!(workers);
                                                 break
                                             }
@@ -656,7 +678,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                                                 .min_by_key(|&(_, num_workers)| num_workers);
                                             if let Some((seed_idx, _)) = seed_idx {
                                                 if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
-                                                    worker.error.get_or_insert(worker::Error::Receive { message });
+                                                    worker.error.get_or_insert(Arc::new(worker::Error::Receive { message }));
                                                     cancel!(workers);
                                                     break
                                                 }
@@ -885,12 +907,12 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                 cancel!(workers.as_deref().unwrap_or_default());
             },
         }
-        Message::Status {
+        tx.send(Message::Status {
             retry_failures: args.retry_failures,
-            seed_states: &seed_states,
-            workers: workers.as_deref().ok(),
+            seed_states: seed_states.clone(),
+            workers: workers.as_ref().ok().cloned(),
             label, available_parallelism, completed_readers, start, start_local,
-        }.print(args.json_messages, &mut stderr)?;
+        }).await?;
         if completed_readers == available_parallelism && seed_states.iter().all(|state| match state {
             SeedState::Cancelled | SeedState::Success { .. } | SeedState::Failure { .. } => true,
             SeedState::Unchecked | SeedState::Pending | SeedState::Rolling { .. } => false,
@@ -907,18 +929,11 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
         }
     }
     drop(cli_rx);
-    if !args.json_messages {
-        if let Ok(ref workers) = workers {
-            crossterm::execute!(stderr,
-                MoveDown(workers.len() as u16),
-            ).at_unknown()?;
-        }
-        crossterm::execute!(stderr,
-            Print("\r\n"),
-        ).at_unknown()?;
-    }
+    tx.send(Message::CloseStatus {
+        num_workers: if let Ok(ref workers) = workers { workers.len() as u16 } else { 0 },
+    }).await?;
     match args.subcommand {
-        None => Message::Done { stats_dir }.print(args.json_messages, &mut stderr)?,
+        None => tx.send(Message::Done { stats_dir }).await?,
         Some(Subcommand::Bench { raw_data: false, uncompressed: _ }) => {
             let mut num_successes = 0u16;
             let mut num_failures = 0u16;
@@ -939,14 +954,14 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                 }
             }
             if num_successes == 0 {
-                Message::InstructionsNoSuccesses.print(args.json_messages, &mut stdout)?;
+                tx.send(Message::InstructionsNoSuccesses).await?;
             } else {
                 let success_rate = num_successes as f64 / (num_successes as f64 + num_failures as f64);
                 let average_instructions_success = instructions_success / u64::try_from(num_successes).unwrap();
                 let average_instructions_failure = instructions_failure.checked_div(u64::try_from(num_failures).unwrap()).unwrap_or_default();
                 let average_failure_count = (1.0 - success_rate) / success_rate; // mean of 0-support geometric distribution
                 let average_instructions = average_failure_count * average_instructions_failure as f64 + average_instructions_success as f64;
-                Message::Instructions { num_successes, num_failures, success_rate, average_instructions_success, average_instructions_failure, average_failure_count, average_instructions }.print(args.json_messages, &mut stdout)?;
+                tx.send(Message::Instructions { num_successes, num_failures, success_rate, average_instructions_success, average_instructions_failure, average_failure_count, average_instructions }).await?;
             }
         }
         Some(Subcommand::Bench { raw_data: true, uncompressed: _ }) => {
@@ -954,16 +969,8 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                 match state {
                     SeedState::Unchecked | SeedState::Pending | SeedState::Rolling { .. } => unreachable!(),
                     SeedState::Cancelled | SeedState::Success { instructions: None, .. } | SeedState::Failure { instructions: None, .. } => {}
-                    SeedState::Success { instructions: Some(instructions), .. } => {
-                        crossterm::execute!(stdout,
-                            Print(format_args!("s {instructions}\r\n")),
-                        ).at_unknown()?;
-                    }
-                    SeedState::Failure { instructions: Some(instructions), .. } => {
-                        crossterm::execute!(stdout,
-                            Print(format_args!("f {instructions}\r\n")),
-                        ).at_unknown()?;
-                    }
+                    SeedState::Success { instructions: Some(instructions), .. } => tx.send(Message::SeedInstructions { success: true, instructions }).await?,
+                    SeedState::Failure { instructions: Some(instructions), .. } => tx.send(Message::SeedInstructions { success: false, instructions }).await?,
                 }
             }
         }
@@ -983,18 +990,20 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                 return Err(Error::Jaq)
             }
             let inputs = jaq_interpret::RcIter::new(iter::empty());
-            let mut outputs = BTreeMap::<jaq_interpret::Val, usize>::default();
-            for state in seed_states {
-                if let SeedState::Success { spoiler_log, .. } = state {
-                    for value in jaq_interpret::FilterT::run(&filter, (jaq_interpret::Ctx::new([], &inputs), jaq_interpret::Val::from(spoiler_log))) {
-                        *outputs.entry(value.map_err(|_| Error::Jaq)?).or_default() += 1;
+            let mut outputs = {
+                let mut outputs = BTreeMap::<jaq_interpret::Val, usize>::default();
+                for state in seed_states {
+                    if let SeedState::Success { spoiler_log, .. } = state {
+                        for value in jaq_interpret::FilterT::run(&filter, (jaq_interpret::Ctx::new([], &inputs), jaq_interpret::Val::from(spoiler_log))) {
+                            *outputs.entry(value.map_err(|_| Error::Jaq)?).or_default() += 1;
+                        }
                     }
                 }
-            }
-            let mut outputs = outputs.into_iter().collect_vec();
+                outputs.into_iter().map(|(output, count)| (output.into(), count)).collect_vec()
+            };
             outputs.sort_by(|(_, count1), (_, count2)| count2.cmp(count1));
             for (output, count) in outputs {
-                Message::Category { output: output.into(), count }.print(args.json_messages, &mut stdout)?;
+                tx.send(Message::Category { output, count }).await?;
             }
         }
         Some(Subcommand::Failures) => {
@@ -1012,13 +1021,18 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                     }
                 }
             }
-            Message::FailuresHeader { stats_dir }.print(args.json_messages, &mut stdout)?;
+            tx.send(Message::FailuresHeader { stats_dir }).await?;
             for msgs in counts.into_values().sorted_unstable_by_key(|msgs| -(msgs.values().map(|&(_, count)| count).sum::<usize>() as isize)).take(10) {
                 let count = msgs.values().map(|&(_, count)| count).sum::<usize>();
-                let mut msgs = msgs.into_iter().collect_vec();
+                let mut msgs = msgs.into_iter()
+                    .map(|(msg, (seed_idx, count))| (msg.to_owned(), (seed_idx, count)))
+                    .collect_vec();
                 msgs.sort_unstable_by_key(|&(_, (_, count))| count);
                 let (top_msg, (seed_idx, top_count)) = msgs.pop().expect("no error messages");
-                Message::Failure { count, top_msg, top_count, seed_idx, msgs }.print(args.json_messages, &mut stdout)?;
+                tx.send(Message::Failure {
+                    top_msg: top_msg.to_owned(),
+                    count, top_count, seed_idx, msgs,
+                }).await?;
             }
         }
         Some(Subcommand::MidosHouse { out_path }) => {
@@ -1048,36 +1062,43 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
 
 #[wheel::main(custom_exit)]
 async fn main(args: Args) -> Result<(), Error> {
-    if !args.json_messages {
-        enable_raw_mode().at_unknown()?;
-    }
-    let res = 'res: {
-        if args.suite {
-            let mut first_network_error = None;
-            for (label, args) in [
-                ("Default / Beginner", args.clone()),
-                ("Tournament", Args { preset: Some(format!("tournament")), ..args.clone() }),
-                ("Multiworld", Args { preset: Some(format!("mw")), ..args.clone() }),
-                ("Hell Mode", Args { preset: Some(format!("hell")), ..args.clone() }),
-                ("Random Settings", Args { rsl: true, github_user: format!("fenhl"), branch: Some(format!("dev-mvp")), ..args }), //TODO check to make sure plando-random-settings branch is up to date with matthewkirby:master and the randomizer commit specified in rslversion.py is equal to the specified randomizer commit
-            ] {
-                if let Err(e) = cli(Some(label), args).await {
-                    if e.is_network_error() {
-                        first_network_error.get_or_insert(e);
-                    } else {
-                        break 'res Err(e)
+    if args.gui {
+        iced::application("ootrstats", gui::State::update, gui::State::view)
+            .subscription(gui::State::subscription)
+            .run_with(|| (gui::State::new(args), iced::Task::none()))?;
+        Ok(())
+    } else {
+        if !args.json_messages {
+            enable_raw_mode().at_unknown()?;
+        }
+        let res = 'res: {
+            if args.suite {
+                let mut first_network_error = None;
+                for (label, args) in [
+                    ("Default / Beginner", args.clone()),
+                    ("Tournament", Args { preset: Some(format!("tournament")), ..args.clone() }),
+                    ("Multiworld", Args { preset: Some(format!("mw")), ..args.clone() }),
+                    ("Hell Mode", Args { preset: Some(format!("hell")), ..args.clone() }),
+                    ("Random Settings", Args { rsl: true, github_user: format!("fenhl"), branch: Some(format!("dev-mvp")), ..args }), //TODO check to make sure plando-random-settings branch is up to date with matthewkirby:master and the randomizer commit specified in rslversion.py is equal to the specified randomizer commit
+                ] {
+                    if let Err(e) = cli(Some(label), args).await {
+                        if e.is_network_error() {
+                            first_network_error.get_or_insert(e);
+                        } else {
+                            break 'res Err(e)
+                        }
                     }
                 }
-            }
-            if let Some(e) = first_network_error {
-                Err(e)
+                if let Some(e) = first_network_error {
+                    Err(e)
+                } else {
+                    Ok(())
+                }
             } else {
-                Ok(())
+                cli(None, args).await
             }
-        } else {
-            cli(None, args).await
-        }
-    };
-    disable_raw_mode().at_unknown()?;
-    res
+        };
+        disable_raw_mode().at_unknown()?;
+        res
+    }
 }
