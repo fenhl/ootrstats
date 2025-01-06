@@ -217,7 +217,8 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, settings: &Ra
     } else {
         Command::new(&python)
     };
-    cmd.arg("OoTRandomizer.py");
+    cmd.arg("-c");
+    cmd.arg("import OoTRandomizer; OoTRandomizer.start()"); // called this way to allow mypyc optimization to work
     cmd.arg("--no_log");
     match settings {
         RandoSettings::Default => {}

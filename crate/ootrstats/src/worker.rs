@@ -152,6 +152,10 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     tx.send(Message::Init(format!("building Rust code"))).await?;
                     let mut cargo = if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
                         let mut cargo = Command::new(crate::WSL);
+                        if let Some(wsl_distro) = &wsl_distro {
+                            cargo.arg("--distribution");
+                            cargo.arg(wsl_distro);
+                        }
                         cargo.arg("cargo");
                         cargo
                     } else {
@@ -169,7 +173,12 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     tx.send(Message::Init(format!("copying Rust module"))).await?;
                     #[cfg(target_os = "windows")] {
                         if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
-                            Command::new(crate::WSL).arg("cp").arg("target/release/librs.so").arg("rs.so").current_dir(&repo_path).check("wsl cp").await?;
+                            let mut cp = Command::new(crate::WSL);
+                            if let Some(wsl_distro) = &wsl_distro {
+                                cp.arg("--distribution");
+                                cp.arg(wsl_distro);
+                            }
+                            cp.arg("cp").arg("target/release/librs.so").arg("rs.so").current_dir(&repo_path).check("wsl cp").await?;
                         } else {
                             fs::copy(repo_path.join("target").join("release").join("rs.dll"), repo_path.join("rs.pyd")).await?;
                         }
@@ -177,6 +186,21 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     #[cfg(target_os = "linux")] fs::copy(repo_path.join("target").join("release").join("librs.so"), repo_path.join("rs.so")).await?;
                     #[cfg(target_os = "macos")] fs::copy(repo_path.join("target").join("release").join("librs.dylib"), repo_path.join("rs.so")).await?;
                 }
+            }
+            if fs::exists(repo_path.join("mypy.ini")).await? {
+                tx.send(Message::Init(format!("compiling Python code with mypyc"))).await?;
+                let mut mypyc = if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
+                    let mut mypyc = Command::new(crate::WSL);
+                    if let Some(wsl_distro) = &wsl_distro {
+                        mypyc.arg("--distribution");
+                        mypyc.arg(wsl_distro);
+                    }
+                    mypyc.arg("mypyc");
+                    mypyc
+                } else {
+                    Command::new("mypyc")
+                };
+                mypyc.current_dir(&repo_path).check("mypyc").await?;
             }
             repo_path
         }
@@ -201,8 +225,18 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             let rsl_data_dir = repo_path.join("data");
             let rsl_base_rom_path = rsl_data_dir.join("oot-ntscu-1.0.z64");
             if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
-                Command::new(crate::WSL).arg("mkdir").arg("-p").arg("data").current_dir(&repo_path).check("wsl mkdir").await?;
-                Command::new(crate::WSL).arg("cp").arg(&wsl_base_rom_path).arg("data/oot-ntscu-1.0.z64").current_dir(&repo_path).check("wsl cp").await?;
+                let mut mkdir = Command::new(crate::WSL);
+                if let Some(wsl_distro) = &wsl_distro {
+                    mkdir.arg("--distribution");
+                    mkdir.arg(wsl_distro);
+                }
+                mkdir.arg("mkdir").arg("-p").arg("data").current_dir(&repo_path).check("wsl mkdir").await?;
+                let mut cp = Command::new(crate::WSL);
+                if let Some(wsl_distro) = &wsl_distro {
+                    cp.arg("--distribution");
+                    cp.arg(wsl_distro);
+                }
+                cp.arg("cp").arg(&wsl_base_rom_path).arg("data/oot-ntscu-1.0.z64").current_dir(&repo_path).check("wsl cp").await?;
             } else {
                 if !fs::exists(&rsl_base_rom_path).await? {
                     fs::create_dir_all(rsl_data_dir).await?;
