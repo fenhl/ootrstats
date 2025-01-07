@@ -14,10 +14,10 @@ clap = { version = "4.5.1", features = ["derive"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
 either = "1.10.0"
 futures = "0.3.30"
-gix = "0.68"
+gix = "0.69"
 iced = { version = "0.13.1", default-features = false, features = ["advanced", "auto-detect-theme", "tiny-skia", "tokio"] }
 if_chain = "1.0.2"
-itertools = "0.13"
+itertools = "0.14"
 jaq-core = "1.4.0"
 jaq-interpret = "1.4.0"
 jaq-parse = "1.0.2"
