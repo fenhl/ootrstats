@@ -210,11 +210,11 @@ impl Kind {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Serialize)]
 pub(crate) struct State {
     pub(crate) name: Arc<str>,
     pub(crate) msg: Option<String>,
-    pub(crate) error: Option<Arc<Error>>,
+    pub(crate) error: Option<Error>,
     pub(crate) ready: u8,
     #[serde(skip)]
     pub(crate) supervisor_tx: mpsc::Sender<SupervisorMessage>,

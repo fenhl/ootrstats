@@ -15,7 +15,6 @@ crossterm = { version = "0.28", features = ["event-stream"] }
 either = "1.10.0"
 futures = "0.3.30"
 gix = "0.69"
-iced = { version = "0.13.1", default-features = false, features = ["advanced", "auto-detect-theme", "tiny-skia", "tokio"] }
 if_chain = "1.0.2"
 itertools = "0.14"
 jaq-core = "1.4.0"
@@ -35,7 +34,6 @@ serde_with = "3.9.0"
 syn = { version = "2.0.66", default-features = false, features = ["parsing"] }
 thiserror = "2"
 tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }
-tokio-stream = "0.1.17"
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-webpki-roots"] }
 wheel = { git = "https://github.com/fenhl/wheel", branch = "main", features = ["async-proto", "serde", "serde_json", "tungstenite024"] }
 

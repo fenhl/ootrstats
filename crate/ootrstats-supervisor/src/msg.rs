@@ -11,7 +11,6 @@ use {
     },
     crossterm::{
         cursor::{
-            MoveDown,
             MoveToColumn,
             MoveUp,
         },
@@ -35,23 +34,20 @@ use {
     },
 };
 
-#[derive(Debug, Serialize)]
-pub(crate) enum Message {
+#[derive(Serialize)]
+pub(crate) enum Message<'a> {
     Preparing(Option<&'static str>),
     Status {
         label: Option<&'static str>,
         available_parallelism: u16,
         completed_readers: u16,
         retry_failures: bool,
-        seed_states: Vec<SeedState>,
+        seed_states: &'a [SeedState],
         #[serde(skip)]
         start: Instant,
         #[serde(skip)]
         start_local: DateTime<Local>,
-        workers: Option<Vec<worker::State>>,
-    },
-    CloseStatus {
-        num_workers: u16,
+        workers: Option<&'a [worker::State]>,
     },
     Done {
         stats_dir: PathBuf,
@@ -66,10 +62,6 @@ pub(crate) enum Message {
         average_failure_count: f64,
         average_instructions: f64,
     },
-    SeedInstructions {
-        success: bool,
-        instructions: u64,
-    },
     Category {
         count: usize,
         output: Json,
@@ -79,14 +71,14 @@ pub(crate) enum Message {
     },
     Failure {
         count: usize,
-        top_msg: String,
+        top_msg: &'a str,
         top_count: usize,
         seed_idx: SeedIdx,
-        msgs: Vec<(String, (SeedIdx, usize))>,
+        msgs: Vec<(&'a str, (SeedIdx, usize))>,
     },
 }
 
-impl Message {
+impl Message<'_> {
     pub(crate) fn print(self, json: bool, writer: &mut impl Write) -> Result<(), Error> {
         if json {
             serde_json::to_writer(writer, &self)?;
@@ -101,7 +93,7 @@ impl Message {
                 ).at_unknown()?,
                 Self::Status { label, available_parallelism, completed_readers, retry_failures, seed_states, start, start_local, workers } => {
                     if let Some(workers) = workers {
-                        for worker in &*workers {
+                        for worker in workers {
                             if let Some(ref e) = worker.error {
                                 let e = e.to_string();
                                 if_chain! {
@@ -132,7 +124,7 @@ impl Message {
                                 let mut completed = 0u16;
                                 let mut total_completed = 0u16;
                                 let mut failures = 0u16;
-                                for state in &*seed_states {
+                                for state in seed_states {
                                     match state {
                                         SeedState::Success { worker: Some(name), .. } => {
                                             total_completed += 1;
@@ -211,7 +203,7 @@ impl Message {
                             let mut total = 0u16;
                             let mut completed = 0u16;
                             let mut skipped = 0u16;
-                            for state in &*seed_states {
+                            for state in seed_states {
                                 match state {
                                     SeedState::Unchecked => unreachable!(),
                                     SeedState::Pending => total += 1,
@@ -264,7 +256,7 @@ impl Message {
                             let mut started = 0u16;
                             let mut pending = 0u16;
                             let mut unchecked = 0u16;
-                            for state in &*seed_states {
+                            for state in seed_states {
                                 match state {
                                     SeedState::Unchecked => unchecked += 1,
                                     SeedState::Pending => pending += 1,
@@ -294,10 +286,6 @@ impl Message {
                         Clear(ClearType::UntilNewLine),
                     ).at_unknown()?;
                 }
-                Self::CloseStatus { num_workers } => crossterm::execute!(writer,
-                    MoveDown(num_workers),
-                    Print("\r\n"),
-                ).at_unknown()?,
                 Self::Done { stats_dir } => crossterm::execute!(writer,
                     Print(format_args!("stats saved to {}\r\n", stats_dir.display())),
                 ).at_unknown()?,
@@ -309,9 +297,6 @@ impl Message {
                     Print(format_args!("average instructions (success): {average_instructions_success} ({average_instructions_success:.3e})\r\n")),
                     Print(format_args!("average instructions (failure): {}\r\n", if num_failures == 0 { format!("N/A") } else { format!("{average_instructions_failure} ({average_instructions_failure:.3e})") })),
                     Print(format_args!("average total instructions until success: {average_instructions} ({average_instructions:.3e})\r\n")),
-                ).at_unknown()?,
-                Self::SeedInstructions { success, instructions } => crossterm::execute!(writer,
-                    Print(format_args!("{} {instructions}\r\n", if success { "s" } else { "f" })),
                 ).at_unknown()?,
                 Self::Category { count, output } => crossterm::execute!(writer,
                     Print(format_args!("{count}x: {output}\r\n")),
