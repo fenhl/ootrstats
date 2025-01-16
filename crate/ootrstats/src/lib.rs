@@ -165,7 +165,7 @@ async fn python() -> Result<PathBuf, RollError> {
     })
 }
 
-pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
+pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli: bool, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let mut resolved_settings = collect![as HashMap<_, _>:
         Cow::Borrowed("create_spoiler") => json!(true),
         Cow::Borrowed("create_cosmetics_log") => json!(matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed)),
@@ -177,60 +177,120 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, settings: &Ra
     if world_counts {
         resolved_settings.insert(Cow::Borrowed("world_count"), json!(seed_idx + 1));
     }
-    let python = python().await?;
-    #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(unused_mut))] let mut cmd_name = python.display().to_string();
-    let mut cmd = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
-        #[cfg(any(target_os = "linux", target_os = "windows"))] {
-            let mut cmd = {
-                #[cfg(target_os = "linux")] {
-                    cmd_name = format!("perf stat {cmd_name}");
-                    Command::new("perf")
-                }
-                #[cfg(target_os = "windows")] {
-                    cmd_name = format!("{WSL} perf stat python3");
-                    let mut cmd = Command::new(WSL);
-                    if let Some(wsl_distro) = wsl_distro {
-                        cmd.arg("--distribution");
-                        cmd.arg(wsl_distro);
+    let mut cmd_name;
+    let mut cmd;
+    if use_rust_cli {
+        cmd_name = repo_path.join("target").join("release").join("ootr-cli").display().to_string();
+        cmd = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
+            #[cfg(any(target_os = "linux", target_os = "windows"))] {
+                let mut cmd = {
+                    #[cfg(target_os = "linux")] {
+                        cmd_name = format!("perf stat {cmd_name}");
+                        Command::new("perf")
                     }
-                    // install using `apt-get install linux-tools-generic` and symlink from `/usr/lib/linux-tools/*-generic/perf`
-                    cmd.arg("perf");
-                    cmd
-                }
-            };
-            cmd.arg("stat");
-            cmd.arg("--event=instructions:u");
-            #[cfg(target_os = "linux")] cmd.arg(&python);
-            #[cfg(target_os = "windows")] cmd.arg("python3");
-            cmd
-        }
-        #[cfg(target_os = "macos")] {
-            cmd_name = format!("time {cmd_name}");
-            let mut cmd = Command::new("/usr/bin/time");
-            cmd.arg("-l");
-            cmd.arg(&python);
-            cmd
-        }
-        #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))] {
-            unimplemented!("`bench` subcommand not yet implemented for this OS")
+                    #[cfg(target_os = "windows")] {
+                        cmd_name = format!("{WSL} perf stat {cmd_name}");
+                        let mut cmd = Command::new(WSL);
+                        if let Some(wsl_distro) = wsl_distro {
+                            cmd.arg("--distribution");
+                            cmd.arg(wsl_distro);
+                        }
+                        // install using `apt-get install linux-tools-generic` and symlink from `/usr/lib/linux-tools/*-generic/perf`
+                        cmd.arg("perf");
+                        cmd
+                    }
+                };
+                cmd.arg("stat");
+                cmd.arg("--event=instructions:u");
+                cmd.arg("target/release/ootr-cli");
+                cmd
+            }
+            #[cfg(target_os = "macos")] {
+                cmd_name = format!("time {cmd_name}");
+                let mut cmd = Command::new("/usr/bin/time");
+                cmd.arg("-l");
+                cmd.arg("target/release/ootr-cli");
+                cmd
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))] {
+                unimplemented!("`bench` subcommand not yet implemented for this OS")
+            }
+        } else {
+            #[cfg(target_os = "windows")] {
+                cmd_name = repo_path.join("target").join("release").join("ootr-cli.exe").display().to_string();
+                Command::new(repo_path.join("target").join("release").join("ootr-cli.exe"))
+            }
+            #[cfg(not(target_os = "windows"))] { Command::new(repo_path.join("target").join("release").join("ootr-cli")) }
+        };
+        cmd.arg("--no-log");
+        match settings {
+            RandoSettings::Default => {}
+            RandoSettings::Preset(preset) => {
+                cmd.arg("--settings-preset");
+                cmd.arg(preset);
+            }
+            RandoSettings::String(settings) => {
+                cmd.arg("--settings-string");
+                cmd.arg(settings);
+            }
+            RandoSettings::Draft(spec) => resolved_settings.extend(spec.complete_randomly()?),
         }
     } else {
-        Command::new(&python)
-    };
-    cmd.arg("-c");
-    cmd.arg("import OoTRandomizer; OoTRandomizer.start()"); // called this way to allow mypyc optimization to work
-    cmd.arg("--no_log");
-    match settings {
-        RandoSettings::Default => {}
-        RandoSettings::Preset(preset) => {
-            cmd.arg("--settings_preset");
-            cmd.arg(preset);
+        let python = python().await?;
+        cmd_name = python.display().to_string();
+        cmd = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
+            #[cfg(any(target_os = "linux", target_os = "windows"))] {
+                let mut cmd = {
+                    #[cfg(target_os = "linux")] {
+                        cmd_name = format!("perf stat {cmd_name}");
+                        Command::new("perf")
+                    }
+                    #[cfg(target_os = "windows")] {
+                        cmd_name = format!("{WSL} perf stat python3");
+                        let mut cmd = Command::new(WSL);
+                        if let Some(wsl_distro) = wsl_distro {
+                            cmd.arg("--distribution");
+                            cmd.arg(wsl_distro);
+                        }
+                        // install using `apt-get install linux-tools-generic` and symlink from `/usr/lib/linux-tools/*-generic/perf`
+                        cmd.arg("perf");
+                        cmd
+                    }
+                };
+                cmd.arg("stat");
+                cmd.arg("--event=instructions:u");
+                #[cfg(target_os = "linux")] cmd.arg(&python);
+                #[cfg(target_os = "windows")] cmd.arg("python3");
+                cmd
+            }
+            #[cfg(target_os = "macos")] {
+                cmd_name = format!("time {cmd_name}");
+                let mut cmd = Command::new("/usr/bin/time");
+                cmd.arg("-l");
+                cmd.arg(&python);
+                cmd
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))] {
+                unimplemented!("`bench` subcommand not yet implemented for this OS")
+            }
+        } else {
+            Command::new(&python)
+        };
+        cmd.arg("-c");
+        cmd.arg("import OoTRandomizer; OoTRandomizer.start()"); // called this way to allow mypyc optimization to work
+        cmd.arg("--no_log");
+        match settings {
+            RandoSettings::Default => {}
+            RandoSettings::Preset(preset) => {
+                cmd.arg("--settings_preset");
+                cmd.arg(preset);
+            }
+            RandoSettings::String(settings) => {
+                cmd.arg("--settings_string");
+                cmd.arg(settings);
+            }
+            RandoSettings::Draft(spec) => resolved_settings.extend(spec.complete_randomly()?),
         }
-        RandoSettings::String(settings) => {
-            cmd.arg("--settings_string");
-            cmd.arg(settings);
-        }
-        RandoSettings::Draft(spec) => resolved_settings.extend(spec.complete_randomly()?),
     }
     cmd.arg("--settings=-");
     cmd.stdin(Stdio::piped());

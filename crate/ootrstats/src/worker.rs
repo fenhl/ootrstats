@@ -25,6 +25,7 @@ use {
     },
     if_chain::if_chain,
     rand::prelude::*,
+    semver::Version,
     tokio::{
         select,
         process::Command,
@@ -74,10 +75,12 @@ pub enum SupervisorMessage {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error(transparent)] CargoMetadata(#[from] cargo_metadata::Error),
     #[error(transparent)] Decompress(#[from] decompress::Error),
     #[error(transparent)] Env(#[from] env::VarError),
     #[cfg(unix)] #[error(transparent)] ParseInt(#[from] std::num::ParseIntError),
     #[error(transparent)] Roll(#[from] crate::RollError),
+    #[error(transparent)] Semver(#[from] semver::Error),
     #[error(transparent)] Send(#[from] mpsc::error::SendError<Message>),
     #[error(transparent)] Task(#[from] tokio::task::JoinError),
     #[error(transparent)] Wheel(#[from] wheel::Error),
@@ -122,6 +125,7 @@ async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[S
 }
 
 pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, wsl_base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, rando_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String]) -> Result<(), Error> {
+    let mut use_rust_cli = false;
     let repo_path = match setup {
         RandoSetup::Normal { ref github_user, ref repo, .. } => {
             tx.send(Message::Init(format!("cloning randomizer: determining repo path"))).await?;
@@ -144,27 +148,29 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 tx.send(Message::Init(format!("decompressing base rom"))).await?;
                 fs::write(repo_path.join("ZOOTDEC.z64"), decompress::decompress(&mut fs::read(&base_rom_path).await?)?).await?;
             }
-            if fs::exists(repo_path.join("Cargo.toml")).await? {
+            let cargo_manifest_path = repo_path.join("Cargo.toml");
+            if fs::exists(&cargo_manifest_path).await? {
+                let cargo_command = || Ok::<_, Error>(if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
+                    let mut cargo = Command::new(crate::WSL);
+                    if let Some(wsl_distro) = &wsl_distro {
+                        cargo.arg("--distribution");
+                        cargo.arg(wsl_distro);
+                    }
+                    cargo.arg("cargo");
+                    cargo
+                } else {
+                    let mut cargo = Command::new("cargo");
+                    if let Some(user_dirs) = UserDirs::new() {
+                        cargo.env("PATH", format!("{}:{}", user_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
+                    }
+                    cargo
+                });
                 #[cfg(target_os = "windows")] let rust_library_filename = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode { "rs.so" } else { "rs.dll" };
                 #[cfg(any(target_os = "linux", target_os = "macos"))] let rust_library_filename = "rs.so";
                 if matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) || !fs::exists(repo_path.join(rust_library_filename)).await? {
                     //TODO update Rust
                     tx.send(Message::Init(format!("building Rust code"))).await?;
-                    let mut cargo = if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
-                        let mut cargo = Command::new(crate::WSL);
-                        if let Some(wsl_distro) = &wsl_distro {
-                            cargo.arg("--distribution");
-                            cargo.arg(wsl_distro);
-                        }
-                        cargo.arg("cargo");
-                        cargo
-                    } else {
-                        let mut cargo = Command::new("cargo");
-                        if let Some(user_dirs) = UserDirs::new() {
-                            cargo.env("PATH", format!("{}:{}", user_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
-                        }
-                        cargo
-                    };
+                    let mut cargo = cargo_command()?;
                     cargo.arg("build");
                     cargo.arg("--lib");
                     cargo.arg("--release");
@@ -185,6 +191,24 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     }
                     #[cfg(target_os = "linux")] fs::copy(repo_path.join("target").join("release").join("librs.so"), repo_path.join("rs.so")).await?;
                     #[cfg(target_os = "macos")] fs::copy(repo_path.join("target").join("release").join("librs.dylib"), repo_path.join("rs.so")).await?;
+                }
+                if let Some(package) = cargo_metadata::MetadataCommand::new()
+                    .manifest_path(cargo_manifest_path)
+                    .exec()?
+                    .packages
+                    .into_iter()
+                    .find(|package| package.name == "ootr-cli")
+                {
+                    use_rust_cli = package.version >= Version { major: 8, minor: 2, patch: 49, pre: "fenhl.1.riir.2".parse()?, build: semver::BuildMetadata::default() };
+                }
+                if use_rust_cli {
+                    tx.send(Message::Init(format!("building Rust CLI"))).await?;
+                    let mut cargo = cargo_command()?;
+                    cargo.arg("build");
+                    cargo.arg("--release");
+                    cargo.arg("--package=ootr-cli");
+                    cargo.current_dir(&repo_path);
+                    cargo.check("cargo build").await?;
                 }
             }
             if fs::exists(repo_path.join("mypy.ini")).await? {
@@ -274,7 +298,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 let repo_path = repo_path.clone();
                 let settings = settings.clone();
                 let json_settings = json_settings.clone();
-                Either::Left(async move { crate::run_rando(wsl_distro.as_deref(), &repo_path, &settings, &json_settings, world_counts, seed_idx, output_mode).await })
+                Either::Left(async move { crate::run_rando(wsl_distro.as_deref(), &repo_path, use_rust_cli, &settings, &json_settings, world_counts, seed_idx, output_mode).await })
             }
             RandoSetup::Rsl { .. } => {
                 let wsl_distro = wsl_distro.clone();
