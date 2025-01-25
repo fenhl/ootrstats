@@ -14,7 +14,7 @@ clap = { version = "4.5.1", features = ["derive"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
 either = "1.10.0"
 futures = "0.3.30"
-gix = "0.69"
+gix = "0.70"
 if_chain = "1.0.2"
 itertools = "0.14"
 jaq-core = "1.4.0"
@@ -38,7 +38,7 @@ tokio-tungstenite = { version = "0.24", default-features = false, features = ["r
 wheel = { git = "https://github.com/fenhl/wheel", branch = "main", features = ["async-proto", "serde", "serde_json", "tungstenite024"] }
 
 [target."cfg(windows)".dependencies]
-directories = "5.0.1"
+directories = "6"
 
 [target."cfg(unix)".dependencies]
 xdg = "2.5.2"
