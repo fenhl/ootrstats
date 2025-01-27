@@ -13,7 +13,7 @@ if (-not $?)
     throw 'Native Failure'
 }
 
-wsl env -C /home/fenhl/wslgit/github.com/fenhl/ootrstats cargo check --workspace
+wsl env -C /home/fenhl/wslgit/github.com/fenhl/ootrstats cargo check --workspace --exclude=ootrstats-worker-windows-service
 if (-not $?)
 {
     throw 'Native Failure'
