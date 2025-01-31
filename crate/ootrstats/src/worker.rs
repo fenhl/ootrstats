@@ -247,7 +247,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             }
             tx.send(Message::Init(format!("copying base rom to RSL repo"))).await?;
             let rsl_data_dir = repo_path.join("data");
-            let rsl_base_rom_path = rsl_data_dir.join("oot-ntscu-1.0.z64");
+            let rsl_base_rom_path = rsl_data_dir.join("oot-ntscu-1.0.n64");
             if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
                 let mut mkdir = Command::new(crate::WSL);
                 if let Some(wsl_distro) = &wsl_distro {
@@ -263,8 +263,9 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 cp.arg("cp").arg(&wsl_base_rom_path).arg("data/oot-ntscu-1.0.z64").current_dir(&repo_path).check("wsl cp").await?;
             } else {
                 if !fs::exists(&rsl_base_rom_path).await? {
+                    tx.send(Message::Init(format!("decompressing base rom"))).await?;
                     fs::create_dir_all(rsl_data_dir).await?;
-                    fs::copy(&base_rom_path, rsl_base_rom_path).await?;
+                    fs::write(rsl_base_rom_path, decompress::decompress(&mut fs::read(&base_rom_path).await?)?).await?;
                 }
             }
             repo_path
