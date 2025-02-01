@@ -3558,7 +3558,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats"
-version = "11.0.0"
+version = "12.0.0"
 dependencies = [
  "async-proto",
  "bytes",
@@ -3584,7 +3584,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-supervisor"
-version = "11.0.0"
+version = "12.0.0"
 dependencies = [
  "async-proto",
  "bytes",
@@ -3621,7 +3621,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-daemon"
-version = "11.0.0"
+version = "12.0.0"
 dependencies = [
  "async-proto",
  "directories 6.0.0",
@@ -3640,7 +3640,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-windows-service"
-version = "11.0.0"
+version = "12.0.0"
 dependencies = [
  "ootrstats-worker-daemon",
  "rocket",

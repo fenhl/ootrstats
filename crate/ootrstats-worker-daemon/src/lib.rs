@@ -54,12 +54,12 @@ enum Error {
 }
 
 async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::stream::DuplexStream, rocket_ws::Message>>>, stream: &mut SplitStream<rocket_ws::stream::DuplexStream>) -> Result<(), Error> {
-    let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_base_rom_path, wsl_distro, rando_rev, setup, output_mode, priority_users } = websocket::ClientMessage::read_ws021(stream).await? else { return Ok(()) };
+    let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_distro, rando_rev, setup, output_mode, priority_users } = websocket::ClientMessage::read_ws021(stream).await? else { return Ok(()) };
     if received_password != correct_password { return Ok(()) }
     let (worker_tx, mut worker_rx) = mpsc::channel(256);
     let (mut supervisor_tx, supervisor_rx) = mpsc::channel(256);
     let mut stream = Some(stream);
-    let mut work = pin!(ootrstats::worker::work(worker_tx, supervisor_rx, PathBuf::from(base_rom_path.clone()), PathBuf::from(wsl_base_rom_path.unwrap_or(base_rom_path)), 0, wsl_distro, rando_rev, setup, output_mode, &priority_users));
+    let mut work = pin!(ootrstats::worker::work(worker_tx, supervisor_rx, PathBuf::from(base_rom_path.clone()), 0, wsl_distro, rando_rev, setup, output_mode, &priority_users));
     loop {
         let next_msg = if let Some(ref mut stream) = stream {
             Either::Left(timeout(Duration::from_secs(60), websocket::ClientMessage::read_ws021(*stream)))
@@ -174,7 +174,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
     Ok(())
 }
 
-#[rocket::get("/v11")] //TODO ensure this matches the major crate version
+#[rocket::get("/v12")] //TODO ensure this matches the major crate version
 fn index(correct_password: &State<String>, ws: WebSocket) -> rocket_ws::Channel<'static> {
     let correct_password = (*correct_password).clone();
     ws.channel(move |stream| Box::pin(async move {

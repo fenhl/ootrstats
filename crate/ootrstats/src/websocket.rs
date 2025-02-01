@@ -14,7 +14,6 @@ pub enum ClientMessage {
     Handshake {
         password: String,
         base_rom_path: String,
-        wsl_base_rom_path: Option<String>,
         rando_rev: gix_hash::ObjectId,
         setup: RandoSetup,
         output_mode: OutputMode,

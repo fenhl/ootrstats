@@ -124,7 +124,7 @@ async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[S
     Ok(if wait > Duration::default() { Some((wait, message)) } else { None })
 }
 
-pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, wsl_base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, rando_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String]) -> Result<(), Error> {
+pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, rando_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String]) -> Result<(), Error> {
     let mut use_rust_cli = false;
     let repo_path = match setup {
         RandoSetup::Normal { ref github_user, ref repo, .. } => {
@@ -248,25 +248,10 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             tx.send(Message::Init(format!("copying base rom to RSL repo"))).await?;
             let rsl_data_dir = repo_path.join("data");
             let rsl_base_rom_path = rsl_data_dir.join("oot-ntscu-1.0.n64");
-            if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
-                let mut mkdir = Command::new(crate::WSL);
-                if let Some(wsl_distro) = &wsl_distro {
-                    mkdir.arg("--distribution");
-                    mkdir.arg(wsl_distro);
-                }
-                mkdir.arg("mkdir").arg("-p").arg("data").current_dir(&repo_path).check("wsl mkdir").await?;
-                let mut cp = Command::new(crate::WSL);
-                if let Some(wsl_distro) = &wsl_distro {
-                    cp.arg("--distribution");
-                    cp.arg(wsl_distro);
-                }
-                cp.arg("cp").arg(&wsl_base_rom_path).arg("data/oot-ntscu-1.0.z64").current_dir(&repo_path).check("wsl cp").await?;
-            } else {
-                if !fs::exists(&rsl_base_rom_path).await? {
-                    tx.send(Message::Init(format!("decompressing base rom"))).await?;
-                    fs::create_dir_all(rsl_data_dir).await?;
-                    fs::write(rsl_base_rom_path, decompress::decompress(&mut fs::read(&base_rom_path).await?)?).await?;
-                }
+            if !fs::exists(&rsl_base_rom_path).await? {
+                tx.send(Message::Init(format!("decompressing base rom"))).await?;
+                fs::create_dir_all(rsl_data_dir).await?;
+                fs::write(rsl_base_rom_path, decompress::decompress(&mut fs::read(&base_rom_path).await?)?).await?;
             }
             repo_path
         }
