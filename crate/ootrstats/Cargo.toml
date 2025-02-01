@@ -19,7 +19,7 @@ gix-hash = "0.16"
 if_chain = "1.0.2"
 itertools = "0.14"
 lazy-regex = "3.1.0"
-rand = "0.8.5"
+rand = "0.9"
 semver = "1.0.23"
 serde_json = { package = "serde_json_path_to_error", version = "0.1" }
 syn = { version = "2.0.66", default-features = false, features = ["parsing"] }

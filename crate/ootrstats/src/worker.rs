@@ -24,7 +24,10 @@ use {
         },
     },
     if_chain::if_chain,
-    rand::prelude::*,
+    rand::{
+        prelude::*,
+        rng,
+    },
     semver::Version,
     tokio::{
         select,
@@ -97,7 +100,7 @@ async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[S
     let mut message = String::default();
     #[cfg(unix)] match fs::read_to_string("/sys/class/thermal/thermal_zone0/temp").await {
         Ok(temp) => if temp.trim().parse::<i32>()? >= 80000 {
-            let jitter = thread_rng().gen_range(0..10);
+            let jitter = rng().random_range(0..10);
             let new_wait = Duration::from_secs(55 + jitter);
             if new_wait > wait {
                 wait = new_wait;
@@ -113,7 +116,7 @@ async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[S
         let get_process_stdout = String::from_utf8_lossy(&get_process.stdout);
         //TODO this checks the entire Get-Process output for the given username. Usernames appearing in the table header can cause false positives. Consider requesting XML output from pwsh and parsing that
         if let Some(priority_user) = priority_users.iter().find(|&priority_user| get_process_stdout.contains(priority_user)) {
-            let jitter = thread_rng().gen_range(0..120);
+            let jitter = rng().random_range(0..120);
             let new_wait = Duration::from_secs(14 * 60 + jitter);
             if new_wait > wait {
                 wait = new_wait;

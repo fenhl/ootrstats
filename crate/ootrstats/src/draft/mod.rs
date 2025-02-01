@@ -7,7 +7,10 @@ use {
         },
     },
     async_proto::Protocol,
-    rand::prelude::*,
+    rand::{
+        prelude::*,
+        rng,
+    },
     serde_json::Value as Json,
 };
 
@@ -141,7 +144,7 @@ pub struct Spec {
 impl Spec {
     pub(crate) fn complete_randomly(&self) -> Result<HashMap<Cow<'static, str>, Json>, ResolveError> {
         let Self { groups, steps, settings } = self;
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let mut has_picked = HashSet::new();
         let mut picked_settings = HashMap::<&str, &str>::default();
         for (team, step) in steps {
