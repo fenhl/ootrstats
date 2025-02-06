@@ -175,8 +175,9 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     tx.send(Message::Init(format!("building Rust code"))).await?;
                     let mut cargo = cargo_command()?;
                     cargo.arg("build");
-                    cargo.arg("--lib");
+                    cargo.arg("--lib"); // old versions of the riir branch were organized as a single crate with multiple targets
                     cargo.arg("--release");
+                    cargo.arg("--package=ootr-python");
                     cargo.current_dir(&repo_path);
                     cargo.check("cargo build").await?;
                     tx.send(Message::Init(format!("copying Rust module"))).await?;
@@ -209,7 +210,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     let mut cargo = cargo_command()?;
                     cargo.arg("build");
                     cargo.arg("--release");
-                    cargo.arg("--package=ootr-cli");
+                    cargo.arg("--package=ootr-cli"); // old versions of the riir branch had ootr-python as the default crate
                     cargo.current_dir(&repo_path);
                     cargo.check("cargo build").await?;
                 }
