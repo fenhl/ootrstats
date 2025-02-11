@@ -107,7 +107,7 @@ The supervisor can be interrupted cleanly using <kbd>C</kbd> or <kbd>D</kbd>. If
 * `--repo`: Specifies the repository name on GitHub from which to clone the randomizer (or the random settings script if combined with `--rsl`). Defaults to `OoT-Randomizer` (or `plando-random-settings` if combined with `--rsl`).
 * `-b`, `--branch`: Specifies the git branch of the randomizer (or of the random settings script if combined with `--rsl`) to clone. Defaults to the repository's default branch.
 * `--rev`: Specifies the git revision of the randomizer (or of the random settings script if combined with `--rsl`) to clone. Must be given as an unabbreviated git commit hash. Cannot be combined with `--branch`.
-* `-p`, `--preset`: The name or an alias of the settings preset to use. Defaults to the Default/Beginner preset. Cannot be combined with `--rsl`, `--settings`, or `--suite`.
+* `-p`, `--preset`: The name or an alias of the settings preset to use. Defaults to the Default/Beginner preset. If this is combined with `--rsl`, this is the short name of the weights override to use (e.g. `beginner` for `weights/beginner_override.json`). Cannot be combined with `--settings` or `--suite`.
 * `--settings`: The settings string to use for the randomizer. Cannot be combined with `--preset`, `--rsl`, or `--suite`.
 * `--draft`: Simulates a settings draft from the given file. See [`assets/draft`](/assets/draft) for examples. Cannot be combined with `--preset`, `--settings`, or `--rsl`.
 * `--json-settings`: Specifies a JSON object of settings on the command line that will override the given preset, settings string, or draft picks. Cannot be combined with `--rsl`.

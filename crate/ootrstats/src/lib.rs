@@ -56,6 +56,7 @@ pub enum RandoSetup {
     Rsl {
         github_user: String,
         repo: String,
+        preset: Option<String>,
     },
 }
 
@@ -64,7 +65,8 @@ impl RandoSetup {
         match self {
             Self::Normal { github_user, repo, settings, json_settings, world_counts: false, random_seeds: false } if json_settings.is_empty() => Path::new("rando").join(github_user).join(repo).join(rando_rev.to_string()).join(settings.stats_dir()),
             Self::Normal { github_user, repo, settings, .. } => Path::new("rando").join(github_user).join(repo).join(rando_rev.to_string()).join("custom").join(settings.stats_dir()),
-            Self::Rsl { github_user, repo } => Path::new("rsl").join(github_user).join(repo).join(rando_rev.to_string()),
+            Self::Rsl { github_user, repo, preset: None } => Path::new("rsl").join(github_user).join(repo).join(rando_rev.to_string()),
+            Self::Rsl { github_user, repo, preset: Some(preset) } => Path::new("rsl").join(github_user).join(repo).join(rando_rev.to_string()).join(preset),
         }
     }
 }
@@ -405,7 +407,7 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
     })
 }
 
-pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, seed_idx: SeedIdx, bench: bool) -> Result<RollOutput, RollError> {
+pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, preset: Option<&str>, seed_idx: SeedIdx, bench: bool) -> Result<RollOutput, RollError> {
     let python = python().await?;
     #[cfg_attr(not(target_os = "windows"), allow(unused_mut))] let mut cmd_name = python.display().to_string();
     let rsl_version = Command::new(&python)
@@ -464,6 +466,9 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
     cmd.arg("--rando_retries=1");
     if supports_plando_filename_base {
         cmd.arg(format!("--plando_filename_base=ootrstats_{seed_idx}"));
+    }
+    if let Some(preset) = preset {
+        cmd.arg(format!("--override=weights/{preset}_override.json"));
     }
     cmd.current_dir(repo_path);
     let output = cmd.output().await.at_command(cmd_name.clone())?;

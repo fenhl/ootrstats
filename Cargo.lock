@@ -2911,7 +2911,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats"
-version = "13.0.0"
+version = "14.0.0"
 dependencies = [
  "async-proto",
  "bytes",
@@ -2937,7 +2937,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-supervisor"
-version = "13.0.0"
+version = "14.0.0"
 dependencies = [
  "async-proto",
  "bytes",
@@ -2975,7 +2975,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-daemon"
-version = "13.0.0"
+version = "14.0.0"
 dependencies = [
  "async-proto",
  "directories",
@@ -2995,7 +2995,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-windows-service"
-version = "13.0.0"
+version = "14.0.0"
 dependencies = [
  "mimalloc",
  "ootrstats-worker-daemon",

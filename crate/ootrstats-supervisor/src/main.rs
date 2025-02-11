@@ -165,7 +165,7 @@ struct Args {
     branch: Option<String>,
     #[clap(long)]
     rev: Option<gix::ObjectId>,
-    #[clap(short, long, conflicts_with("rsl"))]
+    #[clap(short, long)]
     preset: Option<String>,
     /// Settings string for the randomizer.
     #[clap(long, conflicts_with("rsl"), conflicts_with("preset"))]
@@ -419,6 +419,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
         RandoSetup::Rsl {
             github_user: args.github_user,
             repo: repo.into_owned(),
+            preset: args.preset,
         }
     } else {
         RandoSetup::Normal {
@@ -1063,7 +1064,11 @@ async fn main(args: Args) -> Result<(), Error> {
                 ("Tournament", Args { preset: Some(format!("tournament")), ..args.clone() }),
                 ("Multiworld", Args { preset: Some(format!("mw")), ..args.clone() }),
                 ("Hell Mode", Args { preset: Some(format!("hell")), ..args.clone() }),
-                ("Random Settings", Args { rsl: true, github_user: format!("fenhl"), branch: Some(format!("dev-mvp")), ..args }), //TODO check to make sure plando-random-settings branch is up to date with matthewkirby:master and the randomizer commit specified in rslversion.py is equal to the specified randomizer commit
+                ("Random Settings", if args.github_user == "fenhl" {
+                    Args { rsl: true, branch: Some(format!("dev-fenhl")), preset: Some(format!("fenhl")), ..args }
+                } else {
+                    Args { rsl: true, github_user: format!("fenhl"), branch: Some(format!("dev-mvp")), ..args }
+                }), //TODO check to make sure plando-random-settings branch is up to date with matthewkirby:master and the randomizer commit specified in rslversion.py is equal to the specified randomizer commit
             ] {
                 if let Err(e) = cli(Some(label), args).await {
                     if e.is_network_error() {
