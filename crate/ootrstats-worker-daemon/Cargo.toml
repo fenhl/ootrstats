@@ -13,6 +13,7 @@ futures = "0.3.30"
 log-lock = { git = "https://github.com/fenhl/log-lock", branch = "main", version = "0.2.1" }
 mimalloc = "0.1.43"
 ootrstats = { path = "../ootrstats" }
+ootrstats-macros = { path = "../ootrstats-macros" }
 rocket = "0.5.0"
 rocket_ws = "0.1.1"
 serde = { version = "1.0.197", features = ["derive"] }

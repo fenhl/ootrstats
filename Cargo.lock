@@ -2936,6 +2936,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ootrstats-macros"
+version = "15.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "semver",
+]
+
+[[package]]
 name = "ootrstats-supervisor"
 version = "15.0.0"
 dependencies = [
@@ -2984,6 +2993,7 @@ dependencies = [
  "log-lock",
  "mimalloc",
  "ootrstats",
+ "ootrstats-macros",
  "rocket",
  "rocket_ws",
  "serde",
