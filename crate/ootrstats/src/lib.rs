@@ -101,6 +101,7 @@ pub enum OutputMode {
 pub struct RollOutput {
     /// present if the `bench` parameter was set and `perf` output was parsed successfully.
     pub instructions: Result<u64, Bytes>,
+    pub rsl_instructions: Result<u64, Bytes>,
     /// `Ok`: spoiler log, `Err`: stderr
     pub log: Result<PathBuf, Bytes>,
     /// `(is_wsl, path)`
@@ -120,6 +121,8 @@ pub enum RollError {
     MissingHomeDir,
     #[error("failed to parse `perf` output: {}", String::from_utf8_lossy(.0))]
     PerfSyntax(Vec<u8>),
+    #[error("RSL script did not report plando location")]
+    PlandoPath(std::process::Output),
     #[error("the RSL script errored\nstdout:\n{}\nstderr:\n{}", String::from_utf8_lossy(&.0.stdout), String::from_utf8_lossy(&.0.stderr))]
     RslScriptExit(std::process::Output),
     #[error("randomizer did not report spoiler log location")]
@@ -404,10 +407,11 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
         } else {
             Err(output.stderr.into())
         },
+        rsl_instructions: Ok(0),
     })
 }
 
-pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, preset: Option<&str>, seed_idx: SeedIdx, bench: bool) -> Result<RollOutput, RollError> {
+pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli: bool, supports_unsalted_seeds: bool, random_seed: bool, preset: Option<&str>, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let python = python().await?;
     #[cfg_attr(not(target_os = "windows"), allow(unused_mut))] let mut cmd_name = python.display().to_string();
     let rsl_version = Command::new(&python)
@@ -422,7 +426,7 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
     } else {
         rsl_version.parse::<Version>().is_ok_and(|rsl_version| rsl_version >= Version::new(2, 8, 2))
     };
-    let mut cmd = if bench {
+    let mut cmd = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
         #[cfg(any(target_os = "linux", target_os = "windows"))] {
             let mut cmd = {
                 #[cfg(target_os = "linux")] {
@@ -462,8 +466,7 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
     };
     cmd.arg("RandomSettingsGenerator.py");
     cmd.arg("--no_log_errors");
-    cmd.arg("--plando_retries=1");
-    cmd.arg("--rando_retries=1");
+    cmd.arg("--no_seed");
     if supports_plando_filename_base {
         cmd.arg(format!("--plando_filename_base=ootrstats_{seed_idx}"));
     }
@@ -475,52 +478,42 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
     let stderr = BufRead::lines(&*output.stderr).try_collect::<_, Vec<_>, _>().at_command(cmd_name.clone())?;
     if output.status.success() || output.status.code() == Some(3) {
         let stdout = BufRead::lines(&*output.stdout).try_collect::<_, Vec<_>, _>().at_command(cmd_name)?;
-        Ok(RollOutput {
-            instructions: if bench {
-                #[cfg(any(target_os = "linux", target_os = "windows"))] {
-                    if_chain! {
-                        if let Some(instructions_line) = stderr.iter().rev().find(|line| line.contains("instructions:u"));
-                        if let Some((_, instructions)) = regex_captures!("^ *([0-9,.]+) +instructions:u", instructions_line);
-                        then {
-                            Ok(instructions.chars().filter(|&c| c != ',' && c != '.').collect::<String>().parse()?)
-                        } else {
-                            Err(output.stderr.clone().into())
-                        }
+        let plando_path = Path::new("data").join(stdout.iter().rev().find_map(|line| line.strip_prefix("Plando File: ")).ok_or_else(|| RollError::SpoilerLogPath(output.clone()))?);
+        let mut roll_output = run_rando(wsl_distro, &repo_path.join("randomizer"), use_rust_cli, supports_unsalted_seeds, random_seed, &RandoSettings::Default, &collect![
+            format!("enable_distribution_file") => json!(true),
+            format!("distribution_file") => json!(plando_path),
+        ], false, seed_idx, output_mode).await?;
+        fs::remove_file(plando_path).await?;
+        roll_output.rsl_instructions = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
+            #[cfg(any(target_os = "linux", target_os = "windows"))] {
+                if_chain! {
+                    if let Some(instructions_line) = stderr.iter().rev().find(|line| line.contains("instructions:u"));
+                    if let Some((_, instructions)) = regex_captures!("^ *([0-9,.]+) +instructions:u", instructions_line);
+                    then {
+                        Ok(instructions.chars().filter(|&c| c != ',' && c != '.').collect::<String>().parse()?)
+                    } else {
+                        Err(output.stderr.clone().into())
                     }
                 }
-                #[cfg(target_os = "macos")] {
-                    if_chain! {
-                        if let Some(instructions_line) = stderr.iter().rev().find(|line| line.contains("instructions retired"));
-                        if let Some((_, instructions)) = regex_captures!("^ *([0-9]+) +instructions retired", instructions_line);
-                        then {
-                            Ok(instructions.parse()?)
-                        } else {
-                            Err(output.stderr.clone().into())
-                        }
+            }
+            #[cfg(target_os = "macos")] {
+                if_chain! {
+                    if let Some(instructions_line) = stderr.iter().rev().find(|line| line.contains("instructions retired"));
+                    if let Some((_, instructions)) = regex_captures!("^ *([0-9]+) +instructions retired", instructions_line);
+                    then {
+                        Ok(instructions.parse()?)
+                    } else {
+                        Err(output.stderr.clone().into())
                     }
                 }
-                #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))] {
-                    unimplemented!("`bench` subcommand not yet implemented for this OS")
-                }
-            } else {
-                Err(Bytes::from_static(b"output mode"))
-            },
-            log: if stdout.iter().rev().any(|line| line.starts_with("rsl_tools.RandomizerError")) {
-                Err(output.stdout.into())
-            } else {
-                if let Some(distribution_file_path) = stdout.iter().rev().find_map(|line| line.strip_prefix("Copied distribution file to: ")) {
-                    fs::remove_file(distribution_file_path).await?;
-                }
-                if let Some(patch_file_path) = stdout.iter().rev().find_map(|line| line.strip_prefix("Creating Patch File: ")) {
-                    fs::remove_file(repo_path.join("patches").join(patch_file_path)).await?;
-                }
-                if let Some(cosmetics_log_path) = stdout.iter().rev().find_map(|line| line.strip_prefix("Creating Cosmetics Log: ")) {
-                    fs::remove_file(repo_path.join("patches").join(cosmetics_log_path)).await?;
-                }
-                Ok(repo_path.join("patches").join(stdout.iter().rev().find_map(|line| line.strip_prefix("Created spoiler log at: ")).ok_or_else(|| RollError::SpoilerLogPath(output))?))
-            },
-            patch: None, //TODO?
-        })
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))] {
+                unimplemented!("`bench` subcommand not yet implemented for this OS")
+            }
+        } else {
+            Err(Bytes::from_static(b"output mode"))
+        };
+        Ok(roll_output)
     } else {
         Err(RollError::RslScriptExit(output))
     }

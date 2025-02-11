@@ -166,12 +166,12 @@ impl Kind {
                         res = timeout(Duration::from_secs(60), stream.next().then(|opt| if let Some(res) = opt { Either::Left(future::ready(res)) } else { Either::Right(future::pending()) })) => match res? {
                             Ok(websocket::ServerMessage::Init(msg)) => tx.send((name.clone(), Message::Init(msg))).await?,
                             Ok(websocket::ServerMessage::Ready(ready)) => tx.send((name.clone(), Message::Ready(ready))).await?,
-                            Ok(websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, patch }) => tx.send((name.clone(), Message::Success {
+                            Ok(websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch }) => tx.send((name.clone(), Message::Success {
                                 spoiler_log: Either::Right(spoiler_log),
                                 patch: patch.map(Either::Right),
-                                seed_idx, instructions,
+                                seed_idx, instructions, rsl_instructions,
                             })).await?,
-                            Ok(websocket::ServerMessage::Failure { seed_idx, instructions, error_log }) => tx.send((name.clone(), Message::Failure { seed_idx, instructions, error_log })).await?,
+                            Ok(websocket::ServerMessage::Failure { seed_idx, instructions, rsl_instructions, error_log }) => tx.send((name.clone(), Message::Failure { seed_idx, instructions, rsl_instructions, error_log })).await?,
                             Ok(websocket::ServerMessage::Error { display, debug }) => return Err(Error::Remote { debug, display }),
                             Ok(websocket::ServerMessage::Ping) => {}
                             Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite024(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => stream = Box::pin(stream::empty()),
@@ -186,12 +186,12 @@ impl Kind {
                                 match res {
                                     Ok(websocket::ServerMessage::Init(msg)) => tx.send((name.clone(), Message::Init(msg))).await?,
                                     Ok(websocket::ServerMessage::Ready(ready)) => tx.send((name.clone(), Message::Ready(ready))).await?,
-                                    Ok(websocket::ServerMessage::Success { seed_idx, instructions, spoiler_log, patch }) => tx.send((name.clone(), Message::Success {
+                                    Ok(websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch }) => tx.send((name.clone(), Message::Success {
                                         spoiler_log: Either::Right(spoiler_log),
                                         patch: patch.map(Either::Right),
-                                        seed_idx, instructions,
+                                        seed_idx, instructions, rsl_instructions,
                                     })).await?,
-                                    Ok(websocket::ServerMessage::Failure { seed_idx, instructions, error_log }) => tx.send((name.clone(), Message::Failure { seed_idx, instructions, error_log })).await?,
+                                    Ok(websocket::ServerMessage::Failure { seed_idx, instructions, rsl_instructions, error_log }) => tx.send((name.clone(), Message::Failure { seed_idx, instructions, rsl_instructions, error_log })).await?,
                                     Ok(websocket::ServerMessage::Error { display, debug }) => return Err(Error::Remote { debug, display }),
                                     Ok(websocket::ServerMessage::Ping) => {}
                                     Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite024(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => break,

@@ -104,10 +104,12 @@ enum ReaderMessage {
     Success {
         seed_idx: SeedIdx,
         instructions: Option<u64>,
+        rsl_instructions: Option<u64>,
     },
     Failure {
         seed_idx: SeedIdx,
         instructions: Option<u64>,
+        rsl_instructions: Option<u64>,
     },
     Done,
 }
@@ -116,6 +118,7 @@ enum ReaderMessage {
 struct Metadata {
     /// present if the `bench` parameter was set.
     instructions: Option<Result<u64, String>>,
+    rsl_instructions: Option<Result<u64, String>>,
     /// always written by this version of ootrstats but may be absent in metadata from older ootrstats versions.
     worker: Option<Arc<str>>,
 }
@@ -132,12 +135,14 @@ enum SeedState {
         /// `None` means the seed was read from disk.
         worker: Option<Arc<str>>,
         instructions: Option<u64>,
+        rsl_instructions: Option<u64>,
         spoiler_log: serde_json::Value,
     },
     Failure {
         /// `None` means the seed was read from disk.
         worker: Option<Arc<str>>,
         instructions: Option<u64>,
+        rsl_instructions: Option<u64>,
         error_log: Bytes,
     },
 }
@@ -345,7 +350,7 @@ impl wheel::CustomExit for Error {
     }
 }
 
-async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
+async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error> {
     if args.world_counts && args.num_seeds > 255 {
         return Err(Error::TooManyWorlds)
     }
@@ -470,28 +475,28 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                 match (fs::exists(&stats_spoiler_log_path).await?, fs::exists(&stats_error_log_path).await?) {
                     (false, false) => reader_tx.send(ReaderMessage::Pending(seed_idx)).await?,
                     (false, true) => {
-                        let instructions = if is_bench {
+                        let (instructions, rsl_instructions) = if is_bench {
                             match fs::read_json::<Metadata>(seed_path.join("metadata.json")).await {
-                                Ok(metadata) => metadata.instructions.and_then(Result::ok),
-                                Err(wheel::Error::Io { inner, .. }) if inner.kind() == io::ErrorKind::NotFound => None,
+                                Ok(metadata) => (metadata.instructions.and_then(Result::ok), metadata.rsl_instructions.and_then(Result::ok)),
+                                Err(wheel::Error::Io { inner, .. }) if inner.kind() == io::ErrorKind::NotFound => (None, None),
                                 Err(e) => return Err(e.into()),
                             }
                         } else {
-                            None
+                            (None, None)
                         };
-                        reader_tx.send(ReaderMessage::Failure { seed_idx, instructions }).await?;
+                        reader_tx.send(ReaderMessage::Failure { seed_idx, instructions, rsl_instructions }).await?;
                     }
                     (true, false) => {
-                        let instructions = if is_bench {
+                        let (instructions, rsl_instructions) = if is_bench {
                             match fs::read_json::<Metadata>(seed_path.join("metadata.json")).await {
-                                Ok(metadata) => metadata.instructions.and_then(Result::ok),
-                                Err(wheel::Error::Io { inner, .. }) if inner.kind() == io::ErrorKind::NotFound => None,
+                                Ok(metadata) => (metadata.instructions.and_then(Result::ok), metadata.rsl_instructions.and_then(Result::ok)),
+                                Err(wheel::Error::Io { inner, .. }) if inner.kind() == io::ErrorKind::NotFound => (None, None),
                                 Err(e) => return Err(e.into()),
                             }
                         } else {
-                            None
+                            (None, None)
                         };
-                        reader_tx.send(ReaderMessage::Success { seed_idx, instructions }).await?;
+                        reader_tx.send(ReaderMessage::Success { seed_idx, instructions, rsl_instructions }).await?;
                     }
                     (true, true) => return Err(Error::SuccessAndFailure),
                 }
@@ -564,7 +569,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                             seed_states[usize::from(seed_idx)] = SeedState::Pending;
                             Some(seed_idx)
                         }
-                        ReaderMessage::Success { seed_idx, instructions } => if is_bench && instructions.is_none() {
+                        ReaderMessage::Success { seed_idx, instructions, rsl_instructions } => if is_bench && instructions.is_none() {
                             // seed was already rolled but not benchmarked, roll a new seed instead
                             fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
                             seed_states[usize::from(seed_idx)] = SeedState::Pending;
@@ -573,11 +578,11 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                             seed_states[usize::from(seed_idx)] = SeedState::Success {
                                 worker: None,
                                 spoiler_log: fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?,
-                                instructions,
+                                instructions, rsl_instructions,
                             };
                             None
                         },
-                        ReaderMessage::Failure { seed_idx, instructions } => if args.retry_failures {
+                        ReaderMessage::Failure { seed_idx, instructions, rsl_instructions } => if args.retry_failures {
                             fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
                             seed_states[usize::from(seed_idx)] = SeedState::Pending;
                             Some(seed_idx)
@@ -590,7 +595,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                             seed_states[usize::from(seed_idx)] = SeedState::Failure {
                                 worker: None,
                                 error_log: fs::read(stats_dir.join(seed_idx.to_string()).join("error.log")).await?.into(),
-                                instructions,
+                                instructions, rsl_instructions,
                             };
                             None
                         },
@@ -674,7 +679,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                                     }
                                     None
                                 }
-                                ootrstats::worker::Message::Success { seed_idx, instructions, spoiler_log, patch } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
+                                ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
                                     let seed_dir = stats_dir.join(seed_idx.to_string());
                                     fs::create_dir_all(&seed_dir).await?;
                                     let stats_spoiler_log_path = seed_dir.join("spoiler.json");
@@ -746,6 +751,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                                     }
                                     fs::write_json(seed_dir.join("metadata.json"), Metadata {
                                         instructions: Some(instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
+                                        rsl_instructions: Some(rsl_instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
                                         worker: Some(name.clone()),
                                     }).await?;
                                     let mut new_workers = Vec::from(worker_names.clone());
@@ -754,7 +760,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                                     if_chain! {
                                         if !cancelled;
                                         if is_bench;
-                                        if let Err(ref stderr) = instructions;
+                                        if let Some(ref stderr) = instructions.as_ref().err().or_else(|| rsl_instructions.as_ref().err());
                                         then {
                                             // perf sometimes doesn't output instruction count for whatever reason, retry if this happens
                                             log!("worker {name} retrying seed {seed_idx} due to missing instruction count, stderr:");
@@ -782,6 +788,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                                                     Either::Right(spoiler_log) => serde_json::from_slice(&spoiler_log)?,
                                                 },
                                                 instructions: instructions.as_ref().ok().copied(),
+                                                rsl_instructions: rsl_instructions.as_ref().ok().copied(),
                                             };
                                             None
                                         }
@@ -790,7 +797,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                                     // seed was already rolled but this worker's instance of this seed didn't get cancelled in time so we just ignore it
                                     None
                                 },
-                                ootrstats::worker::Message::Failure { seed_idx, instructions, error_log } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
+                                ootrstats::worker::Message::Failure { seed_idx, instructions, rsl_instructions, error_log } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
                                     let seed_dir = stats_dir.join(seed_idx.to_string());
                                     let mut new_workers = Vec::from(worker_names.clone());
                                     let pos = new_workers.iter().position(|worker| *worker == name).expect("got failure from a worker that wasn't rolling that seed");
@@ -809,12 +816,13 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                                         fs::write(stats_error_log_path, &error_log).await?;
                                         fs::write_json(seed_dir.join("metadata.json"), Metadata {
                                             instructions: Some(instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
+                                            rsl_instructions: Some(rsl_instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
                                             worker: Some(name.clone()),
                                         }).await?;
                                         if_chain! {
                                             if !cancelled;
                                             if is_bench;
-                                            if let Err(ref stderr) = instructions;
+                                            if let Some(ref stderr) = instructions.as_ref().err().or_else(|| rsl_instructions.as_ref().err());
                                             then {
                                                 // perf sometimes doesn't output instruction count for whatever reason, retry if this happens
                                                 log!("worker {name} retrying seed {seed_idx} due to missing instruction count, stderr:");
@@ -838,6 +846,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                                                 seed_states[usize::from(seed_idx)] = SeedState::Failure {
                                                     worker: Some(name),
                                                     instructions: instructions.as_ref().ok().copied(),
+                                                    rsl_instructions: rsl_instructions.as_ref().ok().copied(),
                                                     error_log,
                                                 };
                                                 None
@@ -929,17 +938,21 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
             let mut num_failures = 0u16;
             let mut instructions_success = 0u64;
             let mut instructions_failure = 0u64;
+            let mut rsl_instructions_success = 0u64;
+            let mut rsl_instructions_failure = 0u64;
             for state in seed_states {
                 match state {
                     SeedState::Unchecked | SeedState::Pending | SeedState::Rolling { .. } => unreachable!(),
                     SeedState::Cancelled | SeedState::Success { instructions: None, .. } | SeedState::Failure { instructions: None, .. } => {}
-                    SeedState::Success { instructions: Some(instructions), .. } => {
+                    SeedState::Success { instructions: Some(instructions), rsl_instructions, .. } => {
                         num_successes += 1;
                         instructions_success += instructions;
+                        rsl_instructions_success += rsl_instructions.unwrap_or_default();
                     }
-                    SeedState::Failure { instructions: Some(instructions), .. } => {
+                    SeedState::Failure { instructions: Some(instructions), rsl_instructions, .. } => {
                         num_failures += 1;
                         instructions_failure += instructions;
+                        rsl_instructions_failure += rsl_instructions.unwrap_or_default();
                     }
                 }
             }
@@ -951,7 +964,13 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                 let average_instructions_failure = instructions_failure.checked_div(u64::try_from(num_failures).unwrap()).unwrap_or_default();
                 let average_failure_count = (1.0 - success_rate) / success_rate; // mean of 0-support geometric distribution
                 let average_instructions = average_failure_count * average_instructions_failure as f64 + average_instructions_success as f64;
-                Message::Instructions { num_successes, num_failures, success_rate, average_instructions_success, average_instructions_failure, average_failure_count, average_instructions }.print(args.json_messages, &mut stdout)?;
+                Message::Instructions { rsl: false, num_successes, num_failures, success_rate, average_instructions_success, average_instructions_failure, average_failure_count, average_instructions }.print(args.json_messages, &mut stdout)?;
+                if rsl_instructions_success + rsl_instructions_failure > 0 {
+                    let average_instructions_success = rsl_instructions_success / u64::try_from(num_successes).unwrap();
+                    let average_instructions_failure = rsl_instructions_failure.checked_div(u64::try_from(num_failures).unwrap()).unwrap_or_default();
+                    let average_instructions = average_failure_count * average_instructions_failure as f64 + average_instructions_success as f64;
+                    Message::Instructions { rsl: true, num_successes, num_failures, success_rate, average_instructions_success, average_instructions_failure, average_failure_count, average_instructions }.print(args.json_messages, &mut stdout)?;
+                }
             }
         }
         Some(Subcommand::Bench { raw_data: true, uncompressed: _ }) => {
@@ -959,15 +978,25 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
                 match state {
                     SeedState::Unchecked | SeedState::Pending | SeedState::Rolling { .. } => unreachable!(),
                     SeedState::Cancelled | SeedState::Success { instructions: None, .. } | SeedState::Failure { instructions: None, .. } => {}
-                    SeedState::Success { instructions: Some(instructions), .. } => {
+                    SeedState::Success { instructions: Some(instructions), rsl_instructions, .. } => {
                         crossterm::execute!(stdout,
                             Print(format_args!("s {instructions}\r\n")),
                         ).at_unknown()?;
+                        if let Some(rsl_instructions) = rsl_instructions {
+                            crossterm::execute!(stdout,
+                                Print(format_args!("S {rsl_instructions}\r\n")),
+                            ).at_unknown()?;
+                        }
                     }
-                    SeedState::Failure { instructions: Some(instructions), .. } => {
+                    SeedState::Failure { instructions: Some(instructions), rsl_instructions, .. } => {
                         crossterm::execute!(stdout,
                             Print(format_args!("f {instructions}\r\n")),
                         ).at_unknown()?;
+                        if let Some(rsl_instructions) = rsl_instructions {
+                            crossterm::execute!(stdout,
+                                Print(format_args!("F {rsl_instructions}\r\n")),
+                            ).at_unknown()?;
+                        }
                     }
                 }
             }
@@ -1048,7 +1077,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
             return Err(Error::Worker(worker_errors))
         }
     }
-    Ok(())
+    Ok(cancelled)
 }
 
 #[wheel::main(custom_exit)]
@@ -1070,12 +1099,13 @@ async fn main(args: Args) -> Result<(), Error> {
                     Args { rsl: true, github_user: format!("fenhl"), branch: Some(format!("dev-mvp")), ..args }
                 }), //TODO check to make sure plando-random-settings branch is up to date with matthewkirby:master and the randomizer commit specified in rslversion.py is equal to the specified randomizer commit
             ] {
-                if let Err(e) = cli(Some(label), args).await {
-                    if e.is_network_error() {
+                match cli(Some(label), args).await {
+                    Ok(cancelled) => if cancelled { break },
+                    Err(e) => if e.is_network_error() {
                         first_network_error.get_or_insert(e);
                     } else {
                         break 'res Err(e)
-                    }
+                    },
                 }
             }
             if let Some(e) = first_network_error {
@@ -1084,7 +1114,7 @@ async fn main(args: Args) -> Result<(), Error> {
                 Ok(())
             }
         } else {
-            cli(None, args).await
+            cli(None, args).await.map(|_| ())
         }
     };
     disable_raw_mode().at_unknown()?;

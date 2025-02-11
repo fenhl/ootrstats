@@ -60,6 +60,7 @@ pub enum Message {
         seed_idx: SeedIdx,
         /// present if the `bench` parameter was set and `perf` output was parsed successfully.
         instructions: Result<u64, Bytes>,
+        rsl_instructions: Result<u64, Bytes>,
         spoiler_log: Either<PathBuf, Bytes>,
         patch: Option<Either<(Option<Option<String>>, PathBuf), (String, Bytes)>>,
     },
@@ -67,6 +68,7 @@ pub enum Message {
         seed_idx: SeedIdx,
         /// present if the `bench` parameter was set and `perf` output was parsed successfully.
         instructions: Result<u64, Bytes>,
+        rsl_instructions: Result<u64, Bytes>,
         error_log: Bytes,
     },
 }
@@ -310,20 +312,20 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 let wsl_distro = wsl_distro.clone();
                 let repo_path = repo_path.clone();
                 let preset = preset.clone();
-                Either::Right(async move { crate::run_rsl(wsl_distro.as_deref(), &repo_path, preset.as_deref(), seed_idx, matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed)).await })
+                Either::Right(async move { crate::run_rsl(wsl_distro.as_deref(), &repo_path, use_rust_cli, supports_unsalted_seeds, random_seeds, preset.as_deref(), seed_idx, output_mode).await })
             }
         };
         let tx = tx.clone();
         let wsl_distro = wsl_distro.clone();
         tokio::spawn(async move {
             tx.send(match run_future.await? {
-                RollOutput { instructions, log: Ok(spoiler_log_path), patch } => Message::Success {
+                RollOutput { instructions, rsl_instructions, log: Ok(spoiler_log_path), patch } => Message::Success {
                     spoiler_log: Either::Left(spoiler_log_path),
                     patch: patch.map(|(is_wsl, patch)| Either::Left((is_wsl.then(|| wsl_distro.clone()), patch))),
-                    seed_idx, instructions,
+                    seed_idx, instructions, rsl_instructions,
                 },
-                RollOutput { instructions, log: Err(error_log), patch: _ } => Message::Failure {
-                    seed_idx, instructions, error_log,
+                RollOutput { instructions, rsl_instructions, log: Err(error_log), patch: _ } => Message::Failure {
+                    seed_idx, instructions, rsl_instructions, error_log,
                 },
             }).await?;
             Ok::<_, Error>(())

@@ -33,6 +33,7 @@ pub enum ServerMessage {
         seed_idx: SeedIdx,
         /// present if the `bench` parameter was set and `perf` output was parsed successfully.
         instructions: Result<u64, Bytes>,
+        rsl_instructions: Result<u64, Bytes>,
         spoiler_log: Bytes,
         patch: Option<(String, Bytes)>,
     },
@@ -40,6 +41,7 @@ pub enum ServerMessage {
         seed_idx: SeedIdx,
         /// present if the `bench` parameter was set and `perf` output was parsed successfully.
         instructions: Result<u64, Bytes>,
+        rsl_instructions: Result<u64, Bytes>,
         error_log: Bytes,
     },
     Error {
