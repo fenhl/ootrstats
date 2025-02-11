@@ -22,6 +22,7 @@ jaq-interpret = "1.4.0"
 jaq-parse = "1.0.2"
 jaq-std = "1.4.0"
 lazy-regex = "3.1.0"
+mimalloc = "0.1.43"
 nonempty-collections = { version = "0.2.5", features = ["serde"] }
 ootr-utils = { git = "https://github.com/midoshouse/rust-ootr-utils", branch = "main" }
 ootrstats = { path = "../ootrstats" }
