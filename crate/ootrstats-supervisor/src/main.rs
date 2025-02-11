@@ -436,6 +436,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<(), Error> {
             },
             json_settings: args.json_settings,
             world_counts: args.world_counts,
+            random_seeds: args.retry_failures,
         }
     };
     let stats_dir = {

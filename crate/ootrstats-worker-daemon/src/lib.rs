@@ -1,3 +1,5 @@
+#![allow(unused_crate_dependencies)] // lib/bin combo crate
+
 use {
     std::{
         io,
@@ -174,7 +176,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
     Ok(())
 }
 
-#[rocket::get("/v12")] //TODO ensure this matches the major crate version
+#[rocket::get("/v13")] //TODO ensure this matches the major crate version
 fn index(correct_password: &State<String>, ws: WebSocket) -> rocket_ws::Channel<'static> {
     let correct_password = (*correct_password).clone();
     ws.channel(move |stream| Box::pin(async move {

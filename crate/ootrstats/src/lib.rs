@@ -51,6 +51,7 @@ pub enum RandoSetup {
         settings: RandoSettings,
         json_settings: serde_json::Map<String, serde_json::Value>,
         world_counts: bool,
+        random_seeds: bool,
     },
     Rsl {
         github_user: String,
@@ -61,7 +62,7 @@ pub enum RandoSetup {
 impl RandoSetup {
     pub fn stats_dir(&self, rando_rev: gix_hash::ObjectId) -> PathBuf {
         match self {
-            Self::Normal { github_user, repo, settings, json_settings, world_counts: false } if json_settings.is_empty() => Path::new("rando").join(github_user).join(repo).join(rando_rev.to_string()).join(settings.stats_dir()),
+            Self::Normal { github_user, repo, settings, json_settings, world_counts: false, random_seeds: false } if json_settings.is_empty() => Path::new("rando").join(github_user).join(repo).join(rando_rev.to_string()).join(settings.stats_dir()),
             Self::Normal { github_user, repo, settings, .. } => Path::new("rando").join(github_user).join(repo).join(rando_rev.to_string()).join("custom").join(settings.stats_dir()),
             Self::Rsl { github_user, repo } => Path::new("rsl").join(github_user).join(repo).join(rando_rev.to_string()),
         }
@@ -165,7 +166,7 @@ async fn python() -> Result<PathBuf, RollError> {
     })
 }
 
-pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli: bool, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
+pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli: bool, supports_unsalted_seeds: bool, random_seed: bool, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let mut resolved_settings = collect![as HashMap<_, _>:
         Cow::Borrowed("create_spoiler") => json!(true),
         Cow::Borrowed("create_cosmetics_log") => json!(matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed)),
@@ -173,6 +174,9 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
         Cow::Borrowed("create_uncompressed_rom") => json!(output_mode == OutputMode::BenchUncompressed),
         Cow::Borrowed("create_compressed_rom") => json!(output_mode == OutputMode::Bench),
     ];
+    if supports_unsalted_seeds && !random_seed {
+        resolved_settings.insert(Cow::Borrowed("salt_seed"), json!(false));
+    }
     resolved_settings.extend(json_settings.iter().map(|(name, value)| (Cow::<str>::Borrowed(name), value.clone())));
     if world_counts {
         resolved_settings.insert(Cow::Borrowed("world_count"), json!(seed_idx + 1));
@@ -293,6 +297,9 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
         }
     }
     cmd.arg("--settings=-");
+    if !random_seed {
+        cmd.arg(format!("--seed=ootrstats{seed_idx}"));
+    }
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::null());
     cmd.stderr(Stdio::piped());

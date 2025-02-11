@@ -24,6 +24,7 @@ use {
         },
     },
     if_chain::if_chain,
+    lazy_regex::regex_captures,
     rand::{
         prelude::*,
         rng,
@@ -129,8 +130,9 @@ async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[S
 
 pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, rando_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String]) -> Result<(), Error> {
     let mut use_rust_cli = false;
-    let repo_path = match setup {
-        RandoSetup::Normal { ref github_user, ref repo, .. } => {
+    let mut supports_unsalted_seeds = false;
+    let (repo_path, random_seeds) = match setup {
+        RandoSetup::Normal { ref github_user, ref repo, random_seeds, .. } => {
             tx.send(Message::Init(format!("cloning randomizer: determining repo path"))).await?;
             let repo_parent = gitdir().await?.join("github.com").join(github_user).join(repo).join("rev");
             let repo_path = repo_parent.join(rando_rev.to_string());
@@ -204,6 +206,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     .find(|package| package.name == "ootr-cli")
                 {
                     use_rust_cli = package.version >= Version { major: 8, minor: 2, patch: 49, pre: "fenhl.1.riir.2".parse()?, build: semver::BuildMetadata::default() };
+                    supports_unsalted_seeds = package.version >= Version { major: 8, minor: 2, patch: 54, pre: "fenhl.2.riir.2".parse()?, build: semver::BuildMetadata::default() };
                 }
                 if use_rust_cli {
                     tx.send(Message::Init(format!("building Rust CLI"))).await?;
@@ -213,6 +216,19 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     cargo.arg("--package=ootr-cli"); // old versions of the riir branch had ootr-python as the default crate
                     cargo.current_dir(&repo_path);
                     cargo.check("cargo build").await?;
+                }
+            } else {
+                let version_py = fs::read_to_string(repo_path.join("versio.py")).await?;
+                if let Some(base_version) = version_py.lines()
+                    .filter_map(|line| regex_captures!("^__version__ = '([0-9.]+)'$", line))
+                    .find_map(|(_, base_version)| base_version.parse::<Version>().ok())
+                {
+                    if let Some(supplementary_version) = version_py.lines()
+                        .filter_map(|line| regex_captures!("^supplementary_version = ([0-9]+)$", line))
+                        .find_map(|(_, supplementary_version)| supplementary_version.parse::<u8>().ok())
+                    {
+                        supports_unsalted_seeds = (base_version, supplementary_version) >= (Version::new(8, 2, 54), 2);
+                    }
                 }
             }
             if fs::exists(repo_path.join("mypy.ini")).await? {
@@ -230,7 +246,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 };
                 mypyc.current_dir(&repo_path).check("mypyc").await?;
             }
-            repo_path
+            (repo_path, random_seeds)
         }
         RandoSetup::Rsl { ref github_user, ref repo, .. } => {
             tx.send(Message::Init(format!("cloning random settings script: determining repo path"))).await?;
@@ -257,7 +273,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 fs::create_dir_all(rsl_data_dir).await?;
                 fs::write(rsl_base_rom_path, decompress::decompress(&mut fs::read(&base_rom_path).await?)?).await?;
             }
-            repo_path
+            (repo_path, true)
         }
     };
     let mut first_seed_rolled = false;
@@ -288,7 +304,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 let repo_path = repo_path.clone();
                 let settings = settings.clone();
                 let json_settings = json_settings.clone();
-                Either::Left(async move { crate::run_rando(wsl_distro.as_deref(), &repo_path, use_rust_cli, &settings, &json_settings, world_counts, seed_idx, output_mode).await })
+                Either::Left(async move { crate::run_rando(wsl_distro.as_deref(), &repo_path, use_rust_cli, supports_unsalted_seeds, random_seeds, &settings, &json_settings, world_counts, seed_idx, output_mode).await })
             }
             RandoSetup::Rsl { .. } => {
                 let wsl_distro = wsl_distro.clone();
