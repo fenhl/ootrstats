@@ -218,7 +218,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     cargo.check("cargo build").await?;
                 }
             } else {
-                let version_py = fs::read_to_string(repo_path.join("versio.py")).await?;
+                let version_py = fs::read_to_string(repo_path.join("version.py")).await?;
                 if let Some(base_version) = version_py.lines()
                     .filter_map(|line| regex_captures!("^__version__ = '([0-9.]+)'$", line))
                     .find_map(|(_, base_version)| base_version.parse::<Version>().ok())
