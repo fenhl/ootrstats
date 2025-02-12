@@ -421,10 +421,14 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
         .check(cmd_name.clone()).await?
         .stdout;
     let rsl_version = String::from_utf8(rsl_version)?;
-    let supports_plando_filename_base = if let Some((_, major, minor, patch, devmvp)) = regex_captures!(r"^([0-9]+)\.([0-9]+)\.([0-9]+) devmvp-([0-9]+)$", &rsl_version.trim()) {
-        (Version::new(major.parse()?, minor.parse()?, patch.parse()?), devmvp.parse()?) >= (Version::new(2, 6, 3), 4)
+    let (supports_plando_filename_base, supports_seed, supports_no_salt) = if let Some((_, major, minor, patch, supplementary)) = regex_captures!(r"^([0-9]+)\.([0-9]+)\.([0-9]+) Fenhl-([0-9]+)$", &rsl_version.trim()) {
+        let rsl_version = (Version::new(major.parse()?, minor.parse()?, patch.parse()?), supplementary.parse()?);
+        (rsl_version >= (Version::new(2, 8, 2), 0), rsl_version >= (Version::new(2, 8, 2), 3), rsl_version >= (Version::new(2, 8, 2), 3))
+    } else if let Some((_, major, minor, patch, supplementary)) = regex_captures!(r"^([0-9]+)\.([0-9]+)\.([0-9]+) devmvp-([0-9]+)$", &rsl_version.trim()) {
+        let rsl_version = (Version::new(major.parse()?, minor.parse()?, patch.parse()?), supplementary.parse()?);
+        (rsl_version >= (Version::new(2, 6, 3), 4), false, false)
     } else {
-        rsl_version.parse::<Version>().is_ok_and(|rsl_version| rsl_version >= Version::new(2, 8, 2))
+        (rsl_version.parse::<Version>().is_ok_and(|rsl_version| rsl_version >= Version::new(2, 8, 2)), false, false)
     };
     let mut cmd = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
         #[cfg(any(target_os = "linux", target_os = "windows"))] {
@@ -469,6 +473,12 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
     cmd.arg("--no_seed");
     if supports_plando_filename_base {
         cmd.arg(format!("--plando_filename_base=ootrstats_{seed_idx}"));
+    }
+    if supports_seed && !random_seed {
+        cmd.arg(format!("--seed=ootrstats{seed_idx}"));
+        if supports_no_salt {
+            cmd.arg("--no_salt");
+        }
     }
     if let Some(preset) = preset {
         cmd.arg(format!("--override=weights/{preset}_override.json"));
