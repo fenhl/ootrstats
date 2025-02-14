@@ -47,9 +47,11 @@ pub(crate) enum Message<'a> {
         start: Instant,
         #[serde(skip)]
         start_local: DateTime<Local>,
-        workers: Option<&'a [worker::State]>,
+        workers: &'a [worker::State],
     },
     Done {
+        label: Option<&'static str>,
+        num_workers: u16,
         stats_dir: PathBuf,
     },
     InstructionsNoSuccesses,
@@ -93,108 +95,106 @@ impl Message<'_> {
                     Print(format_args!("{label}: preparing...")),
                 ).at_unknown()?,
                 Self::Status { label, available_parallelism, completed_readers, retry_failures, seed_states, start, start_local, workers } => {
-                    if let Some(workers) = workers {
-                        for worker in workers {
-                            if let Some(ref e) = worker.error {
-                                let e = e.to_string();
-                                if_chain! {
-                                    if let Ok((width, _)) = terminal::size();
-                                    let mut prefix_end = e.len().min(usize::from(width) - worker.name.len() - 13);
-                                    if prefix_end + 3 < e.len() || e.contains('\n');
-                                    then {
-                                        if let Some(idx) = e[..prefix_end].find('\n') {
-                                            prefix_end = idx;
-                                        } else {
-                                            while !e.is_char_boundary(prefix_end) {
-                                                prefix_end -= 1;
-                                            }
-                                        }
-                                        crossterm::execute!(writer,
-                                            Print(format_args!("\r\n{}: error: {}[…]", worker.name, &e[..prefix_end])),
-                                            Clear(ClearType::UntilNewLine),
-                                        ).at_unknown()?;
+                    for worker in workers {
+                        if let Some(ref e) = worker.error {
+                            let e = e.to_string();
+                            if_chain! {
+                                if let Ok((width, _)) = terminal::size();
+                                let mut prefix_end = e.len().min(usize::from(width) - worker.name.len() - 13);
+                                if prefix_end + 3 < e.len() || e.contains('\n');
+                                then {
+                                    if let Some(idx) = e[..prefix_end].find('\n') {
+                                        prefix_end = idx;
                                     } else {
-                                        crossterm::execute!(writer,
-                                            Print(format_args!("\r\n{}: error: {e}", worker.name)),
-                                            Clear(ClearType::UntilNewLine),
-                                        ).at_unknown()?;
-                                    }
-                                }
-                            } else {
-                                let mut running = 0u16;
-                                let mut completed = 0u16;
-                                let mut total_completed = 0u16;
-                                let mut failures = 0u16;
-                                for state in seed_states {
-                                    match state {
-                                        SeedState::Success { worker: Some(name), .. } => {
-                                            total_completed += 1;
-                                            if *name == worker.name { completed += 1 }
+                                        while !e.is_char_boundary(prefix_end) {
+                                            prefix_end -= 1;
                                         }
-                                        SeedState::Failure { worker: Some(name), .. } => {
-                                            total_completed += 1;
-                                            if *name == worker.name {
-                                                completed += 1;
-                                                failures += 1;
-                                            }
-                                        }
-                                        SeedState::Rolling { workers } => running += u16::try_from(workers.iter().into_iter().filter(|name| **name == worker.name).count())?,
-                                        | SeedState::Unchecked
-                                        | SeedState::Pending
-                                        | SeedState::Success { worker: None, .. }
-                                        | SeedState::Failure { worker: None, .. }
-                                        | SeedState::Cancelled
-                                            => {}
                                     }
-                                }
-                                let state = if worker.stopped {
-                                    Cow::Borrowed("done")
-                                } else if let Some(ref msg) = worker.msg {
-                                    if running > 0 {
-                                        Cow::Owned(format!("{running} running, {msg}"))
-                                    } else {
-                                        Cow::Borrowed(&**msg)
-                                    }
-                                } else {
-                                    Cow::Owned(format!("{running} running"))
-                                };
-                                if total_completed > 0 {
-                                    if failures > 0 {
-                                        crossterm::execute!(writer,
-                                            Print(format_args!(
-                                                "\r\n{}: {completed} rolled ({}%), failure rate {}%, {state}",
-                                                worker.name,
-                                                100 * u32::from(completed) / u32::from(total_completed),
-                                                100 * u32::from(failures) / u32::from(completed),
-                                            )),
-                                            Clear(ClearType::UntilNewLine),
-                                        ).at_unknown()?;
-                                    } else {
-                                        crossterm::execute!(writer,
-                                            Print(format_args!(
-                                                "\r\n{}: {completed} rolled ({}%), {state}",
-                                                worker.name,
-                                                100 * u32::from(completed) / u32::from(total_completed),
-                                            )),
-                                            Clear(ClearType::UntilNewLine),
-                                        ).at_unknown()?;
-                                    }
+                                    crossterm::execute!(writer,
+                                        Print(format_args!("\r\n{}: error: {}[…]", worker.name, &e[..prefix_end])),
+                                        Clear(ClearType::UntilNewLine),
+                                    ).at_unknown()?;
                                 } else {
                                     crossterm::execute!(writer,
-                                        Print(format_args!(
-                                            "\r\n{}: 0 rolled, {state}",
-                                            worker.name,
-                                        )),
+                                        Print(format_args!("\r\n{}: error: {e}", worker.name)),
                                         Clear(ClearType::UntilNewLine),
                                     ).at_unknown()?;
                                 }
                             }
+                        } else {
+                            let mut running = 0u16;
+                            let mut completed = 0u16;
+                            let mut total_completed = 0u16;
+                            let mut failures = 0u16;
+                            for state in seed_states {
+                                match state {
+                                    SeedState::Success { worker: Some(name), .. } => {
+                                        total_completed += 1;
+                                        if *name == worker.name { completed += 1 }
+                                    }
+                                    SeedState::Failure { worker: Some(name), .. } => {
+                                        total_completed += 1;
+                                        if *name == worker.name {
+                                            completed += 1;
+                                            failures += 1;
+                                        }
+                                    }
+                                    SeedState::Rolling { workers } => running += u16::try_from(workers.iter().into_iter().filter(|name| **name == worker.name).count())?,
+                                    | SeedState::Unchecked
+                                    | SeedState::Pending
+                                    | SeedState::Success { worker: None, .. }
+                                    | SeedState::Failure { worker: None, .. }
+                                    | SeedState::Cancelled
+                                        => {}
+                                }
+                            }
+                            let state = if worker.stopped {
+                                Cow::Borrowed("done")
+                            } else if worker.supervisor_tx.is_none() {
+                                Cow::Borrowed("not started")
+                            } else if let Some(ref msg) = worker.msg {
+                                if running > 0 {
+                                    Cow::Owned(format!("{running} running, {msg}"))
+                                } else {
+                                    Cow::Borrowed(&**msg)
+                                }
+                            } else {
+                                Cow::Owned(format!("{running} running"))
+                            };
+                            if total_completed > 0 {
+                                if failures > 0 {
+                                    crossterm::execute!(writer,
+                                        Print(format_args!(
+                                            "\r\n{}: {completed} rolled ({}%), failure rate {}%, {state}",
+                                            worker.name,
+                                            100 * u32::from(completed) / u32::from(total_completed),
+                                            100 * u32::from(failures) / u32::from(completed),
+                                        )),
+                                        Clear(ClearType::UntilNewLine),
+                                    ).at_unknown()?;
+                                } else {
+                                    crossterm::execute!(writer,
+                                        Print(format_args!(
+                                            "\r\n{}: {completed} rolled ({}%), {state}",
+                                            worker.name,
+                                            100 * u32::from(completed) / u32::from(total_completed),
+                                        )),
+                                        Clear(ClearType::UntilNewLine),
+                                    ).at_unknown()?;
+                                }
+                            } else {
+                                crossterm::execute!(writer,
+                                    Print(format_args!(
+                                        "\r\n{}: 0 rolled, {state}",
+                                        worker.name,
+                                    )),
+                                    Clear(ClearType::UntilNewLine),
+                                ).at_unknown()?;
+                            }
                         }
-                        crossterm::execute!(writer,
-                            MoveUp(workers.len() as u16),
-                        ).at_unknown()?;
                     }
                     crossterm::execute!(writer,
+                        MoveUp(workers.len() as u16),
                         MoveToColumn(0),
                         Print(if completed_readers == available_parallelism {
                             // list of pending seeds fully initialized
@@ -287,9 +287,20 @@ impl Message<'_> {
                         Clear(ClearType::UntilNewLine),
                     ).at_unknown()?;
                 }
-                Self::Done { stats_dir } => crossterm::execute!(writer,
-                    Print(format_args!("stats saved to {}\r\n", stats_dir.display())),
-                ).at_unknown()?,
+                Self::Done { label, num_workers, stats_dir } => {
+                    for _ in 0..num_workers {
+                        crossterm::execute!(writer,
+                            Print("\r\n"),
+                            Clear(ClearType::UntilNewLine),
+                        ).at_unknown()?;
+                    }
+                    crossterm::execute!(writer,
+                        MoveUp(num_workers),
+                        Print(format_args!("{}stats saved to {}", if let Some(label) = label { format!("{label}: ") } else { String::default() }, stats_dir.display())),
+                        Clear(ClearType::UntilNewLine),
+                        Print("\r\n"),
+                    ).at_unknown()?;
+                }
                 Self::InstructionsNoSuccesses => crossterm::execute!(writer,
                     Print("No successful seeds, so average instruction count is infinite\r\n"),
                 ).at_unknown()?,

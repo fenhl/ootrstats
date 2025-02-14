@@ -18,7 +18,6 @@ use {
             stdout,
         },
         iter,
-        mem,
         num::NonZeroUsize,
         path::PathBuf,
         sync::Arc,
@@ -26,7 +25,6 @@ use {
     bytes::Bytes,
     chrono::prelude::*,
     crossterm::{
-        cursor::MoveDown,
         event::{
             KeyCode,
             KeyEvent,
@@ -248,6 +246,8 @@ enum Error {
     #[error(transparent)] Utf8(#[from] std::str::Utf8Error),
     #[error(transparent)] Wheel(#[from] wheel::Error),
     #[cfg(unix)] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
+    #[error("cancelled by user")]
+    Cancelled,
     #[error("error parsing draft spec: {source}")]
     DraftParse {
         file: String,
@@ -283,6 +283,7 @@ impl IsNetworkError for Error {
             | Self::TryFromInt(_)
             | Self::ReaderSend(_)
             | Self::Utf8(_)
+            | Self::Cancelled
             | Self::DraftParse { .. }
             | Self::EmptyErrorLog
             | Self::Jaq
@@ -315,6 +316,7 @@ impl wheel::CustomExit for Error {
         }
         eprintln!("\r");
         match self {
+            Self::Cancelled => eprintln!("cancelled by pressing C or D\r"),
             Self::DraftParse { file: _ /*TODO display the span of code? */, source } => {
                 eprintln!("{cmd_name}: error parsing draft spec: {source}\r");
                 let start = source.span().start();
@@ -508,8 +510,14 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
     drop(reader_tx);
     let mut completed_readers = 0;
     let (worker_tx, mut worker_rx) = mpsc::channel(256);
+    let mut worker_tx = Some(worker_tx);
     let mut worker_tasks = FuturesUnordered::default();
-    let mut workers = Err::<Vec<worker::State>, _>(worker_tx);
+    let mut workers = config.workers.iter()
+        .filter(|worker::Config { name, .. }| args.include_workers.is_empty() || args.include_workers.contains(name))
+        .filter(|worker::Config { name, .. }| !args.exclude_workers.contains(name))
+        .filter(|worker::Config { bench, .. }| *bench || !is_bench)
+        .map(|worker::Config { name, .. }| worker::State::new(name.clone()))
+        .collect_vec();
     let mut cancelled = false;
 
     macro_rules! cancel {
@@ -527,7 +535,9 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                         // --race means the user is okay with randomizer instances being cancelled, so we do that here to speed up the exit
                         for name in worker_names.iter() {
                             if let Some(worker) = $workers.iter().find(|worker| worker.name == *name) {
-                                let _ = worker.supervisor_tx.send(ootrstats::worker::SupervisorMessage::Cancel(seed_idx.try_into()?)).await;
+                                if let Some(tx) = &worker.supervisor_tx {
+                                    let _ = tx.send(ootrstats::worker::SupervisorMessage::Cancel(seed_idx.try_into()?)).await;
+                                }
                             } else {
                                 return Err(Error::WorkerNotFound)
                             }
@@ -604,159 +614,221 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                             None
                         }
                     },
-                    Event::WorkerDone(name, result) => if_chain! {
-                        if let Ok(ref mut workers) = workers;
-                        if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name);
-                        then {
-                            worker.stopped = true;
-                            let mut seed_to_reroll = None;
-                            match result? {
-                                Ok(()) => {}
-                                Err(e) => {
-                                    worker.error = Some(e);
-                                    let should_cancel = workers.iter().all(|worker| worker.error.is_some());
-                                    for (seed_idx, state) in seed_states.iter_mut().enumerate() {
-                                        if let SeedState::Rolling { workers } = state {
-                                            if workers.contains(&name) {
-                                                let new_workers = workers.iter().into_iter().filter(|worker| **worker != name).cloned().collect();
-                                                if let Some(new_workers) = NEVec::from_vec(new_workers) {
-                                                    *workers = new_workers;
-                                                } else if should_cancel {
-                                                    *state = SeedState::Cancelled;
-                                                } else {
-                                                    *state = SeedState::Pending;
-                                                    seed_to_reroll.get_or_insert(seed_idx.try_into()?);
-                                                }
+                    Event::WorkerDone(name, result) => if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name) {
+                        let mut seed_to_reroll = None;
+                        match result? {
+                            Ok(()) => worker.stopped = true,
+                            Err(e) => {
+                                if e.is_network_error() {
+                                    worker.ready = 0;
+                                    worker.supervisor_tx = None;
+                                } else {
+                                    worker.stopped = true;
+                                }
+                                worker.error = Some(e);
+                                let should_cancel = workers.iter().all(|worker| worker.error.as_ref().is_some_and(|e| !e.is_network_error()));
+                                for (seed_idx, state) in seed_states.iter_mut().enumerate() {
+                                    if let SeedState::Rolling { workers } = state {
+                                        if workers.contains(&name) {
+                                            let new_workers = workers.iter().into_iter().filter(|worker| **worker != name).cloned().collect();
+                                            if let Some(new_workers) = NEVec::from_vec(new_workers) {
+                                                *workers = new_workers;
+                                            } else if should_cancel {
+                                                *state = SeedState::Cancelled;
+                                            } else {
+                                                *state = SeedState::Pending;
+                                                seed_to_reroll.get_or_insert(seed_idx.try_into()?);
                                             }
                                         }
                                     }
-                                    if should_cancel {
-                                        cancel!(workers);
-                                    }
+                                }
+                                if should_cancel {
+                                    cancel!(workers);
                                 }
                             }
-                            seed_to_reroll
-                        } else {
-                            return Err(Error::WorkerNotFound)
                         }
+                        seed_to_reroll
+                    } else {
+                        return Err(Error::WorkerNotFound)
                     },
-                    Event::WorkerMessage(name, msg) => if_chain! {
-                        if let Ok(ref mut workers) = workers;
-                        if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name);
-                        then {
-                            match msg {
-                                ootrstats::worker::Message::Init(msg) => {
-                                    worker.msg = Some(msg);
-                                    None
-                                }
-                                ootrstats::worker::Message::Ready(ready) => {
-                                    worker.ready += ready;
-                                    while worker.error.is_none() && worker.ready > 0 {
-                                        worker.msg = None;
-                                        if let Some(seed_idx) = seed_states.iter().position(|state| matches!(state, SeedState::Pending)) {
+                    Event::WorkerMessage(name, msg) => if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name) {
+                        match msg {
+                            ootrstats::worker::Message::Init(msg) => {
+                                worker.msg = Some(msg);
+                                None
+                            }
+                            ootrstats::worker::Message::Ready(ready) => {
+                                worker.ready += ready;
+                                while worker.error.is_none() && worker.ready > 0 {
+                                    worker.msg = None;
+                                    if let Some(seed_idx) = seed_states.iter().position(|state| matches!(state, SeedState::Pending)) {
+                                        if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
+                                            worker.error.get_or_insert(worker::Error::Receive { message });
+                                            cancel!(workers);
+                                            break
+                                        }
+                                    } else if args.race {
+                                        let seed_idx = seed_states.iter()
+                                            .enumerate()
+                                            .filter_map(|(seed_idx, state)| if let SeedState::Rolling { workers } = state { Some((seed_idx, workers.len())) } else { None })
+                                            .min_by_key(|&(_, num_workers)| num_workers);
+                                        if let Some((seed_idx, _)) = seed_idx {
                                             if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
                                                 worker.error.get_or_insert(worker::Error::Receive { message });
                                                 cancel!(workers);
                                                 break
                                             }
-                                        } else if args.race {
-                                            let seed_idx = seed_states.iter()
-                                                .enumerate()
-                                                .filter_map(|(seed_idx, state)| if let SeedState::Rolling { workers } = state { Some((seed_idx, workers.len())) } else { None })
-                                                .min_by_key(|&(_, num_workers)| num_workers);
-                                            if let Some((seed_idx, _)) = seed_idx {
-                                                if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
-                                                    worker.error.get_or_insert(worker::Error::Receive { message });
-                                                    cancel!(workers);
-                                                    break
-                                                }
-                                            } else {
-                                                break
-                                            }
                                         } else {
                                             break
                                         }
+                                    } else {
+                                        break
                                     }
-                                    None
                                 }
-                                ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
-                                    let seed_dir = stats_dir.join(seed_idx.to_string());
-                                    fs::create_dir_all(&seed_dir).await?;
-                                    let stats_spoiler_log_path = seed_dir.join("spoiler.json");
-                                    match spoiler_log {
-                                        Either::Left(ref spoiler_log_path) => {
-                                            let is_same_drive = {
-                                                #[cfg(windows)] {
-                                                    spoiler_log_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
-                                                    == stats_spoiler_log_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
-                                                }
-                                                #[cfg(not(windows))] { true }
-                                            };
-                                            if is_same_drive {
-                                                fs::rename(spoiler_log_path, stats_spoiler_log_path).await?;
-                                            } else {
-                                                fs::copy(spoiler_log_path, stats_spoiler_log_path).await?;
-                                                fs::remove_file(spoiler_log_path).await?;
+                                None
+                            }
+                            ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
+                                let seed_dir = stats_dir.join(seed_idx.to_string());
+                                fs::create_dir_all(&seed_dir).await?;
+                                let stats_spoiler_log_path = seed_dir.join("spoiler.json");
+                                match spoiler_log {
+                                    Either::Left(ref spoiler_log_path) => {
+                                        let is_same_drive = {
+                                            #[cfg(windows)] {
+                                                spoiler_log_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                                == stats_spoiler_log_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
                                             }
+                                            #[cfg(not(windows))] { true }
+                                        };
+                                        if is_same_drive {
+                                            fs::rename(spoiler_log_path, stats_spoiler_log_path).await?;
+                                        } else {
+                                            fs::copy(spoiler_log_path, stats_spoiler_log_path).await?;
+                                            fs::remove_file(spoiler_log_path).await?;
                                         }
-                                        Either::Right(ref spoiler_log) => fs::write(stats_spoiler_log_path, spoiler_log).await?,
                                     }
-                                    if let Some(patch) = patch {
-                                        match patch {
-                                            Either::Left((wsl, patch_path)) => {
-                                                let mut patch_filename = OsString::from("patch.");
-                                                if let Some(ext) = patch_path.extension() {
-                                                    patch_filename.push(ext);
-                                                }
-                                                let stats_patch_path = seed_dir.join(patch_filename);
-                                                if let Some(wsl_distro) = wsl {
-                                                    let mut cmd = Command::new(WSL);
-                                                    if let Some(wsl_distro) = &wsl_distro {
-                                                        cmd.arg("--distribution");
-                                                        cmd.arg(wsl_distro);
-                                                    }
-                                                    cmd.arg("cat");
-                                                    cmd.arg(&patch_path);
-                                                    let patch = cmd.check("wsl cat").await?.stdout;
-                                                    fs::write(stats_patch_path, patch).await?;
-                                                    let mut cmd = Command::new(WSL);
-                                                    if let Some(wsl_distro) = &wsl_distro {
-                                                        cmd.arg("--distribution");
-                                                        cmd.arg(wsl_distro);
-                                                    }
-                                                    cmd.arg("rm");
-                                                    cmd.arg(patch_path);
-                                                    cmd.check("wsl rm").await?;
-                                                } else {
-                                                    let is_same_drive = {
-                                                        #[cfg(windows)] {
-                                                            patch_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
-                                                            == stats_patch_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
-                                                        }
-                                                        #[cfg(not(windows))] { true }
-                                                    };
-                                                    if is_same_drive {
-                                                        fs::rename(patch_path, stats_patch_path).await?;
-                                                    } else {
-                                                        fs::copy(&patch_path, stats_patch_path).await?;
-                                                        fs::remove_file(patch_path).await?;
-                                                    }
-                                                }
+                                    Either::Right(ref spoiler_log) => fs::write(stats_spoiler_log_path, spoiler_log).await?,
+                                }
+                                if let Some(patch) = patch {
+                                    match patch {
+                                        Either::Left((wsl, patch_path)) => {
+                                            let mut patch_filename = OsString::from("patch.");
+                                            if let Some(ext) = patch_path.extension() {
+                                                patch_filename.push(ext);
                                             }
-                                            Either::Right((ext, patch)) => {
-                                                let stats_patch_path = seed_dir.join(format!("patch.{ext}"));
+                                            let stats_patch_path = seed_dir.join(patch_filename);
+                                            if let Some(wsl_distro) = wsl {
+                                                let mut cmd = Command::new(WSL);
+                                                if let Some(wsl_distro) = &wsl_distro {
+                                                    cmd.arg("--distribution");
+                                                    cmd.arg(wsl_distro);
+                                                }
+                                                cmd.arg("cat");
+                                                cmd.arg(&patch_path);
+                                                let patch = cmd.check("wsl cat").await?.stdout;
                                                 fs::write(stats_patch_path, patch).await?;
+                                                let mut cmd = Command::new(WSL);
+                                                if let Some(wsl_distro) = &wsl_distro {
+                                                    cmd.arg("--distribution");
+                                                    cmd.arg(wsl_distro);
+                                                }
+                                                cmd.arg("rm");
+                                                cmd.arg(patch_path);
+                                                cmd.check("wsl rm").await?;
+                                            } else {
+                                                let is_same_drive = {
+                                                    #[cfg(windows)] {
+                                                        patch_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                                        == stats_patch_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                                    }
+                                                    #[cfg(not(windows))] { true }
+                                                };
+                                                if is_same_drive {
+                                                    fs::rename(patch_path, stats_patch_path).await?;
+                                                } else {
+                                                    fs::copy(&patch_path, stats_patch_path).await?;
+                                                    fs::remove_file(patch_path).await?;
+                                                }
                                             }
                                         }
+                                        Either::Right((ext, patch)) => {
+                                            let stats_patch_path = seed_dir.join(format!("patch.{ext}"));
+                                            fs::write(stats_patch_path, patch).await?;
+                                        }
                                     }
+                                }
+                                fs::write_json(seed_dir.join("metadata.json"), Metadata {
+                                    instructions: Some(instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
+                                    rsl_instructions: Some(rsl_instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
+                                    worker: Some(name.clone()),
+                                }).await?;
+                                let mut new_workers = Vec::from(worker_names.clone());
+                                let Some(pos) = new_workers.iter().position(|worker| *worker == name) else { panic!("got success from a worker ({name}) that wasn't rolling that seed ({seed_idx})") };
+                                new_workers.swap_remove(pos);
+                                if_chain! {
+                                    if !cancelled;
+                                    if is_bench;
+                                    if let Some(ref stderr) = instructions.as_ref().err().or_else(|| rsl_instructions.as_ref().err());
+                                    then {
+                                        // perf sometimes doesn't output instruction count for whatever reason, retry if this happens
+                                        log!("worker {name} retrying seed {seed_idx} due to missing instruction count, stderr:");
+                                        log!("{}", String::from_utf8_lossy(stderr));
+                                        fs::remove_dir_all(seed_dir).await?;
+                                        if let Some(new_workers) = NEVec::from_vec(new_workers) {
+                                            *worker_names = new_workers;
+                                        } else {
+                                            seed_states[usize::from(seed_idx)] = SeedState::Pending;
+                                        }
+                                        Some(seed_idx)
+                                    } else {
+                                        // cancel remaining raced copies of this seed
+                                        for name in new_workers {
+                                            if let Some(worker) = workers.iter().find(|worker| worker.name == name) {
+                                                if let Some(tx) = &worker.supervisor_tx {
+                                                    let _ = tx.send(ootrstats::worker::SupervisorMessage::Cancel(seed_idx)).await;
+                                                }
+                                            } else {
+                                                return Err(Error::WorkerNotFound)
+                                            }
+                                        }
+                                        seed_states[usize::from(seed_idx)] = SeedState::Success {
+                                            worker: Some(name),
+                                            spoiler_log: match spoiler_log {
+                                                Either::Left(_) => fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?,
+                                                Either::Right(spoiler_log) => serde_json::from_slice(&spoiler_log)?,
+                                            },
+                                            instructions: instructions.as_ref().ok().copied(),
+                                            rsl_instructions: rsl_instructions.as_ref().ok().copied(),
+                                        };
+                                        None
+                                    }
+                                }
+                            } else {
+                                // seed was already rolled but this worker's instance of this seed didn't get cancelled in time so we just ignore it
+                                None
+                            },
+                            ootrstats::worker::Message::Failure { seed_idx, instructions, rsl_instructions, error_log } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
+                                let seed_dir = stats_dir.join(seed_idx.to_string());
+                                let mut new_workers = Vec::from(worker_names.clone());
+                                let pos = new_workers.iter().position(|worker| *worker == name).expect("got failure from a worker that wasn't rolling that seed");
+                                new_workers.swap_remove(pos);
+                                if args.retry_failures {
+                                    fs::remove_dir_all(seed_dir).await.missing_ok()?;
+                                    if let Some(new_workers) = NEVec::from_vec(new_workers) {
+                                        *worker_names = new_workers;
+                                    } else {
+                                        seed_states[usize::from(seed_idx)] = SeedState::Pending;
+                                    }
+                                    Some(seed_idx)
+                                } else {
+                                    fs::create_dir_all(&seed_dir).await?;
+                                    let stats_error_log_path = seed_dir.join("error.log");
+                                    fs::write(stats_error_log_path, &error_log).await?;
                                     fs::write_json(seed_dir.join("metadata.json"), Metadata {
                                         instructions: Some(instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
                                         rsl_instructions: Some(rsl_instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
                                         worker: Some(name.clone()),
                                     }).await?;
-                                    let mut new_workers = Vec::from(worker_names.clone());
-                                    let Some(pos) = new_workers.iter().position(|worker| *worker == name) else { panic!("got success from a worker ({name}) that wasn't rolling that seed ({seed_idx})") };
-                                    new_workers.swap_remove(pos);
                                     if_chain! {
                                         if !cancelled;
                                         if is_bench;
@@ -776,117 +848,47 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                             // cancel remaining raced copies of this seed
                                             for name in new_workers {
                                                 if let Some(worker) = workers.iter().find(|worker| worker.name == name) {
-                                                    let _ = worker.supervisor_tx.send(ootrstats::worker::SupervisorMessage::Cancel(seed_idx)).await;
+                                                    if let Some(tx) = &worker.supervisor_tx {
+                                                        let _ = tx.send(ootrstats::worker::SupervisorMessage::Cancel(seed_idx)).await;
+                                                    }
                                                 } else {
                                                     return Err(Error::WorkerNotFound)
                                                 }
                                             }
-                                            seed_states[usize::from(seed_idx)] = SeedState::Success {
+                                            seed_states[usize::from(seed_idx)] = SeedState::Failure {
                                                 worker: Some(name),
-                                                spoiler_log: match spoiler_log {
-                                                    Either::Left(_) => fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?,
-                                                    Either::Right(spoiler_log) => serde_json::from_slice(&spoiler_log)?,
-                                                },
                                                 instructions: instructions.as_ref().ok().copied(),
                                                 rsl_instructions: rsl_instructions.as_ref().ok().copied(),
+                                                error_log,
                                             };
                                             None
                                         }
                                     }
-                                } else {
-                                    // seed was already rolled but this worker's instance of this seed didn't get cancelled in time so we just ignore it
-                                    None
-                                },
-                                ootrstats::worker::Message::Failure { seed_idx, instructions, rsl_instructions, error_log } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
-                                    let seed_dir = stats_dir.join(seed_idx.to_string());
-                                    let mut new_workers = Vec::from(worker_names.clone());
-                                    let pos = new_workers.iter().position(|worker| *worker == name).expect("got failure from a worker that wasn't rolling that seed");
-                                    new_workers.swap_remove(pos);
-                                    if args.retry_failures {
-                                        fs::remove_dir_all(seed_dir).await.missing_ok()?;
-                                        if let Some(new_workers) = NEVec::from_vec(new_workers) {
-                                            *worker_names = new_workers;
-                                        } else {
-                                            seed_states[usize::from(seed_idx)] = SeedState::Pending;
-                                        }
-                                        Some(seed_idx)
-                                    } else {
-                                        fs::create_dir_all(&seed_dir).await?;
-                                        let stats_error_log_path = seed_dir.join("error.log");
-                                        fs::write(stats_error_log_path, &error_log).await?;
-                                        fs::write_json(seed_dir.join("metadata.json"), Metadata {
-                                            instructions: Some(instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
-                                            rsl_instructions: Some(rsl_instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
-                                            worker: Some(name.clone()),
-                                        }).await?;
-                                        if_chain! {
-                                            if !cancelled;
-                                            if is_bench;
-                                            if let Some(ref stderr) = instructions.as_ref().err().or_else(|| rsl_instructions.as_ref().err());
-                                            then {
-                                                // perf sometimes doesn't output instruction count for whatever reason, retry if this happens
-                                                log!("worker {name} retrying seed {seed_idx} due to missing instruction count, stderr:");
-                                                log!("{}", String::from_utf8_lossy(stderr));
-                                                fs::remove_dir_all(seed_dir).await?;
-                                                if let Some(new_workers) = NEVec::from_vec(new_workers) {
-                                                    *worker_names = new_workers;
-                                                } else {
-                                                    seed_states[usize::from(seed_idx)] = SeedState::Pending;
-                                                }
-                                                Some(seed_idx)
-                                            } else {
-                                                // cancel remaining raced copies of this seed
-                                                for name in new_workers {
-                                                    if let Some(worker) = workers.iter().find(|worker| worker.name == name) {
-                                                        let _ = worker.supervisor_tx.send(ootrstats::worker::SupervisorMessage::Cancel(seed_idx)).await;
-                                                    } else {
-                                                        return Err(Error::WorkerNotFound)
-                                                    }
-                                                }
-                                                seed_states[usize::from(seed_idx)] = SeedState::Failure {
-                                                    worker: Some(name),
-                                                    instructions: instructions.as_ref().ok().copied(),
-                                                    rsl_instructions: rsl_instructions.as_ref().ok().copied(),
-                                                    error_log,
-                                                };
-                                                None
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // seed was already rolled but this worker's instance of this seed didn't get cancelled in time so we just ignore it
-                                    None
-                                },
-                            }
-                        } else {
-                            return Err(Error::WorkerNotFound)
+                                }
+                            } else {
+                                // seed was already rolled but this worker's instance of this seed didn't get cancelled in time so we just ignore it
+                                None
+                            },
                         }
+                    } else {
+                        return Err(Error::WorkerNotFound)
                     },
                     Event::End => break,
                 };
                 if let Some(seed_idx) = seed_idx {
-                    let workers = match workers {
-                        Ok(ref mut workers) => workers,
-                        Err(worker_tx) => {
-                            let (new_worker_tasks, new_workers) = mem::take(&mut config.workers).into_iter()
-                                .filter(|worker::Config { name, .. }| args.include_workers.is_empty() || args.include_workers.contains(name))
-                                .filter(|worker::Config { name, .. }| !args.exclude_workers.contains(name))
-                                .filter(|&worker::Config { bench, .. }| bench || !is_bench)
-                                .map(|worker::Config { name, kind, .. }| {
-                                    let (task, state) = worker::State::new(worker_tx.clone(), name.clone(), kind, rando_rev, &setup, if let Some(Subcommand::Bench { uncompressed, .. }) = args.subcommand {
-                                        if args.patch { unimplemented!("The `bench` subcommand currently cannot generate patch files") }
-                                        if uncompressed { OutputMode::BenchUncompressed } else { OutputMode::Bench }
-                                    } else {
-                                        if args.patch { OutputMode::Patch } else { OutputMode::Normal }
-                                    });
-                                    (task.map(move |res| (name, res)), state)
-                                })
-                                .unzip::<_, _, _, Vec<_>>();
-                            worker_tasks = new_worker_tasks;
-                            workers = Ok(new_workers);
-                            workers.as_mut().ok().expect("just inserted")
+                    if let Some(worker_tx) = &worker_tx {
+                        for worker in &mut workers {
+                            if worker.supervisor_tx.is_none() && !worker.stopped {
+                                let worker::Config { name, kind, .. } = config.workers.iter().find(|config| config.name == worker.name).expect("unconfigured worker");
+                                worker_tasks.push(worker.connect(worker_tx.clone(), kind.clone(), rando_rev, &setup, if let Some(Subcommand::Bench { uncompressed, .. }) = args.subcommand {
+                                    if args.patch { unimplemented!("The `bench` subcommand currently cannot generate patch files") }
+                                    if uncompressed { OutputMode::BenchUncompressed } else { OutputMode::Bench }
+                                } else {
+                                    if args.patch { OutputMode::Patch } else { OutputMode::Normal }
+                                }).map(move |res| (name.clone(), res)));
+                            }
                         }
-                    };
+                    }
                     for worker in workers.iter_mut().filter(|worker| worker.error.is_none() && worker.ready > 0) {
                         if worker.roll(&mut seed_states, seed_idx).await.is_ok() {
                             break
@@ -896,43 +898,31 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             },
             //TODO use signal-hook-tokio crate to handle interrupts on Unix?
             Some(res) = cli_rx.recv() => if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), kind: KeyEventKind::Press, .. }) = res.at_unknown()? {
-                cancel!(workers.as_deref().unwrap_or_default());
+                cancel!(workers);
             },
         }
         Message::Status {
             retry_failures: args.retry_failures,
             seed_states: &seed_states,
-            workers: workers.as_deref().ok(),
+            workers: &workers,
             label, available_parallelism, completed_readers, start, start_local,
         }.print(args.json_messages, &mut stderr)?;
         if completed_readers == available_parallelism && seed_states.iter().all(|state| match state {
             SeedState::Cancelled | SeedState::Success { .. } | SeedState::Failure { .. } => true,
             SeedState::Unchecked | SeedState::Pending | SeedState::Rolling { .. } => false,
         }) {
-            if let Ok(ref mut workers) = workers {
-                for worker in workers {
-                    // drop sender so the worker can shut down
-                    worker.supervisor_tx = mpsc::channel(1).0;
-                }
-            } else if worker_tasks.is_empty() {
-                // make sure worker_tx is dropped to prevent deadlock
-                workers = Ok(Vec::default());
+            for worker in &mut workers {
+                // drop sender so the worker can shut down
+                worker.supervisor_tx = None;
             }
+            // make sure worker_tx is dropped to prevent deadlock
+            worker_tx = None;
         }
     }
     drop(cli_rx);
-    if !args.json_messages {
-        if let Ok(ref workers) = workers {
-            crossterm::execute!(stderr,
-                MoveDown(workers.len() as u16),
-            ).at_unknown()?;
-        }
-        crossterm::execute!(stderr,
-            Print("\r\n"),
-        ).at_unknown()?;
-    }
+    Message::Done { label, num_workers: workers.len() as u16, stats_dir: stats_dir.clone() }.print(args.json_messages, &mut stderr)?;
     match args.subcommand {
-        None => Message::Done { stats_dir }.print(args.json_messages, &mut stderr)?,
+        None => {}
         Some(Subcommand::Bench { raw_data: false, uncompressed: _ }) => {
             let mut num_successes = 0u16;
             let mut num_failures = 0u16;
@@ -1069,13 +1059,11 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             fs::write_json(out_path, counts).await?;
         }
     }
-    if let Ok(workers) = workers {
-        let worker_errors = workers.into_iter()
-            .filter_map(|worker| Some((worker.name, worker.error?)))
-            .collect_vec();
-        if !worker_errors.is_empty() {
-            return Err(Error::Worker(worker_errors))
-        }
+    let worker_errors = workers.into_iter()
+        .filter_map(|worker| Some((worker.name, worker.error?)))
+        .collect_vec();
+    if !worker_errors.is_empty() {
+        return Err(Error::Worker(worker_errors))
     }
     Ok(cancelled)
 }
@@ -1088,6 +1076,7 @@ async fn main(args: Args) -> Result<(), Error> {
     let res = 'res: {
         if args.suite {
             let mut first_network_error = None;
+            let mut any_cancelled = false;
             for (label, args) in [
                 ("Default / Beginner", args.clone()),
                 ("Tournament", Args { preset: Some(format!("tournament")), ..args.clone() }),
@@ -1100,7 +1089,10 @@ async fn main(args: Args) -> Result<(), Error> {
                 }), //TODO check to make sure plando-random-settings branch is up to date with matthewkirby:master and the randomizer commit specified in rslversion.py is equal to the specified randomizer commit
             ] {
                 match cli(Some(label), args).await {
-                    Ok(cancelled) => if cancelled { break },
+                    Ok(cancelled) => if cancelled {
+                        any_cancelled = true;
+                        break
+                    },
                     Err(e) => if e.is_network_error() {
                         first_network_error.get_or_insert(e);
                     } else {
@@ -1111,12 +1103,16 @@ async fn main(args: Args) -> Result<(), Error> {
             if let Some(e) = first_network_error {
                 Err(e)
             } else {
-                Ok(())
+                Ok(any_cancelled)
             }
         } else {
-            cli(None, args).await.map(|_| ())
+            cli(None, args).await
         }
     };
     disable_raw_mode().at_unknown()?;
-    res
+    match res {
+        Ok(false) => Ok(()),
+        Ok(true) => Err(Error::Cancelled),
+        Err(e) => Err(e),
+    }
 }

@@ -215,27 +215,31 @@ pub(crate) struct State {
     pub(crate) error: Option<Error>,
     pub(crate) ready: u8,
     #[serde(skip)]
-    pub(crate) supervisor_tx: mpsc::Sender<SupervisorMessage>,
+    pub(crate) supervisor_tx: Option<mpsc::Sender<SupervisorMessage>>,
     pub(crate) stopped: bool,
 }
 
 impl State {
-    pub(crate) fn new(worker_tx: mpsc::Sender<(Arc<str>, Message)>, name: Arc<str>, kind: Kind, rando_rev: gix::ObjectId, setup: &RandoSetup, output_mode: OutputMode) -> (JoinHandle<Result<(), Error>>, Self) {
+    pub(crate) fn new(name: Arc<str>) -> Self {
+        Self {
+            msg: None,
+            error: None,
+            ready: 0,
+            supervisor_tx: None,
+            stopped: false,
+            name,
+        }
+    }
+
+    pub(crate) fn connect(&mut self, worker_tx: mpsc::Sender<(Arc<str>, Message)>, kind: Kind, rando_rev: gix::ObjectId, setup: &RandoSetup, output_mode: OutputMode) -> JoinHandle<Result<(), Error>> {
+        self.error = None;
         let (supervisor_tx, supervisor_rx) = mpsc::channel(256);
-        (
-            tokio::spawn(kind.run(name.clone(), worker_tx, supervisor_rx, rando_rev, setup.clone(), output_mode)),
-            Self {
-                msg: None,
-                error: None,
-                ready: 0,
-                stopped: false,
-                name, supervisor_tx,
-            }
-        )
+        self.supervisor_tx = Some(supervisor_tx);
+        tokio::spawn(kind.run(self.name.clone(), worker_tx, supervisor_rx, rando_rev, setup.clone(), output_mode))
     }
 
     pub(crate) async fn roll(&mut self, seed_states: &mut [SeedState], seed_idx: SeedIdx) -> Result<(), mpsc::error::SendError<SupervisorMessage>> {
-        self.supervisor_tx.send(SupervisorMessage::Roll(seed_idx)).await?;
+        self.supervisor_tx.as_ref().expect("attempted to roll a seed on an uninitialized worker").send(SupervisorMessage::Roll(seed_idx)).await?;
         self.ready -= 1;
         if let SeedState::Rolling { ref mut workers } = seed_states[usize::from(seed_idx)] {
             workers.push(self.name.clone());
