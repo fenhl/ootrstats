@@ -538,7 +538,7 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
         let stdout = BufRead::lines(&*output.stdout).try_collect::<_, Vec<_>, _>().at_command(cmd_name)?;
         let plando_path = repo_path.join("data").join(stdout.iter().rev().find_map(|line| line.strip_prefix("Plando File: ")).ok_or_else(|| RollError::SpoilerLogPath(output.clone()))?);
         let mut roll_output = run_rando(wsl_distro, &repo_path.join("randomizer"), use_rust_cli, supports_unsalted_seeds, random_seed, &RandoSettings::Default, &collect![
-            format!("rom") => json!(repo_path.join("data").join("oot-ntscu-1.0.n64").to_slash().ok_or(RollError::NonUtf8Path)?),
+            format!("rom") => json!("../data/oot-ntscu-1.0.n64"),
             format!("enable_distribution_file") => json!(true),
             format!("distribution_file") => json!(plando_path.to_slash().ok_or(RollError::NonUtf8Path)?),
         ], false, seed_idx, output_mode).await?;
