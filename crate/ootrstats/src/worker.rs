@@ -89,6 +89,7 @@ pub enum Error {
     #[error(transparent)] Semver(#[from] semver::Error),
     #[error(transparent)] Send(#[from] mpsc::error::SendError<Message>),
     #[error(transparent)] Task(#[from] tokio::task::JoinError),
+    #[error(transparent)] Utf8(#[from] std::string::FromUtf8Error),
     #[error(transparent)] Wheel(#[from] wheel::Error),
     #[error("user folder not found")]
     MissingHomeDir,
@@ -131,6 +132,7 @@ async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[S
 }
 
 pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, rando_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String]) -> Result<(), Error> {
+    let mut rsl_version = None;
     let mut use_rust_cli = false;
     let mut supports_unsalted_seeds = false;
     let (repo_path, random_seeds) = match setup {
@@ -275,6 +277,14 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 fs::create_dir_all(rsl_data_dir).await?;
                 fs::write(rsl_base_rom_path, decompress::decompress(&mut fs::read(&base_rom_path).await?)?).await?;
             }
+            let python = crate::python().await?;
+            rsl_version = Some(String::from_utf8(Command::new(&python)
+                .arg("-c")
+                .arg("import rslversion; print(rslversion.__version__)")
+                .current_dir(&repo_path)
+                .check(python.display().to_string()).await?
+                .stdout
+            )?);
             (repo_path, true)
         }
     };
@@ -311,8 +321,9 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             RandoSetup::Rsl { ref preset, .. } => {
                 let wsl_distro = wsl_distro.clone();
                 let repo_path = repo_path.clone();
+                let rsl_version = rsl_version.clone().unwrap();
                 let preset = preset.clone();
-                Either::Right(async move { crate::run_rsl(wsl_distro.as_deref(), &repo_path, use_rust_cli, supports_unsalted_seeds, random_seeds, preset.as_deref(), seed_idx, output_mode).await })
+                Either::Right(async move { crate::run_rsl(wsl_distro.as_deref(), &repo_path, &rsl_version, use_rust_cli, supports_unsalted_seeds, random_seeds, preset.as_deref(), seed_idx, output_mode).await })
             }
         };
         let tx = tx.clone();

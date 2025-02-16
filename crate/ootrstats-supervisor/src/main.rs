@@ -344,7 +344,7 @@ impl wheel::CustomExit for Error {
                     eprintln!("{cmd_name}: errors in workers:\r");
                     for (worker, source) in errors {
                         eprintln!("\r");
-                        eprintln!("in worker {worker}: {source}\r");
+                        eprintln!("in worker {worker}: {}\r", source.to_string().lines().format("\r\n"));
                     }
                     eprintln!("\r");
                     eprintln!("debug info: {debug}\r");

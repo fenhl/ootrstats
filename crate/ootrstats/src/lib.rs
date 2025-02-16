@@ -162,7 +162,6 @@ pub enum RollError {
     #[error(transparent)] Draft(#[from] draft::ResolveError),
     #[error(transparent)] Json(#[from] serde_json::Error),
     #[error(transparent)] ParseInt(#[from] std::num::ParseIntError),
-    #[error(transparent)] Utf8(#[from] std::string::FromUtf8Error),
     #[error(transparent)] Wheel(#[from] wheel::Error),
     #[cfg(target_os = "macos")] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
     #[cfg(windows)]
@@ -201,11 +200,15 @@ async fn python() -> Result<PathBuf, RollError> {
     Ok({
         #[cfg(windows)] { UserDirs::new().ok_or(RollError::MissingHomeDir)?.home_dir().join("scoop").join("apps").join("python").join("current").join("python.exe") }
         #[cfg(target_os = "linux")] {
-            let python = PathBuf::from("/usr/bin/python3");
-            if python.exists() {
-                python
+            if fs::exists("/etc/NIXOS").await? {
+                PathBuf::from("/run/current-system/sw/bin/python")
             } else {
-                PathBuf::from("python3")
+                let python = PathBuf::from("/usr/bin/python3");
+                if python.exists() {
+                    python
+                } else {
+                    PathBuf::from("python3")
+                }
             }
         }
         #[cfg(target_os = "macos")] {
@@ -462,16 +465,9 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
     })
 }
 
-pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli: bool, supports_unsalted_seeds: bool, random_seed: bool, preset: Option<&str>, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
+pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, rsl_version: &str, use_rust_cli: bool, supports_unsalted_seeds: bool, random_seed: bool, preset: Option<&str>, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let python = python().await?;
     #[cfg_attr(not(target_os = "windows"), allow(unused_mut))] let mut cmd_name = python.display().to_string();
-    let rsl_version = Command::new(&python)
-        .arg("-c")
-        .arg("import rslversion; print(rslversion.__version__)")
-        .current_dir(repo_path)
-        .check(cmd_name.clone()).await?
-        .stdout;
-    let rsl_version = String::from_utf8(rsl_version)?;
     let (supports_plando_filename_base, supports_seed, supports_no_salt) = if let Some((_, major, minor, patch, supplementary)) = regex_captures!(r"^([0-9]+)\.([0-9]+)\.([0-9]+) Fenhl-([0-9]+)$", &rsl_version.trim()) {
         let rsl_version = (Version::new(major.parse()?, minor.parse()?, patch.parse()?), supplementary.parse()?);
         (rsl_version >= (Version::new(2, 8, 2), 0), rsl_version >= (Version::new(2, 8, 2), 3), rsl_version >= (Version::new(2, 8, 2), 3))
@@ -534,6 +530,7 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
     if let Some(preset) = preset {
         cmd.arg(format!("--override=weights/{preset}_override.json"));
     }
+    cmd.stdin(Stdio::null());
     cmd.current_dir(repo_path);
     let output = cmd.output().await.at_command(cmd_name.clone())?;
     let stderr = BufRead::lines(&*output.stderr).try_collect::<_, Vec<_>, _>().at_command(cmd_name.clone())?;
