@@ -2933,7 +2933,6 @@ name = "ootrstats-deploy"
 version = "15.0.0"
 dependencies = [
  "clap",
- "futures",
  "ootrstats-supervisor",
  "thiserror 2.0.11",
  "tokio",
