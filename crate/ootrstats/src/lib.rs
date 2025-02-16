@@ -20,7 +20,6 @@ use {
     if_chain::if_chain,
     itertools::Itertools as _,
     lazy_regex::regex_captures,
-    path_slash::PathBufExt as _,
     rustc_stable_hash::StableSipHasher128,
     semver::Version,
     serde_json::json,
@@ -167,8 +166,6 @@ pub enum RollError {
     #[cfg(windows)]
     #[error("user folder not found")]
     MissingHomeDir,
-    #[error("non-UTF-8 RSL plando or base rom path")]
-    NonUtf8Path,
     #[error("failed to parse `perf` output: {}", String::from_utf8_lossy(.0))]
     PerfSyntax(Vec<u8>),
     #[error("RSL script did not report plando location")]
@@ -536,13 +533,13 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
     let stderr = BufRead::lines(&*output.stderr).try_collect::<_, Vec<_>, _>().at_command(cmd_name.clone())?;
     if output.status.success() || output.status.code() == Some(3) {
         let stdout = BufRead::lines(&*output.stdout).try_collect::<_, Vec<_>, _>().at_command(cmd_name)?;
-        let plando_path = repo_path.join("data").join(stdout.iter().rev().find_map(|line| line.strip_prefix("Plando File: ")).ok_or_else(|| RollError::SpoilerLogPath(output.clone()))?);
+        let plando_filename = stdout.iter().rev().find_map(|line| line.strip_prefix("Plando File: ")).ok_or_else(|| RollError::SpoilerLogPath(output.clone()))?;
         let mut roll_output = run_rando(wsl_distro, &repo_path.join("randomizer"), use_rust_cli, supports_unsalted_seeds, random_seed, &RandoSettings::Default, &collect![
             format!("rom") => json!("../data/oot-ntscu-1.0.n64"),
             format!("enable_distribution_file") => json!(true),
-            format!("distribution_file") => json!(plando_path.to_slash().ok_or(RollError::NonUtf8Path)?),
+            format!("distribution_file") => json!(format!("../data/{plando_filename}")),
         ], false, seed_idx, output_mode).await?;
-        fs::remove_file(plando_path).await?;
+        fs::remove_file(repo_path.join("data").join(plando_filename)).await?;
         roll_output.rsl_instructions = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
             #[cfg(any(target_os = "linux", target_os = "windows"))] {
                 if_chain! {
