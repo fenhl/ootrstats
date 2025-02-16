@@ -167,8 +167,8 @@ pub enum RollError {
     #[cfg(windows)]
     #[error("user folder not found")]
     MissingHomeDir,
-    #[error("RSL script reported non-UTF-8 plando path")]
-    NonUtf8PlandoPath,
+    #[error("non-UTF-8 RSL plando or base rom path")]
+    NonUtf8Path,
     #[error("failed to parse `perf` output: {}", String::from_utf8_lossy(.0))]
     PerfSyntax(Vec<u8>),
     #[error("RSL script did not report plando location")]
@@ -538,8 +538,9 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
         let stdout = BufRead::lines(&*output.stdout).try_collect::<_, Vec<_>, _>().at_command(cmd_name)?;
         let plando_path = repo_path.join("data").join(stdout.iter().rev().find_map(|line| line.strip_prefix("Plando File: ")).ok_or_else(|| RollError::SpoilerLogPath(output.clone()))?);
         let mut roll_output = run_rando(wsl_distro, &repo_path.join("randomizer"), use_rust_cli, supports_unsalted_seeds, random_seed, &RandoSettings::Default, &collect![
+            format!("rom") => json!(repo_path.join("data").join("oot-ntscu-1.0.n64").to_slash().ok_or(RollError::NonUtf8Path)?),
             format!("enable_distribution_file") => json!(true),
-            format!("distribution_file") => json!(plando_path.to_slash().ok_or(RollError::NonUtf8PlandoPath)?),
+            format!("distribution_file") => json!(plando_path.to_slash().ok_or(RollError::NonUtf8Path)?),
         ], false, seed_idx, output_mode).await?;
         fs::remove_file(plando_path).await?;
         roll_output.rsl_instructions = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
