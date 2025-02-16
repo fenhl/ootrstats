@@ -20,7 +20,7 @@ impl Parse for Spec {
             input.parse::<Token![:]>()?;
             match &*field_name.to_string() {
                 "groups" => {
-                    let mut new_groups = HashMap::default();
+                    let mut new_groups = BTreeMap::default();
                     let content;
                     braced!(content in input);
                     for Group { name, settings } in content.parse_terminated(Group::parse, Token![,])? {
@@ -59,14 +59,14 @@ impl Parse for Spec {
 
 struct Group {
     name: String,
-    settings: HashMap<String, Setting>,
+    settings: BTreeMap<String, Setting>,
 }
 
 impl Parse for Group {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let name = input.parse::<LitStr>()?.value();
         input.parse::<Token![:]>()?;
-        let mut settings = HashMap::default();
+        let mut settings = BTreeMap::default();
         let content;
         braced!(content in input);
         for ParseSetting { name, default, other } in content.parse_terminated(ParseSetting::parse, Token![,])? {
@@ -81,7 +81,7 @@ impl Parse for Group {
 struct ParseSetting {
     name: String,
     default: String,
-    other: HashSet<String>,
+    other: BTreeSet<String>,
 }
 
 impl Parse for ParseSetting {
@@ -89,7 +89,7 @@ impl Parse for ParseSetting {
         let name = input.parse::<Ident>()?.to_string();
         input.parse::<Token![:]>()?;
         let mut default = None;
-        let mut other = HashSet::default();
+        let mut other = BTreeSet::default();
         let content;
         braced!(content in input);
         for option in content.parse_terminated(ParseOption::parse, Token![,])? {
@@ -259,7 +259,7 @@ impl Parse for Settings {
             input.parse::<Token![match]>()?;
             let mut fallback = None;
             let setting = input.parse::<Ident>()?.to_string();
-            let mut arms = HashMap::default();
+            let mut arms = BTreeMap::default();
             let content;
             braced!(content in input);
             for SettingsMatchArm { options, value } in content.parse_terminated(SettingsMatchArm::parse, Token![,])? {
@@ -289,7 +289,7 @@ impl Parse for Settings {
         } else if lookahead.peek(LitStr) {
             Self::String(input.parse::<LitStr>()?.value())
         } else if lookahead.peek(token::Brace) {
-            let mut obj = HashMap::default();
+            let mut obj = BTreeMap::default();
             let content;
             braced!(content in input);
             for SettingsEntry { name, value } in content.parse_terminated(SettingsEntry::parse, Token![,])? {

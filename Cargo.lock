@@ -2916,7 +2916,9 @@ dependencies = [
  "if_chain",
  "itertools",
  "lazy-regex",
+ "path-slash",
  "rand 0.9.0",
+ "rustc-stable-hash",
  "semver",
  "serde_json_path_to_error",
  "syn 2.0.98",
@@ -2924,6 +2926,18 @@ dependencies = [
  "tokio",
  "wheel",
  "xdg",
+]
+
+[[package]]
+name = "ootrstats-deploy"
+version = "15.0.0"
+dependencies = [
+ "clap",
+ "futures",
+ "ootrstats-supervisor",
+ "thiserror 2.0.11",
+ "tokio",
+ "wheel",
 ]
 
 [[package]]
@@ -3039,6 +3053,12 @@ dependencies = [
  "smallvec",
  "windows-targets 0.52.6",
 ]
+
+[[package]]
+name = "path-slash"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e91099d4268b0e11973f036e885d652fb0b21fedcf69738c627f94db6a44f42"
 
 [[package]]
 name = "pear"
@@ -3462,6 +3482,12 @@ name = "rustc-demangle"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "719b953e2095829ee67db738b3bfa9fa368c94900df327b3f07fe6e794d2fe1f"
+
+[[package]]
+name = "rustc-stable-hash"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2febf9acc5ee5e99d1ad0afcdbccc02d87aa3f857a1f01f825b80eacf8edfcd1"
 
 [[package]]
 name = "rustix"

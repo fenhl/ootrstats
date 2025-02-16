@@ -2,6 +2,8 @@ use {
     std::{
         borrow::Cow,
         collections::{
+            BTreeMap,
+            BTreeSet,
             HashMap,
             HashSet,
         },
@@ -16,10 +18,10 @@ use {
 
 mod ast;
 
-#[derive(Clone, Protocol)]
+#[derive(Clone, Hash, Protocol)]
 struct Setting {
     default: String,
-    other: HashSet<String>,
+    other: BTreeSet<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Protocol)]
@@ -28,14 +30,14 @@ enum Team {
     B,
 }
 
-#[derive(Clone, Copy, Protocol)]
+#[derive(Clone, Copy, Hash, Protocol)]
 enum Defaultable {
     False,
     True,
     HasPicked,
 }
 
-#[derive(Clone, Copy, Protocol)]
+#[derive(Clone, Copy, Hash, Protocol)]
 enum StepKind {
     Ban {
         skippable: bool,
@@ -46,17 +48,17 @@ enum StepKind {
     },
 }
 
-#[derive(Clone, Protocol)]
+#[derive(Clone, Hash, Protocol)]
 enum Settings {
     Bool(bool),
     Number(serde_json::Number),
     String(String),
     Array(Vec<Settings>),
-    Object(HashMap<String, Settings>),
+    Object(BTreeMap<String, Settings>),
     Setting(String),
     Match {
         setting: String,
-        arms: HashMap<String, Settings>,
+        arms: BTreeMap<String, Settings>,
         fallback: Option<Box<Settings>>,
     },
 }
@@ -80,7 +82,7 @@ pub enum ResolveError {
 }
 
 impl Settings {
-    fn resolve(&self, groups: &HashMap<String, HashMap<String, Setting>>, picks: &HashMap<&str, &str>) -> Result<Json, ResolveError> {
+    fn resolve(&self, groups: &BTreeMap<String, BTreeMap<String, Setting>>, picks: &HashMap<&str, &str>) -> Result<Json, ResolveError> {
         Ok(match self {
             Self::Bool(b) => Json::Bool(*b),
             Self::Number(n) => Json::Number(n.clone()),
@@ -134,9 +136,9 @@ impl Settings {
     }
 }
 
-#[derive(Clone, Protocol)]
+#[derive(Clone, Hash, Protocol)]
 pub struct Spec {
-    groups: HashMap<String, HashMap<String, Setting>>,
+    groups: BTreeMap<String, BTreeMap<String, Setting>>,
     steps: Vec<(Team, StepKind)>,
     settings: Settings,
 }

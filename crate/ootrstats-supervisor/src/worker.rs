@@ -1,6 +1,5 @@
 use {
     std::{
-        path::PathBuf,
         pin::{
             Pin,
             pin,
@@ -23,10 +22,7 @@ use {
     },
     nonempty_collections::nev,
     semver::Version,
-    serde::{
-        Deserialize,
-        Serialize,
-    },
+    serde::Serialize,
     serde_with::SerializeDisplay,
     tokio::{
         select,
@@ -53,40 +49,8 @@ use {
     crate::SeedState,
 };
 
-fn make_neg_one() -> i8 { -1 }
-fn make_true() -> bool { true }
-
-#[derive(Deserialize)]
-pub(crate) struct Config {
-    pub(crate) name: Arc<str>,
-    #[serde(flatten)]
-    pub(crate) kind: Kind,
-    #[serde(default = "make_true")]
-    pub(crate) bench: bool,
-}
-
-#[derive(Clone, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub(crate) enum Kind {
-    #[serde(rename_all = "camelCase")]
-    Local {
-        base_rom_path: PathBuf,
-        wsl_distro: Option<String>,
-        #[serde(default = "make_neg_one")] // default to keeping one core free to avoid slowing down the supervisor too much
-        cores: i8,
-    },
-    #[serde(rename_all = "camelCase")]
-    WebSocket {
-        #[serde(default = "make_true")]
-        tls: bool,
-        hostname: String,
-        password: String,
-        base_rom_path: String,
-        wsl_distro: Option<String>,
-        #[serde(default)]
-        priority_users: Vec<String>,
-    },
-}
+pub(crate) type Config = crate::config::Worker;
+pub(crate) type Kind = crate::config::WorkerKind;
 
 #[derive(Debug, thiserror::Error, SerializeDisplay)]
 pub(crate) enum Error {

@@ -2,6 +2,10 @@ use {
     std::{
         borrow::Cow,
         collections::HashMap,
+        hash::{
+            Hash as _,
+            Hasher,
+        },
         io::prelude::*,
         path::{
             Path,
@@ -16,6 +20,8 @@ use {
     if_chain::if_chain,
     itertools::Itertools as _,
     lazy_regex::regex_captures,
+    path_slash::PathBufExt as _,
+    rustc_stable_hash::StableSipHasher128,
     semver::Version,
     serde_json::json,
     tokio::{
@@ -62,11 +68,40 @@ pub enum RandoSetup {
 
 impl RandoSetup {
     pub fn stats_dir(&self, rando_rev: gix_hash::ObjectId) -> PathBuf {
+        //TODO more detailed categorization (after current benchmark is done): switch to stats_dir_new
         match self {
             Self::Normal { github_user, repo, settings, json_settings, world_counts: false, random_seeds: false } if json_settings.is_empty() => Path::new("rando").join(github_user).join(repo).join(rando_rev.to_string()).join(settings.stats_dir()),
             Self::Normal { github_user, repo, settings, .. } => Path::new("rando").join(github_user).join(repo).join(rando_rev.to_string()).join("custom").join(settings.stats_dir()),
             Self::Rsl { github_user, repo, preset: None } => Path::new("rsl").join(github_user).join(repo).join(rando_rev.to_string()),
             Self::Rsl { github_user, repo, preset: Some(preset) } => Path::new("rsl").join(github_user).join(repo).join(rando_rev.to_string()).join(preset),
+        }
+    }
+
+    pub fn stats_dir_new(&self, rando_rev: gix_hash::ObjectId) -> PathBuf {
+        match self {
+            Self::Normal { github_user, repo, settings, json_settings, world_counts, random_seeds } => {
+                let mut path = Path::new("rando")
+                    .join(github_user)
+                    .join(repo)
+                    .join(rando_rev.to_string())
+                    .join(settings.stats_dir_new()); //TODO rename to stats_dir
+                if !json_settings.is_empty() {
+                    let mut hasher = StableSipHasher128::default();
+                    json_settings.hash(&mut hasher);
+                    path = path.join(format!("j{:016x}", Hasher::finish(&hasher))).into();
+                }
+                path.join(match (world_counts, random_seeds) {
+                    (false, false) => "default",
+                    (false, true) => "r",
+                    (true, false) => "w",
+                    (true, true) => "wr",
+                })
+            }
+            Self::Rsl { github_user, repo, preset } => Path::new("rsl")
+                .join(github_user)
+                .join(repo)
+                .join(rando_rev.to_string())
+                .join(preset.as_deref().unwrap_or("default"))
         }
     }
 }
@@ -80,12 +115,26 @@ pub enum RandoSettings {
 }
 
 impl RandoSettings {
-    pub fn stats_dir(&self) -> Cow<'static, Path> {
+    //TODO more detailed categorization (after current benchmark is done): switch to stats_dir_new
+    fn stats_dir(&self) -> Cow<'static, Path> {
         match self {
             Self::Default => Path::new("default").into(),
             Self::Preset(preset) => Path::new("preset").join(preset).into(),
             Self::String(settings) => Path::new("settings").join(settings).into(),
             Self::Draft(_) => Path::new("draft").into(), //TODO add a hash of the draft spec as a subdirectory?
+        }
+    }
+
+    fn stats_dir_new(&self) -> Cow<'static, Path> {
+        match self {
+            Self::Default => Path::new("default").into(),
+            Self::Preset(preset) => Path::new("preset").join(preset).into(),
+            Self::String(settings) => Path::new("settings").join(settings).into(),
+            Self::Draft(spec) => {
+                let mut hasher = StableSipHasher128::default();
+                spec.hash(&mut hasher);
+                Path::new("draft").join(format!("{:016x}", Hasher::finish(&hasher))).into()
+            }
         }
     }
 }
@@ -119,6 +168,8 @@ pub enum RollError {
     #[cfg(windows)]
     #[error("user folder not found")]
     MissingHomeDir,
+    #[error("RSL script reported non-UTF-8 plando path")]
+    NonUtf8PlandoPath,
     #[error("failed to parse `perf` output: {}", String::from_utf8_lossy(.0))]
     PerfSyntax(Vec<u8>),
     #[error("RSL script did not report plando location")]
@@ -491,7 +542,7 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
         let plando_path = Path::new("data").join(stdout.iter().rev().find_map(|line| line.strip_prefix("Plando File: ")).ok_or_else(|| RollError::SpoilerLogPath(output.clone()))?);
         let mut roll_output = run_rando(wsl_distro, &repo_path.join("randomizer"), use_rust_cli, supports_unsalted_seeds, random_seed, &RandoSettings::Default, &collect![
             format!("enable_distribution_file") => json!(true),
-            format!("distribution_file") => json!(plando_path),
+            format!("distribution_file") => json!(plando_path.to_slash().ok_or(RollError::NonUtf8PlandoPath)?),
         ], false, seed_idx, output_mode).await?;
         fs::remove_file(plando_path).await?;
         roll_output.rsl_instructions = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {

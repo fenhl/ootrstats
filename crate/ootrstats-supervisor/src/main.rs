@@ -49,6 +49,7 @@ use {
     lazy_regex::regex_is_match,
     nonempty_collections::NEVec,
     ootr_utils::spoiler::SpoilerLog,
+    ootrstats_supervisor as _, // included directly as modules
     proc_macro2 as _, // feature config required for Span::start used in CustomExit impl
     rustls as _, // feature ring required for WebSocket connections to work
     serde::{
@@ -209,6 +210,9 @@ struct Args {
     /// Print status updates as machine-readable JSON.
     #[clap(long)]
     json_messages: bool,
+    /// Temporary option for migration, will become the default in a future version.
+    #[clap(long, hide = true)]
+    new_stats_dir_structure: bool,
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
 }
@@ -266,8 +270,11 @@ enum Error {
     SuccessAndFailure,
     #[error("at most 255 seeds may be generated with the --world-counts option")]
     TooManyWorlds,
-    #[error("error(s) in worker(s): {}", .0.iter().map(|(worker, source)| format!("{worker}: {source}")).format(", "))]
-    Worker(Vec<(Arc<str>, worker::Error)>),
+    #[error("error(s) in worker(s): {}", .worker_errors.iter().map(|(worker, source)| format!("{worker}: {source}")).format(", "))]
+    Worker {
+        worker_errors: Vec<(Arc<str>, worker::Error)>,
+        cancelled: bool,
+    },
     #[error("received a message from an unknown worker")]
     WorkerNotFound,
 }
@@ -295,7 +302,7 @@ impl IsNetworkError for Error {
             #[cfg(unix)] Self::Xdg(_) => false,
             #[cfg(windows)] Self::MissingHomeDir => false,
             Self::Wheel(e) => e.is_network_error(),
-            Self::Worker(errors) => errors.iter().all(|(_, e)| e.is_network_error()),
+            Self::Worker { worker_errors, .. } => worker_errors.iter().all(|(_, e)| e.is_network_error()),
         }
     }
 }
@@ -323,7 +330,7 @@ impl wheel::CustomExit for Error {
                 eprintln!("line {}, column {}\r", start.line, start.column);
                 eprintln!("debug info: {debug}\r");
             }
-            Self::Worker(errors) => match errors.into_iter().exactly_one() {
+            Self::Worker { worker_errors, .. } => match worker_errors.into_iter().exactly_one() {
                 Ok((worker, worker::Error::Local(ootrstats::worker::Error::Roll(ootrstats::RollError::PerfSyntax(stderr))))) => {
                     eprintln!("{cmd_name}: roll error in worker {worker}: failed to parse `perf` output\r");
                     eprintln!("stderr:\r");
@@ -455,7 +462,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             #[cfg(windows)] { project_dirs.data_dir().to_owned() }
             #[cfg(unix)] { BaseDirectories::new()?.place_data_file("ootrstats").at_unknown()? }
         };
-        stats_root.join(setup.stats_dir(rando_rev))
+        stats_root.join(if args.new_stats_dir_structure { setup.stats_dir_new(rando_rev) } else { setup.stats_dir(rando_rev) })
     };
     if args.clean {
         fs::remove_dir_all(&stats_dir).await.missing_ok()?;
@@ -519,6 +526,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
         .map(|worker::Config { name, .. }| worker::State::new(name.clone()))
         .collect_vec();
     let mut cancelled = false;
+    let mut cancelled_by_user = false;
 
     macro_rules! cancel {
         ($workers:expr) => {{
@@ -898,6 +906,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             },
             //TODO use signal-hook-tokio crate to handle interrupts on Unix?
             Some(res) = cli_rx.recv() => if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), kind: KeyEventKind::Press, .. }) = res.at_unknown()? {
+                cancelled_by_user = true;
                 cancel!(workers);
             },
         }
@@ -1063,9 +1072,9 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
         .filter_map(|worker| Some((worker.name, worker.error?)))
         .collect_vec();
     if !worker_errors.is_empty() {
-        return Err(Error::Worker(worker_errors))
+        return Err(Error::Worker { worker_errors, cancelled: cancelled_by_user })
     }
-    Ok(cancelled)
+    Ok(cancelled_by_user)
 }
 
 #[wheel::main(custom_exit)]
@@ -1093,11 +1102,17 @@ async fn main(args: Args) -> Result<(), Error> {
                         any_cancelled = true;
                         break
                     },
-                    Err(e) => if e.is_network_error() {
-                        first_network_error.get_or_insert(e);
-                    } else {
-                        break 'res Err(e)
-                    },
+                    Err(e) => {
+                        if let Error::Worker { cancelled: true, .. } = e {
+                            any_cancelled = true;
+                            break
+                        }
+                        if e.is_network_error() {
+                            first_network_error.get_or_insert(e);
+                        } else {
+                            break 'res Err(e)
+                        }
+                    }
                 }
             }
             if let Some(e) = first_network_error {

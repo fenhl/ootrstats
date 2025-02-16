@@ -25,7 +25,10 @@ use {
     serde::Serialize,
     serde_json::Value as Json,
     tokio::time::Instant,
-    wheel::traits::IoResultExt as _,
+    wheel::traits::{
+        IoResultExt as _,
+        IsNetworkError as _,
+    },
     ootrstats::SeedIdx,
     crate::{
         Error,
@@ -97,10 +100,11 @@ impl Message<'_> {
                 Self::Status { label, available_parallelism, completed_readers, retry_failures, seed_states, start, start_local, workers } => {
                     for worker in workers {
                         if let Some(ref e) = worker.error {
+                            let kind = if e.is_network_error() { "network error" } else { "error" };
                             let e = e.to_string();
                             if_chain! {
                                 if let Ok((width, _)) = terminal::size();
-                                let mut prefix_end = e.len().min(usize::from(width) - worker.name.len() - 13);
+                                let mut prefix_end = e.len().min(usize::from(width) - worker.name.len() - kind.len() - 8);
                                 if prefix_end + 3 < e.len() || e.contains('\n');
                                 then {
                                     if let Some(idx) = e[..prefix_end].find('\n') {
@@ -111,12 +115,12 @@ impl Message<'_> {
                                         }
                                     }
                                     crossterm::execute!(writer,
-                                        Print(format_args!("\r\n{}: error: {}[…]", worker.name, &e[..prefix_end])),
+                                        Print(format_args!("\r\n{}: {kind}: {}[…]", worker.name, &e[..prefix_end])),
                                         Clear(ClearType::UntilNewLine),
                                     ).at_unknown()?;
                                 } else {
                                     crossterm::execute!(writer,
-                                        Print(format_args!("\r\n{}: error: {e}", worker.name)),
+                                        Print(format_args!("\r\n{}: {kind}: {e}", worker.name)),
                                         Clear(ClearType::UntilNewLine),
                                     ).at_unknown()?;
                                 }
