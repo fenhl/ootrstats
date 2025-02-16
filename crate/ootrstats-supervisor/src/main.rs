@@ -57,10 +57,7 @@ use {
         Serialize,
     },
     tokio::{
-        io::{
-            self,
-            AsyncWriteExt as _,
-        },
+        io::AsyncWriteExt as _,
         process::Command,
         select,
         sync::mpsc,
@@ -102,11 +99,13 @@ enum ReaderMessage {
     Pending(SeedIdx),
     Success {
         seed_idx: SeedIdx,
+        worker: Arc<str>,
         instructions: Option<u64>,
         rsl_instructions: Option<u64>,
     },
     Failure {
         seed_idx: SeedIdx,
+        worker: Arc<str>,
         instructions: Option<u64>,
         rsl_instructions: Option<u64>,
     },
@@ -119,7 +118,7 @@ struct Metadata {
     instructions: Option<Result<u64, String>>,
     rsl_instructions: Option<Result<u64, String>>,
     /// always written by this version of ootrstats but may be absent in metadata from older ootrstats versions.
-    worker: Option<Arc<str>>,
+    worker: Arc<str>,
 }
 
 #[derive(Serialize)]
@@ -131,15 +130,17 @@ enum SeedState {
     },
     Cancelled,
     Success {
-        /// `None` means the seed was read from disk.
-        worker: Option<Arc<str>>,
+        /// Whether the seed was read from disk.
+        existing: bool,
+        worker: Arc<str>,
         instructions: Option<u64>,
         rsl_instructions: Option<u64>,
         spoiler_log: serde_json::Value,
     },
     Failure {
-        /// `None` means the seed was read from disk.
-        worker: Option<Arc<str>>,
+        /// Whether the seed was read from disk.
+        existing: bool,
+        worker: Arc<str>,
         instructions: Option<u64>,
         rsl_instructions: Option<u64>,
         error_log: Bytes,
@@ -484,28 +485,20 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                 match (fs::exists(&stats_spoiler_log_path).await?, fs::exists(&stats_error_log_path).await?) {
                     (false, false) => reader_tx.send(ReaderMessage::Pending(seed_idx)).await?,
                     (false, true) => {
-                        let (instructions, rsl_instructions) = if is_bench {
-                            match fs::read_json::<Metadata>(seed_path.join("metadata.json")).await {
-                                Ok(metadata) => (metadata.instructions.and_then(Result::ok), metadata.rsl_instructions.and_then(Result::ok)),
-                                Err(wheel::Error::Io { inner, .. }) if inner.kind() == io::ErrorKind::NotFound => (None, None),
-                                Err(e) => return Err(e.into()),
-                            }
-                        } else {
-                            (None, None)
-                        };
-                        reader_tx.send(ReaderMessage::Failure { seed_idx, instructions, rsl_instructions }).await?;
+                        let Metadata { instructions, rsl_instructions, worker } = fs::read_json(seed_path.join("metadata.json")).await?;
+                        reader_tx.send(ReaderMessage::Failure {
+                            instructions: instructions.and_then(Result::ok),
+                            rsl_instructions: rsl_instructions.and_then(Result::ok),
+                            seed_idx, worker,
+                        }).await?;
                     }
                     (true, false) => {
-                        let (instructions, rsl_instructions) = if is_bench {
-                            match fs::read_json::<Metadata>(seed_path.join("metadata.json")).await {
-                                Ok(metadata) => (metadata.instructions.and_then(Result::ok), metadata.rsl_instructions.and_then(Result::ok)),
-                                Err(wheel::Error::Io { inner, .. }) if inner.kind() == io::ErrorKind::NotFound => (None, None),
-                                Err(e) => return Err(e.into()),
-                            }
-                        } else {
-                            (None, None)
-                        };
-                        reader_tx.send(ReaderMessage::Success { seed_idx, instructions, rsl_instructions }).await?;
+                        let Metadata { instructions, rsl_instructions, worker } = fs::read_json(seed_path.join("metadata.json")).await?;
+                        reader_tx.send(ReaderMessage::Success {
+                            instructions: instructions.and_then(Result::ok),
+                            rsl_instructions: rsl_instructions.and_then(Result::ok),
+                            seed_idx, worker,
+                        }).await?;
                     }
                     (true, true) => return Err(Error::SuccessAndFailure),
                 }
@@ -577,53 +570,38 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                     else => Event::End,
                 }
             } => {
-                let seed_idx = match event {
-                    Event::ReaderDone(res) => {
-                        let () = res??;
-                        None
-                    }
+                match event {
+                    Event::ReaderDone(res) => { let () = res??; }
                     Event::ReaderMessage(msg) => match msg {
-                        ReaderMessage::Pending(seed_idx) => {
-                            seed_states[usize::from(seed_idx)] = SeedState::Pending;
-                            Some(seed_idx)
-                        }
-                        ReaderMessage::Success { seed_idx, instructions, rsl_instructions } => if is_bench && instructions.is_none() {
+                        ReaderMessage::Pending(seed_idx) => seed_states[usize::from(seed_idx)] = SeedState::Pending,
+                        ReaderMessage::Success { seed_idx, worker, instructions, rsl_instructions } => if is_bench && instructions.is_none() {
                             // seed was already rolled but not benchmarked, roll a new seed instead
                             fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
                             seed_states[usize::from(seed_idx)] = SeedState::Pending;
-                            Some(seed_idx)
                         } else {
                             seed_states[usize::from(seed_idx)] = SeedState::Success {
-                                worker: None,
+                                existing: true,
                                 spoiler_log: fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?,
-                                instructions, rsl_instructions,
+                                worker, instructions, rsl_instructions,
                             };
-                            None
                         },
-                        ReaderMessage::Failure { seed_idx, instructions, rsl_instructions } => if args.retry_failures {
+                        ReaderMessage::Failure { worker, seed_idx, instructions, rsl_instructions } => if args.retry_failures {
                             fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
                             seed_states[usize::from(seed_idx)] = SeedState::Pending;
-                            Some(seed_idx)
                         } else if is_bench && instructions.is_none() {
                             // seed was already rolled but not benchmarked, roll a new seed instead
                             fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
                             seed_states[usize::from(seed_idx)] = SeedState::Pending;
-                            Some(seed_idx)
                         } else {
                             seed_states[usize::from(seed_idx)] = SeedState::Failure {
-                                worker: None,
+                                existing: true,
                                 error_log: fs::read(stats_dir.join(seed_idx.to_string()).join("error.log")).await?.into(),
-                                instructions, rsl_instructions,
+                                worker, instructions, rsl_instructions,
                             };
-                            None
                         },
-                        ReaderMessage::Done => {
-                            completed_readers += 1;
-                            None
-                        }
+                        ReaderMessage::Done => completed_readers += 1,
                     },
                     Event::WorkerDone(name, result) => if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name) {
-                        let mut seed_to_reroll = None;
                         match result? {
                             Ok(()) => worker.stopped = true,
                             Err(e) => {
@@ -635,7 +613,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                 }
                                 worker.error = Some(e);
                                 let should_cancel = workers.iter().all(|worker| worker.error.as_ref().is_some_and(|e| !e.is_network_error()));
-                                for (seed_idx, state) in seed_states.iter_mut().enumerate() {
+                                for state in &mut seed_states {
                                     if let SeedState::Rolling { workers } = state {
                                         if workers.contains(&name) {
                                             let new_workers = workers.iter().into_iter().filter(|worker| **worker != name).cloned().collect();
@@ -645,7 +623,6 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                                 *state = SeedState::Cancelled;
                                             } else {
                                                 *state = SeedState::Pending;
-                                                seed_to_reroll.get_or_insert(seed_idx.try_into()?);
                                             }
                                         }
                                     }
@@ -655,45 +632,17 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                 }
                             }
                         }
-                        seed_to_reroll
                     } else {
                         return Err(Error::WorkerNotFound)
                     },
                     Event::WorkerMessage(name, msg) => if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name) {
                         match msg {
-                            ootrstats::worker::Message::Init(msg) => {
-                                worker.msg = Some(msg);
-                                None
-                            }
+                            ootrstats::worker::Message::Init(msg) => worker.msg = Some(msg),
                             ootrstats::worker::Message::Ready(ready) => {
                                 worker.ready += ready;
-                                while worker.error.is_none() && worker.ready > 0 {
+                                if worker.error.is_none() && worker.ready > 0 {
                                     worker.msg = None;
-                                    if let Some(seed_idx) = seed_states.iter().position(|state| matches!(state, SeedState::Pending)) {
-                                        if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
-                                            worker.error.get_or_insert(worker::Error::Receive { message });
-                                            cancel!(workers);
-                                            break
-                                        }
-                                    } else if args.race {
-                                        let seed_idx = seed_states.iter()
-                                            .enumerate()
-                                            .filter_map(|(seed_idx, state)| if let SeedState::Rolling { workers } = state { Some((seed_idx, workers.len())) } else { None })
-                                            .min_by_key(|&(_, num_workers)| num_workers);
-                                        if let Some((seed_idx, _)) = seed_idx {
-                                            if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
-                                                worker.error.get_or_insert(worker::Error::Receive { message });
-                                                cancel!(workers);
-                                                break
-                                            }
-                                        } else {
-                                            break
-                                        }
-                                    } else {
-                                        break
-                                    }
                                 }
-                                None
                             }
                             ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
                                 let seed_dir = stats_dir.join(seed_idx.to_string());
@@ -768,7 +717,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                 fs::write_json(seed_dir.join("metadata.json"), Metadata {
                                     instructions: Some(instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
                                     rsl_instructions: Some(rsl_instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
-                                    worker: Some(name.clone()),
+                                    worker: name.clone(),
                                 }).await?;
                                 let mut new_workers = Vec::from(worker_names.clone());
                                 let Some(pos) = new_workers.iter().position(|worker| *worker == name) else { panic!("got success from a worker ({name}) that wasn't rolling that seed ({seed_idx})") };
@@ -787,7 +736,6 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                         } else {
                                             seed_states[usize::from(seed_idx)] = SeedState::Pending;
                                         }
-                                        Some(seed_idx)
                                     } else {
                                         // cancel remaining raced copies of this seed
                                         for name in new_workers {
@@ -800,7 +748,8 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                             }
                                         }
                                         seed_states[usize::from(seed_idx)] = SeedState::Success {
-                                            worker: Some(name),
+                                            existing: false,
+                                            worker: name,
                                             spoiler_log: match spoiler_log {
                                                 Either::Left(_) => fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?,
                                                 Either::Right(spoiler_log) => serde_json::from_slice(&spoiler_log)?,
@@ -808,12 +757,10 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                             instructions: instructions.as_ref().ok().copied(),
                                             rsl_instructions: rsl_instructions.as_ref().ok().copied(),
                                         };
-                                        None
                                     }
                                 }
                             } else {
                                 // seed was already rolled but this worker's instance of this seed didn't get cancelled in time so we just ignore it
-                                None
                             },
                             ootrstats::worker::Message::Failure { seed_idx, instructions, rsl_instructions, error_log } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
                                 let seed_dir = stats_dir.join(seed_idx.to_string());
@@ -827,7 +774,6 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                     } else {
                                         seed_states[usize::from(seed_idx)] = SeedState::Pending;
                                     }
-                                    Some(seed_idx)
                                 } else {
                                     fs::create_dir_all(&seed_dir).await?;
                                     let stats_error_log_path = seed_dir.join("error.log");
@@ -835,7 +781,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                     fs::write_json(seed_dir.join("metadata.json"), Metadata {
                                         instructions: Some(instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
                                         rsl_instructions: Some(rsl_instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
-                                        worker: Some(name.clone()),
+                                        worker: name.clone(),
                                     }).await?;
                                     if_chain! {
                                         if !cancelled;
@@ -851,7 +797,6 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                             } else {
                                                 seed_states[usize::from(seed_idx)] = SeedState::Pending;
                                             }
-                                            Some(seed_idx)
                                         } else {
                                             // cancel remaining raced copies of this seed
                                             for name in new_workers {
@@ -864,18 +809,17 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                                 }
                                             }
                                             seed_states[usize::from(seed_idx)] = SeedState::Failure {
-                                                worker: Some(name),
+                                                existing: false,
+                                                worker: name,
                                                 instructions: instructions.as_ref().ok().copied(),
                                                 rsl_instructions: rsl_instructions.as_ref().ok().copied(),
                                                 error_log,
                                             };
-                                            None
                                         }
                                     }
                                 }
                             } else {
                                 // seed was already rolled but this worker's instance of this seed didn't get cancelled in time so we just ignore it
-                                None
                             },
                         }
                     } else {
@@ -883,7 +827,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                     },
                     Event::End => break,
                 };
-                if let Some(seed_idx) = seed_idx {
+                if seed_states.iter().any(|state| matches!(state, SeedState::Pending)) { //TODO also run if args.race and any seeds are rolling
                     if let Some(worker_tx) = &worker_tx {
                         for worker in &mut workers {
                             if worker.supervisor_tx.is_none() && !worker.stopped {
@@ -897,8 +841,30 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                             }
                         }
                     }
-                    for worker in workers.iter_mut().filter(|worker| worker.error.is_none() && worker.ready > 0) {
-                        if worker.roll(&mut seed_states, seed_idx).await.is_ok() {
+                }
+                'outer: for worker in &mut workers {
+                    while worker.error.is_none() && worker.ready > 0 {
+                        if let Some(seed_idx) = seed_states.iter().position(|state| matches!(state, SeedState::Pending)) {
+                            if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
+                                worker.error.get_or_insert(worker::Error::Receive { message });
+                                cancel!(workers);
+                                break 'outer
+                            }
+                        } else if args.race {
+                            let seed_idx = seed_states.iter()
+                                .enumerate()
+                                .filter_map(|(seed_idx, state)| if let SeedState::Rolling { workers } = state { Some((seed_idx, workers.len())) } else { None })
+                                .min_by_key(|&(_, num_workers)| num_workers);
+                            if let Some((seed_idx, _)) = seed_idx {
+                                if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
+                                    worker.error.get_or_insert(worker::Error::Receive { message });
+                                    cancel!(workers);
+                                    break 'outer
+                                }
+                            } else {
+                                break
+                            }
+                        } else {
                             break
                         }
                     }
@@ -977,23 +943,23 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                 match state {
                     SeedState::Unchecked | SeedState::Pending | SeedState::Rolling { .. } => unreachable!(),
                     SeedState::Cancelled | SeedState::Success { instructions: None, .. } | SeedState::Failure { instructions: None, .. } => {}
-                    SeedState::Success { instructions: Some(instructions), rsl_instructions, .. } => {
+                    SeedState::Success { worker, instructions: Some(instructions), rsl_instructions, .. } => {
                         crossterm::execute!(stdout,
-                            Print(format_args!("s {instructions}\r\n")),
+                            Print(format_args!("s {instructions} {worker}\r\n")),
                         ).at_unknown()?;
                         if let Some(rsl_instructions) = rsl_instructions {
                             crossterm::execute!(stdout,
-                                Print(format_args!("S {rsl_instructions}\r\n")),
+                                Print(format_args!("S {rsl_instructions} {worker}\r\n")),
                             ).at_unknown()?;
                         }
                     }
-                    SeedState::Failure { instructions: Some(instructions), rsl_instructions, .. } => {
+                    SeedState::Failure { worker, instructions: Some(instructions), rsl_instructions, .. } => {
                         crossterm::execute!(stdout,
-                            Print(format_args!("f {instructions}\r\n")),
+                            Print(format_args!("f {instructions} {worker}\r\n")),
                         ).at_unknown()?;
                         if let Some(rsl_instructions) = rsl_instructions {
                             crossterm::execute!(stdout,
-                                Print(format_args!("F {rsl_instructions}\r\n")),
+                                Print(format_args!("F {rsl_instructions} {worker}\r\n")),
                             ).at_unknown()?;
                         }
                     }

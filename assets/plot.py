@@ -48,7 +48,7 @@ for line in subprocess.run(
             latest_rsl_failure.append(int(rest))
 
 def draw_plot(prev_success, prev_failure, latest_success, latest_failure, path):
-    num_bins = int(np.ceil(np.sqrt((len(prev_success) + len(prev_failure) + len(latest_success) + len(latest_failure)) / 2)))
+    num_bins = int(np.ceil(np.sqrt(np.average([len(prev_success), len(prev_failure), len(latest_success), len(latest_failure)]))))
     bins = np.linspace(0, max(max(prev_success), max(prev_failure), max(latest_success), max(latest_failure)), num_bins)
 
     axs[0].hist([prev_success, latest_success], bins, histtype='step', linewidth=2, alpha=0.7, label=['successes (dev-fenhl)', 'successes (riir)'])

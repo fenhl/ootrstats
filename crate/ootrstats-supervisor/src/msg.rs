@@ -132,11 +132,11 @@ impl Message<'_> {
                             let mut failures = 0u16;
                             for state in seed_states {
                                 match state {
-                                    SeedState::Success { worker: Some(name), .. } => {
+                                    SeedState::Success { existing: false, worker: name, .. } => {
                                         total_completed += 1;
                                         if *name == worker.name { completed += 1 }
                                     }
-                                    SeedState::Failure { worker: Some(name), .. } => {
+                                    SeedState::Failure { existing: false, worker: name, .. } => {
                                         total_completed += 1;
                                         if *name == worker.name {
                                             completed += 1;
@@ -146,8 +146,8 @@ impl Message<'_> {
                                     SeedState::Rolling { workers } => running += u16::try_from(workers.iter().into_iter().filter(|name| **name == worker.name).count())?,
                                     | SeedState::Unchecked
                                     | SeedState::Pending
-                                    | SeedState::Success { worker: None, .. }
-                                    | SeedState::Failure { worker: None, .. }
+                                    | SeedState::Success { existing: true, .. }
+                                    | SeedState::Failure { existing: true, .. }
                                     | SeedState::Cancelled
                                         => {}
                                 }
@@ -217,17 +217,17 @@ impl Message<'_> {
                                         started += 1;
                                     }
                                     SeedState::Cancelled => {}
-                                    SeedState::Success { worker, .. } => {
+                                    SeedState::Success { existing, .. } => {
                                         total += 1;
                                         started += 1;
                                         num_successes += 1;
-                                        if worker.is_some() { completed += 1 } else { skipped += 1 }
+                                        if *existing { skipped += 1 } else { completed += 1 }
                                     }
-                                    SeedState::Failure { worker, .. } => {
+                                    SeedState::Failure { existing, .. } => {
                                         total += 1;
                                         started += 1;
                                         num_failures += 1;
-                                        if worker.is_some() { completed += 1 } else { skipped += 1 }
+                                        if *existing { skipped += 1 } else { completed += 1 }
                                     }
                                 }
                             }
