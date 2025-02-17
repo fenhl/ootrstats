@@ -132,11 +132,11 @@ impl Message<'_> {
                             let mut failures = 0u16;
                             for state in seed_states {
                                 match state {
-                                    SeedState::Success { existing: false, worker: name, .. } => {
+                                    SeedState::Success { worker: name, .. } => {
                                         total_completed += 1;
                                         if *name == worker.name { completed += 1 }
                                     }
-                                    SeedState::Failure { existing: false, worker: name, .. } => {
+                                    SeedState::Failure { worker: name, .. } => {
                                         total_completed += 1;
                                         if *name == worker.name {
                                             completed += 1;
@@ -146,8 +146,6 @@ impl Message<'_> {
                                     SeedState::Rolling { workers } => running += u16::try_from(workers.iter().into_iter().filter(|name| **name == worker.name).count())?,
                                     | SeedState::Unchecked
                                     | SeedState::Pending
-                                    | SeedState::Success { existing: true, .. }
-                                    | SeedState::Failure { existing: true, .. }
                                     | SeedState::Cancelled
                                         => {}
                                 }

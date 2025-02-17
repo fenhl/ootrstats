@@ -17,16 +17,16 @@ for line in subprocess.run(
     ['cargo', 'run', '--release', '--', '--github-user=fenhl', *sys.argv[1:], 'bench', '--raw-data', '--uncompressed'],
     stdout=subprocess.PIPE, encoding='utf-8', check=True,
 ).stdout.splitlines():
-    kind, rest = line.split(' ', 1)
+    kind, count, worker = line.split(' ', 2)
     match kind:
         case 's':
-            prev_success.append(int(rest))
+            prev_success.append(int(count))
         case 'f':
-            prev_failure.append(int(rest))
+            prev_failure.append(int(count))
         case 'S':
-            prev_rsl_success.append(int(rest))
+            prev_rsl_success.append(int(count))
         case 'F':
-            prev_rsl_failure.append(int(rest))
+            prev_rsl_failure.append(int(count))
 
 latest_success = []
 latest_failure = []
@@ -36,16 +36,16 @@ for line in subprocess.run(
     ['cargo', 'run', '--release', '--', '--github-user=fenhl', '--branch=riir', *sys.argv[1:], 'bench', '--raw-data', '--uncompressed'],
     stdout=subprocess.PIPE, encoding='utf-8', check=True,
 ).stdout.splitlines():
-    kind, rest = line.split(' ', 1)
+    kind, count, worker = line.split(' ', 2)
     match kind:
         case 's':
-            latest_success.append(int(rest))
+            latest_success.append(int(count))
         case 'f':
-            latest_failure.append(int(rest))
+            latest_failure.append(int(count))
         case 'S':
-            latest_rsl_success.append(int(rest))
+            latest_rsl_success.append(int(count))
         case 'F':
-            latest_rsl_failure.append(int(rest))
+            latest_rsl_failure.append(int(count))
 
 def draw_plot(prev_success, prev_failure, latest_success, latest_failure, path):
     num_bins = int(np.ceil(np.sqrt(np.average([len(prev_success), len(prev_failure), len(latest_success), len(latest_failure)]))))

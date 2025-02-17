@@ -160,6 +160,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             let cargo_manifest_path = repo_path.join("Cargo.toml");
             if fs::exists(&cargo_manifest_path).await? {
                 let cargo_command = || Ok::<_, Error>(if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
+                    //TODO update Rust toolchain on WSL
                     let mut cargo = Command::new(crate::WSL);
                     if let Some(wsl_distro) = &wsl_distro {
                         cargo.arg("--distribution");
@@ -202,7 +203,11 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     #[cfg(target_os = "linux")] fs::copy(repo_path.join("target").join("release").join("librs.so"), repo_path.join("rs.so")).await?;
                     #[cfg(target_os = "macos")] fs::copy(repo_path.join("target").join("release").join("librs.dylib"), repo_path.join("rs.so")).await?;
                 }
-                if let Some(package) = cargo_metadata::MetadataCommand::new()
+                let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
+                if let Some(user_dirs) = UserDirs::new() {
+                    metadata_cmd.env("PATH", format!("{}:{}", user_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
+                }
+                if let Some(package) = metadata_cmd
                     .manifest_path(cargo_manifest_path)
                     .exec()?
                     .packages

@@ -7,7 +7,7 @@ if (-not $?)
 }
 
 # copy the tree to the WSL file system to improve compile times
-wsl rsync --delete -av /mnt/c/Users/fenhl/git/github.com/fenhl/ootrstats/stage/ /home/fenhl/wslgit/github.com/fenhl/ootrstats/ --exclude target
+wsl rsync --delete -av /mnt/c/Users/fenhl/git/github.com/fenhl/ootrstats/stage/ /home/fenhl/wslgit/github.com/fenhl/ootrstats/ --exclude .cargo/config.toml --exclude target
 if (-not $?)
 {
     throw 'Native Failure'

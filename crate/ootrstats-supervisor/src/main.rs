@@ -6,6 +6,7 @@ use {
         borrow::Cow,
         collections::{
             BTreeMap,
+            HashSet,
             hash_map::{
                 self,
                 HashMap,
@@ -13,6 +14,7 @@ use {
         },
         ffi::OsString,
         io::{
+            self,
             IsTerminal as _,
             stderr,
             stdout,
@@ -47,7 +49,10 @@ use {
     if_chain::if_chain,
     itertools::Itertools as _,
     lazy_regex::regex_is_match,
-    nonempty_collections::NEVec,
+    nonempty_collections::{
+        NEVec,
+        nev,
+    },
     ootr_utils::spoiler::SpoilerLog,
     ootrstats_supervisor as _, // included directly as modules
     proc_macro2 as _, // feature config required for Span::start used in CustomExit impl
@@ -96,7 +101,10 @@ mod msg;
 mod worker;
 
 enum ReaderMessage {
-    Pending(SeedIdx),
+    Pending {
+        seed_idx: SeedIdx,
+        allowed_workers: Option<NEVec<Arc<str>>>,
+    },
     Success {
         seed_idx: SeedIdx,
         worker: Arc<str>,
@@ -392,6 +400,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
         }};
     }
 
+    let is_bench = matches!(args.subcommand, Some(Subcommand::Bench { .. }));
     let repo = if let Some(repo) = args.repo {
         Cow::Owned(repo)
     } else if args.rsl {
@@ -430,6 +439,28 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
         }
         gix::open(dir)?.head_id()?.detach()
     };
+    let baseline_rando_rev = 'baseline_rando_rev: {
+        if is_bench && args.github_user == "fenhl" {
+            if args.rev.is_some() {
+                None
+            } else {
+                let dir_parent = gitdir().await?.join("github.com").join(&args.github_user).join(&*repo);
+                let dir_name = match args.branch.as_deref() {
+                    Some("riir2") if args.rsl => "main",
+                    Some("riir") if !args.rsl => "main",
+                    _ => break 'baseline_rando_rev None,
+                };
+                let dir = dir_parent.join(dir_name);
+                if fs::exists(&dir).await? {
+                    Some(gix::open(dir)?.head_id()?.detach())
+                } else {
+                    break 'baseline_rando_rev None
+                }
+            }
+        } else {
+            None
+        }
+    };
     let setup = if args.rsl {
         RandoSetup::Rsl {
             github_user: args.github_user,
@@ -455,27 +486,27 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             random_seeds: args.retry_failures,
         }
     };
-    let stats_dir = {
-        let stats_root = if let Some(stats_dir) = config.stats_dir.take() {
-            stats_dir
-        } else {
-            #[cfg(windows)] let project_dirs = ProjectDirs::from("net", "Fenhl", "ootrstats").ok_or(Error::MissingHomeDir)?;
-            #[cfg(windows)] { project_dirs.data_dir().to_owned() }
-            #[cfg(unix)] { BaseDirectories::new()?.place_data_file("ootrstats").at_unknown()? }
-        };
-        stats_root.join(if args.new_stats_dir_structure { setup.stats_dir_new(rando_rev) } else { setup.stats_dir(rando_rev) })
+    let stats_root = if let Some(stats_dir) = config.stats_dir.take() {
+        stats_dir
+    } else {
+        #[cfg(windows)] let project_dirs = ProjectDirs::from("net", "Fenhl", "ootrstats").ok_or(Error::MissingHomeDir)?;
+        #[cfg(windows)] { project_dirs.data_dir().to_owned() }
+        #[cfg(unix)] { BaseDirectories::new()?.place_data_file("ootrstats").at_unknown()? }
     };
+    let stats_dir = stats_root.join(if args.new_stats_dir_structure { setup.stats_dir_new(rando_rev) } else { setup.stats_dir(rando_rev) });
+    let baseline_stats_dir = baseline_rando_rev.map(|rando_rev| stats_root.join(if args.new_stats_dir_structure { setup.stats_dir_new(rando_rev) } else { setup.stats_dir(rando_rev) }));
     if args.clean {
         fs::remove_dir_all(&stats_dir).await.missing_ok()?;
     }
     let available_parallelism = std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN).get().try_into().unwrap_or(SeedIdx::MAX).min(args.num_seeds);
-    let is_bench = matches!(args.subcommand, Some(Subcommand::Bench { .. }));
     let start = Instant::now();
     let start_local = Local::now();
     let mut seed_states = Vec::from_iter(iter::repeat_with(|| SeedState::Unchecked).take(args.num_seeds.into()));
+    let mut allowed_workers = HashMap::new();
     let (reader_tx, mut reader_rx) = mpsc::channel(args.num_seeds.min(256).into());
     let mut readers = (0..available_parallelism).map(|task_idx| {
         let stats_dir = stats_dir.clone();
+        let baseline_stats_dir = baseline_stats_dir.clone();
         let reader_tx = reader_tx.clone();
         tokio::spawn(async move {
             for seed_idx in (task_idx..args.num_seeds).step_by(available_parallelism.into()) {
@@ -483,7 +514,19 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                 let stats_spoiler_log_path = seed_path.join("spoiler.json");
                 let stats_error_log_path = seed_path.join("error.log");
                 match (fs::exists(&stats_spoiler_log_path).await?, fs::exists(&stats_error_log_path).await?) {
-                    (false, false) => reader_tx.send(ReaderMessage::Pending(seed_idx)).await?,
+                    (false, false) => reader_tx.send(ReaderMessage::Pending {
+                        allowed_workers: if let Some(ref baseline_stats_dir) = baseline_stats_dir {
+                            let baseline_seed_path = baseline_stats_dir.join(seed_idx.to_string());
+                            match fs::read_json(baseline_seed_path.join("metadata.json")).await {
+                                Ok(Metadata { worker, .. }) => Some(nev![worker]),
+                                Err(wheel::Error::Io { inner, .. }) if inner.kind() == io::ErrorKind::NotFound => None,
+                                Err(e) => return Err(e.into()),
+                            }
+                        } else {
+                            None
+                        },
+                        seed_idx,
+                    }).await?,
                     (false, true) => {
                         let Metadata { instructions, rsl_instructions, worker } = fs::read_json(seed_path.join("metadata.json")).await?;
                         reader_tx.send(ReaderMessage::Failure {
@@ -573,7 +616,12 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                 match event {
                     Event::ReaderDone(res) => { let () = res??; }
                     Event::ReaderMessage(msg) => match msg {
-                        ReaderMessage::Pending(seed_idx) => seed_states[usize::from(seed_idx)] = SeedState::Pending,
+                        ReaderMessage::Pending { seed_idx, allowed_workers: seed_allowed_workers } => {
+                            seed_states[usize::from(seed_idx)] = SeedState::Pending;
+                            if let Some(seed_allowed_workers) = seed_allowed_workers {
+                                allowed_workers.insert(seed_idx, seed_allowed_workers);
+                            }
+                        }
                         ReaderMessage::Success { seed_idx, worker, instructions, rsl_instructions } => if is_bench && instructions.is_none() {
                             // seed was already rolled but not benchmarked, roll a new seed instead
                             fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
@@ -827,10 +875,11 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                     },
                     Event::End => break,
                 };
-                if seed_states.iter().any(|state| matches!(state, SeedState::Pending)) { //TODO also run if args.race and any seeds are rolling
+                let pending_seeds = seed_states.iter().enumerate().filter(|(_, state)| matches!(state, SeedState::Pending) || args.race && matches!(state, SeedState::Rolling { .. })).map(|(seed_idx, _)| seed_idx as SeedIdx).collect::<HashSet<_>>();
+                if !pending_seeds.is_empty() {
                     if let Some(worker_tx) = &worker_tx {
                         for worker in &mut workers {
-                            if worker.supervisor_tx.is_none() && !worker.stopped {
+                            if worker.supervisor_tx.is_none() && !worker.stopped && pending_seeds.iter().any(|seed_idx| allowed_workers.get(seed_idx).is_none_or(|allowed_workers| allowed_workers.contains(&worker.name))) {
                                 let worker::Config { name, kind, .. } = config.workers.iter().find(|config| config.name == worker.name).expect("unconfigured worker");
                                 worker_tasks.push(worker.connect(worker_tx.clone(), kind.clone(), rando_rev, &setup, if let Some(Subcommand::Bench { uncompressed, .. }) = args.subcommand {
                                     if args.patch { unimplemented!("The `bench` subcommand currently cannot generate patch files") }
@@ -844,7 +893,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                 }
                 'outer: for worker in &mut workers {
                     while worker.error.is_none() && worker.ready > 0 {
-                        if let Some(seed_idx) = seed_states.iter().position(|state| matches!(state, SeedState::Pending)) {
+                        if let Some((seed_idx, _)) = seed_states.iter().enumerate().find(|(seed_idx, state)| matches!(state, SeedState::Pending) && allowed_workers.get(&(*seed_idx as SeedIdx)).is_none_or(|allowed_workers| allowed_workers.contains(&worker.name))) {
                             if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
                                 worker.error.get_or_insert(worker::Error::Receive { message });
                                 cancel!(workers);
@@ -1058,7 +1107,7 @@ async fn main(args: Args) -> Result<(), Error> {
                 ("Multiworld", Args { preset: Some(format!("mw")), ..args.clone() }),
                 ("Hell Mode", Args { preset: Some(format!("hell")), ..args.clone() }),
                 ("Random Settings", if args.github_user == "fenhl" {
-                    Args { rsl: true, branch: Some(format!("dev-fenhl")), preset: Some(format!("fenhl")), ..args }
+                    Args { rsl: true, branch: Some(if args.branch.is_some_and(|branch| branch == "riir") { format!("riir2") } else { format!("dev-fenhl") }), preset: Some(format!("fenhl")), ..args }
                 } else {
                     Args { rsl: true, github_user: format!("fenhl"), branch: Some(format!("dev-mvp")), ..args }
                 }), //TODO check to make sure plando-random-settings branch is up to date with matthewkirby:master and the randomizer commit specified in rslversion.py is equal to the specified randomizer commit
@@ -1068,17 +1117,15 @@ async fn main(args: Args) -> Result<(), Error> {
                         any_cancelled = true;
                         break
                     },
-                    Err(e) => {
+                    Err(e) => if e.is_network_error() {
                         if let Error::Worker { cancelled: true, .. } = e {
                             any_cancelled = true;
                             break
                         }
-                        if e.is_network_error() {
-                            first_network_error.get_or_insert(e);
-                        } else {
-                            break 'res Err(e)
-                        }
-                    }
+                        first_network_error.get_or_insert(e);
+                    } else {
+                        break 'res Err(e)
+                    },
                 }
             }
             if let Some(e) = first_network_error {
