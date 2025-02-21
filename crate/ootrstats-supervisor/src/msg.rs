@@ -181,10 +181,15 @@ impl Message<'_> {
                             };
                             crossterm::execute!(writer,
                                 Print(format_args!(
-                                    "\r\n{}: {completed}{} rolled{}{}, {state}",
+                                    "\r\n{}: {completed}{}{}, {state}",
                                     worker.name,
-                                    if all_assigned { format!("/{assigned}") } else { String::default() },
-                                    if total_completed > 0 { format!(" ({}%)", 100 * u32::from(completed) / u32::from(total_completed)) } else { String::default() },
+                                    if all_assigned {
+                                        format!("/{assigned} rolled")
+                                    } else if total_completed > 0 {
+                                        format!(" rolled ({}%)", 100 * u32::from(completed) / u32::from(total_completed))
+                                    } else {
+                                        format!(" rolled")
+                                    },
                                     if failures > 0 { format!(", failure rate {}%", 100 * u32::from(failures) / u32::from(completed)) } else { String::default() },
                                 )),
                                 Clear(ClearType::UntilNewLine),
