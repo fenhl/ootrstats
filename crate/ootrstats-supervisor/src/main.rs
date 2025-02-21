@@ -20,7 +20,7 @@ use {
             stdout,
         },
         iter,
-        num::NonZeroUsize,
+        num::NonZero,
         path::PathBuf,
         sync::Arc,
     },
@@ -200,7 +200,7 @@ struct Args {
 
     /// Sample size — how many seeds to roll.
     #[clap(short, long, default_value = "16384", default_value_if("world_counts", "true", Some("255")))]
-    num_seeds: SeedIdx,
+    num_seeds: NonZero<SeedIdx>,
     /// If there are more available cores than remaining seeds, roll the same seed multiple times and keep the one that finishes first.
     #[clap(long)]
     race: bool,
@@ -346,14 +346,14 @@ impl wheel::CustomExit for Error {
                     eprintln!("{}\r", String::from_utf8_lossy(&stderr).lines().filter(|line| !regex_is_match!("^[0-9]+ files remaining$", line)).format("\r\n"));
                 }
                 Ok((worker, source)) => {
-                    eprintln!("{cmd_name}: error in worker {worker}: {source}\r");
+                    eprintln!("{cmd_name}: {} in worker {worker}: {source}\r", if source.is_network_error() { "network error" } else { "error" });
                     eprintln!("debug info: {debug}\r");
                 }
                 Err(errors) => {
                     eprintln!("{cmd_name}: errors in workers:\r");
                     for (worker, source) in errors {
                         eprintln!("\r");
-                        eprintln!("in worker {worker}: {}\r", source.to_string().lines().format("\r\n"));
+                        eprintln!("{} in worker {worker}: {}\r", if source.is_network_error() { "network error" } else { "error" }, source.to_string().lines().format("\r\n"));
                     }
                     eprintln!("\r");
                     eprintln!("debug info: {debug}\r");
@@ -369,7 +369,7 @@ impl wheel::CustomExit for Error {
 }
 
 async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error> {
-    if args.world_counts && args.num_seeds > 255 {
+    if args.world_counts && args.num_seeds.get() > 255 {
         return Err(Error::TooManyWorlds)
     }
     let (cli_tx, mut cli_rx) = mpsc::channel(256);
@@ -498,18 +498,18 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
     if args.clean {
         fs::remove_dir_all(&stats_dir).await.missing_ok()?;
     }
-    let available_parallelism = std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN).get().try_into().unwrap_or(SeedIdx::MAX).min(args.num_seeds);
+    let available_parallelism = std::thread::available_parallelism().unwrap_or(NonZero::<usize>::MIN).try_into().unwrap_or(NonZero::<SeedIdx>::MAX).min(args.num_seeds);
     let start = Instant::now();
     let start_local = Local::now();
-    let mut seed_states = Vec::from_iter(iter::repeat_with(|| SeedState::Unchecked).take(args.num_seeds.into()));
+    let mut seed_states = Vec::from_iter(iter::repeat_with(|| SeedState::Unchecked).take(args.num_seeds.get().into()));
     let mut allowed_workers = HashMap::new();
-    let (reader_tx, mut reader_rx) = mpsc::channel(args.num_seeds.min(256).into());
-    let mut readers = (0..available_parallelism).map(|task_idx| {
+    let (reader_tx, mut reader_rx) = mpsc::channel(args.num_seeds.get().min(256).into());
+    let mut readers = (0..available_parallelism.get()).map(|task_idx| {
         let stats_dir = stats_dir.clone();
         let baseline_stats_dir = baseline_stats_dir.clone();
         let reader_tx = reader_tx.clone();
         tokio::spawn(async move {
-            for seed_idx in (task_idx..args.num_seeds).step_by(available_parallelism.into()) {
+            for seed_idx in (task_idx..args.num_seeds.get()).step_by(available_parallelism.get().into()) {
                 let seed_path = stats_dir.join(seed_idx.to_string());
                 let stats_spoiler_log_path = seed_path.join("spoiler.json");
                 let stats_error_log_path = seed_path.join("error.log");
@@ -570,7 +570,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             cancelled = true;
             args.retry_failures = false;
             readers.clear();
-            completed_readers = available_parallelism;
+            completed_readers = available_parallelism.get();
             reader_rx = mpsc::channel(1).1;
             for (seed_idx, seed_state) in seed_states.iter_mut().enumerate() {
                 match seed_state {
@@ -920,18 +920,22 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                 }
             },
             //TODO use signal-hook-tokio crate to handle interrupts on Unix?
-            Some(res) = cli_rx.recv() => if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), kind: KeyEventKind::Press, .. }) = res.at_unknown()? {
-                cancelled_by_user = true;
-                cancel!(workers);
-            },
+            Some(res) = cli_rx.recv() => {
+                log!("received CLI event: {res:?}"); // debugging C/D keys sometimes not being registered
+                if let crossterm::event::Event::Key(KeyEvent { code: KeyCode::Char('c' | 'd'), kind: KeyEventKind::Press, .. }) = res.at_unknown()? {
+                    cancelled_by_user = true;
+                    cancel!(workers);
+                }
+            }
         }
         Message::Status {
             retry_failures: args.retry_failures,
             seed_states: &seed_states,
+            allowed_workers: &allowed_workers,
             workers: &workers,
             label, available_parallelism, completed_readers, start, start_local,
         }.print(args.json_messages, &mut stderr)?;
-        if completed_readers == available_parallelism && seed_states.iter().all(|state| match state {
+        if completed_readers == available_parallelism.get() && seed_states.iter().all(|state| match state {
             SeedState::Cancelled | SeedState::Success { .. } | SeedState::Failure { .. } => true,
             SeedState::Unchecked | SeedState::Pending | SeedState::Rolling { .. } => false,
         }) {

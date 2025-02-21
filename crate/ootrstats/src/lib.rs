@@ -212,8 +212,8 @@ async fn python() -> Result<PathBuf, RollError> {
             let venv = BaseDirectories::new()?.place_data_file("ootrstats/venv").at_unknown()?;
             if !fs::exists(&venv).await? {
                 let system_python = {
-                    #[cfg(target_arch = "aarch64")] { PathBuf::from("/opt/homebrew/bin/python3") }
-                    #[cfg(target_arch = "x86_64")] { PathBuf::from("/usr/local/bin/python3") }
+                    #[cfg(target_arch = "aarch64")] { "/opt/homebrew/bin/python3" }
+                    #[cfg(target_arch = "x86_64")] { "/usr/local/bin/python3" }
                 };
                 Command::new(system_python).arg("-m").arg("venv").arg(&venv).check("python -m venv").await?;
             }

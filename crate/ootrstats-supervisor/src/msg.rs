@@ -1,8 +1,11 @@
 use {
     std::{
         borrow::Cow,
+        collections::HashMap,
         io::prelude::*,
+        num::NonZero,
         path::PathBuf,
+        sync::Arc,
         time::Duration,
     },
     chrono::{
@@ -22,6 +25,7 @@ use {
         },
     },
     if_chain::if_chain,
+    nonempty_collections::NEVec,
     serde::Serialize,
     serde_json::Value as Json,
     tokio::time::Instant,
@@ -42,10 +46,11 @@ pub(crate) enum Message<'a> {
     Preparing(Option<&'static str>),
     Status {
         label: Option<&'static str>,
-        available_parallelism: u16,
+        available_parallelism: NonZero<u16>,
         completed_readers: u16,
         retry_failures: bool,
         seed_states: &'a [SeedState],
+        allowed_workers: &'a HashMap<SeedIdx, NEVec<Arc<str>>>,
         #[serde(skip)]
         start: Instant,
         #[serde(skip)]
@@ -97,7 +102,7 @@ impl Message<'_> {
                 Self::Preparing(Some(label)) => crossterm::execute!(writer,
                     Print(format_args!("{label}: preparing...")),
                 ).at_unknown()?,
-                Self::Status { label, available_parallelism, completed_readers, retry_failures, seed_states, start, start_local, workers } => {
+                Self::Status { label, available_parallelism, completed_readers, retry_failures, seed_states, allowed_workers, start, start_local, workers } => {
                     for worker in workers {
                         if let Some(ref e) = worker.error {
                             let kind = if e.is_network_error() { "network error" } else { "error" };
@@ -130,7 +135,9 @@ impl Message<'_> {
                             let mut completed = 0u16;
                             let mut total_completed = 0u16;
                             let mut failures = 0u16;
-                            for state in seed_states {
+                            let mut assigned = 0u16;
+                            let mut all_assigned = true;
+                            for (seed_idx, state) in seed_states.into_iter().enumerate() {
                                 match state {
                                     SeedState::Success { worker: name, .. } => {
                                         total_completed += 1;
@@ -149,6 +156,15 @@ impl Message<'_> {
                                     | SeedState::Cancelled
                                         => {}
                                 }
+                                if_chain! {
+                                    if let Some(assigned_workers) = allowed_workers.get(&(seed_idx as SeedIdx));
+                                    if assigned_workers.len() == NonZero::<usize>::MIN;
+                                    then {
+                                        if assigned_workers.head == worker.name { assigned += 1 }
+                                    } else {
+                                        all_assigned = false;
+                                    }
+                                }
                             }
                             let state = if worker.stopped {
                                 Cow::Borrowed("done")
@@ -163,42 +179,22 @@ impl Message<'_> {
                             } else {
                                 Cow::Owned(format!("{running} running"))
                             };
-                            if total_completed > 0 {
-                                if failures > 0 {
-                                    crossterm::execute!(writer,
-                                        Print(format_args!(
-                                            "\r\n{}: {completed} rolled ({}%), failure rate {}%, {state}",
-                                            worker.name,
-                                            100 * u32::from(completed) / u32::from(total_completed),
-                                            100 * u32::from(failures) / u32::from(completed),
-                                        )),
-                                        Clear(ClearType::UntilNewLine),
-                                    ).at_unknown()?;
-                                } else {
-                                    crossterm::execute!(writer,
-                                        Print(format_args!(
-                                            "\r\n{}: {completed} rolled ({}%), {state}",
-                                            worker.name,
-                                            100 * u32::from(completed) / u32::from(total_completed),
-                                        )),
-                                        Clear(ClearType::UntilNewLine),
-                                    ).at_unknown()?;
-                                }
-                            } else {
-                                crossterm::execute!(writer,
-                                    Print(format_args!(
-                                        "\r\n{}: 0 rolled, {state}",
-                                        worker.name,
-                                    )),
-                                    Clear(ClearType::UntilNewLine),
-                                ).at_unknown()?;
-                            }
+                            crossterm::execute!(writer,
+                                Print(format_args!(
+                                    "\r\n{}: {completed}{} rolled{}{}, {state}",
+                                    worker.name,
+                                    if all_assigned { format!("/{assigned}") } else { String::default() },
+                                    if total_completed > 0 { format!(" ({}%)", 100 * u32::from(completed) / u32::from(total_completed)) } else { String::default() },
+                                    if failures > 0 { format!(", failure rate {}%", 100 * u32::from(failures) / u32::from(completed)) } else { String::default() },
+                                )),
+                                Clear(ClearType::UntilNewLine),
+                            ).at_unknown()?;
                         }
                     }
                     crossterm::execute!(writer,
                         MoveUp(workers.len() as u16),
                         MoveToColumn(0),
-                        Print(if completed_readers == available_parallelism {
+                        Print(if completed_readers == available_parallelism.get() {
                             // list of pending seeds fully initialized
                             let mut num_successes = 0u16;
                             let mut num_failures = 0u16;

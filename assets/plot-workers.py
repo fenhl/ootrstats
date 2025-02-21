@@ -12,7 +12,7 @@ failure: dict[str, list[int]] = {}
 rsl_success: dict[str, list[int]] = {}
 rsl_failure: dict[str, list[int]] = {}
 for line in subprocess.run(
-    ['cargo', 'run', '--release', '--', '--github-user=fenhl', '-xpeterpc', '--suite', 'bench', '--raw-data', '--uncompressed'],
+    ['cargo', 'run', '--release', '--', '--github-user=fenhl', '-xintercal', '-xpeterpc', '--suite', 'bench', '--raw-data', '--uncompressed'],
     stdout=subprocess.PIPE, encoding='utf-8', check=True,
 ).stdout.splitlines():
     kind, count, worker = line.split(' ', 2)
