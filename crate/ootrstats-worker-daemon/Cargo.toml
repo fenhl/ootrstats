@@ -8,6 +8,7 @@ workspace = true
 
 [dependencies]
 async-proto = { version = "0.24", features = ["tokio-tungstenite021"] }
+constant_time_eq = "0.4.0"
 either = "1.10.0"
 futures = "0.3.30"
 log-lock = { git = "https://github.com/fenhl/log-lock", branch = "main", version = "0.2.1" }

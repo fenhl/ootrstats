@@ -539,6 +539,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "constant_time_eq"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf2bfb8b8661ac66cf4305b62ac89f6b9b557b72317a941aea6f358d7d28ea93"
+
+[[package]]
 name = "cookie"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2990,6 +2996,7 @@ name = "ootrstats-worker-daemon"
 version = "15.0.0"
 dependencies = [
  "async-proto",
+ "constant_time_eq",
  "directories",
  "either",
  "futures",

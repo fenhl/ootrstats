@@ -9,6 +9,7 @@ use {
         time::Duration,
     },
     async_proto::Protocol as _,
+    constant_time_eq::constant_time_eq,
     either::Either,
     futures::{
         future,
@@ -57,7 +58,7 @@ enum Error {
 
 async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::stream::DuplexStream, rocket_ws::Message>>>, stream: &mut SplitStream<rocket_ws::stream::DuplexStream>) -> Result<(), Error> {
     let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_distro, rando_rev, setup, output_mode, priority_users } = websocket::ClientMessage::read_ws021(stream).await? else { return Ok(()) };
-    if received_password != correct_password { return Ok(()) }
+    if !constant_time_eq(received_password.as_bytes(), correct_password.as_bytes()) { return Ok(()) }
     let (worker_tx, mut worker_rx) = mpsc::channel(256);
     let (mut supervisor_tx, supervisor_rx) = mpsc::channel(256);
     let mut stream = Some(stream);
