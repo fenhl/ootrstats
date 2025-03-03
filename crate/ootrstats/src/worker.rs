@@ -175,14 +175,14 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             let python = crate::python().await?;
             rsl_version = Some(String::from_utf8(Command::new(&python)
                 .arg("-c")
-                .arg("import rslversion; print(rslversion.__version__)")
+                .arg("import rslversion; print(rslversion.__version__, end='', flush=True)")
                 .current_dir(&repo_path)
                 .check(python.display().to_string()).await?
                 .stdout
             )?);
             let mut rando_github_user = String::from_utf8(Command::new(&python)
                 .arg("-c")
-                .arg("import rslversion; print(rslversion.randomizer_repo)")
+                .arg("import rslversion; print(rslversion.randomizer_repo, end='', flush=True)")
                 .current_dir(&repo_path)
                 .check(python.display().to_string()).await?
                 .stdout
@@ -192,7 +192,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             rando_github_user.pop().expect("should end with slash found above");
             let randomizer_commit = String::from_utf8(Command::new(&python)
                 .arg("-c")
-                .arg("import rslversion; print(rslversion.randomizer_commit)")
+                .arg("import rslversion; print(rslversion.randomizer_commit, end='', flush=True)")
                 .current_dir(&repo_path)
                 .check(python.display().to_string()).await?
                 .stdout
