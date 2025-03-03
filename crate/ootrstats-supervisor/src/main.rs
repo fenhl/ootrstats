@@ -617,35 +617,41 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                     Event::ReaderDone(res) => { let () = res??; }
                     Event::ReaderMessage(msg) => match msg {
                         ReaderMessage::Pending { seed_idx, allowed_workers: seed_allowed_workers } => {
-                            seed_states[usize::from(seed_idx)] = SeedState::Pending;
                             if let Some(seed_allowed_workers) = seed_allowed_workers {
                                 allowed_workers.insert(seed_idx, seed_allowed_workers);
                             }
-                        }
-                        ReaderMessage::Success { seed_idx, worker, instructions, rsl_instructions } => if is_bench && instructions.is_none() {
-                            // seed was already rolled but not benchmarked, roll a new seed instead
-                            fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
                             seed_states[usize::from(seed_idx)] = SeedState::Pending;
-                        } else {
-                            seed_states[usize::from(seed_idx)] = SeedState::Success {
-                                existing: true,
-                                spoiler_log: fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?,
-                                worker, instructions, rsl_instructions,
-                            };
-                        },
+                        }
+                        ReaderMessage::Success { seed_idx, worker, instructions, rsl_instructions } => {
+                            allowed_workers.insert(seed_idx, nev![worker.clone()]);
+                            if is_bench && instructions.is_none() {
+                                // seed was already rolled but not benchmarked, roll a new seed instead
+                                fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                                seed_states[usize::from(seed_idx)] = SeedState::Pending;
+                            } else {
+                                seed_states[usize::from(seed_idx)] = SeedState::Success {
+                                    existing: true,
+                                    spoiler_log: fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?,
+                                    worker, instructions, rsl_instructions,
+                                };
+                            }
+                        }
                         ReaderMessage::Failure { worker, seed_idx, instructions, rsl_instructions } => if args.retry_failures {
                             fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
                             seed_states[usize::from(seed_idx)] = SeedState::Pending;
-                        } else if is_bench && instructions.is_none() {
-                            // seed was already rolled but not benchmarked, roll a new seed instead
-                            fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
-                            seed_states[usize::from(seed_idx)] = SeedState::Pending;
                         } else {
-                            seed_states[usize::from(seed_idx)] = SeedState::Failure {
-                                existing: true,
-                                error_log: fs::read(stats_dir.join(seed_idx.to_string()).join("error.log")).await?.into(),
-                                worker, instructions, rsl_instructions,
-                            };
+                            allowed_workers.insert(seed_idx, nev![worker.clone()]);
+                            if is_bench && instructions.is_none() {
+                                // seed was already rolled but not benchmarked, roll a new seed instead
+                                fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                                seed_states[usize::from(seed_idx)] = SeedState::Pending;
+                            } else {
+                                seed_states[usize::from(seed_idx)] = SeedState::Failure {
+                                    existing: true,
+                                    error_log: fs::read(stats_dir.join(seed_idx.to_string()).join("error.log")).await?.into(),
+                                    worker, instructions, rsl_instructions,
+                                };
+                            }
                         },
                         ReaderMessage::Done => completed_readers += 1,
                     },

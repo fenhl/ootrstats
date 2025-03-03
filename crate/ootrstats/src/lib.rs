@@ -2,6 +2,7 @@ use {
     std::{
         borrow::Cow,
         collections::HashMap,
+        env,
         hash::{
             Hash as _,
             Hasher,
@@ -16,7 +17,10 @@ use {
     async_proto::Protocol,
     bytes::Bytes,
     collect_mac::collect,
-    directories::BaseDirs,
+    directories::{
+        BaseDirs,
+        UserDirs,
+    },
     if_chain::if_chain,
     itertools::Itertools as _,
     lazy_regex::regex_captures,
@@ -35,8 +39,6 @@ use {
         },
     },
 };
-#[cfg(unix)] use std::env;
-#[cfg(windows)] use directories::UserDirs;
 #[cfg(target_os = "macos")] use xdg::BaseDirectories;
 
 mod draft;
@@ -159,6 +161,7 @@ pub struct RollOutput {
 #[derive(Debug, thiserror::Error)]
 pub enum RollError {
     #[error(transparent)] Draft(#[from] draft::ResolveError),
+    #[error(transparent)] Env(#[from] env::VarError),
     #[error(transparent)] Json(#[from] serde_json::Error),
     #[error(transparent)] ParseInt(#[from] std::num::ParseIntError),
     #[error(transparent)] Wheel(#[from] wheel::Error),
@@ -529,6 +532,9 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
     }
     cmd.stdin(Stdio::null());
     cmd.current_dir(repo_path);
+    if let Some(user_dirs) = UserDirs::new() {
+        cmd.env("PATH", format!("{}:{}", user_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
+    }
     let output = cmd.output().await.at_command(cmd_name.clone())?;
     let stderr = BufRead::lines(&*output.stderr).try_collect::<_, Vec<_>, _>().at_command(cmd_name.clone())?;
     if output.status.success() || output.status.code() == Some(3) {

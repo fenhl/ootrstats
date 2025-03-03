@@ -1,5 +1,6 @@
 use {
     std::{
+        borrow::Cow,
         collections::HashMap,
         env,
         num::{
@@ -93,6 +94,8 @@ pub enum Error {
     #[error(transparent)] Wheel(#[from] wheel::Error),
     #[error("user folder not found")]
     MissingHomeDir,
+    #[error("failed to determine randomizer version from RSL script")]
+    RslVersion,
 }
 
 /// If the worker is not ready to roll a new seed right now, this returns:
@@ -135,135 +138,22 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
     let mut rsl_version = None;
     let mut use_rust_cli = false;
     let mut supports_unsalted_seeds = false;
-    let (repo_path, random_seeds) = match setup {
-        RandoSetup::Normal { ref github_user, ref repo, random_seeds, .. } => {
+    let (rando_github_user, rando_repo_name, rando_git_rev, mut rando_repo_path) = match setup {
+        RandoSetup::Normal { ref github_user, ref repo, .. } => {
             tx.send(Message::Init(format!("cloning randomizer: determining repo path"))).await?;
-            let repo_parent = gitdir().await?.join("github.com").join(github_user).join(repo).join("rev");
-            let repo_path = repo_parent.join(rando_rev.to_string());
-            tx.send(Message::Init(format!("checking if repo exists"))).await?;
-            if !fs::exists(&repo_path).await? {
-                tx.send(Message::Init(format!("creating repo path"))).await?;
-                fs::create_dir_all(&repo_path).await?;
-                tx.send(Message::Init(format!("cloning randomizer: initializing repo"))).await?;
-                Command::new("git").arg("init").current_dir(&repo_path).check("git init").await?;
-                tx.send(Message::Init(format!("cloning randomizer: adding remote"))).await?;
-                Command::new("git").arg("remote").arg("add").arg("origin").arg(format!("https://github.com/{github_user}/{repo}.git")).current_dir(&repo_path).check("git remote add").await?;
-                tx.send(Message::Init(format!("cloning randomizer: fetching"))).await?;
-                Command::new("git").arg("fetch").arg("origin").arg(rando_rev.to_string()).arg("--depth=1").current_dir(&repo_path).check("git fetch").await?;
-                tx.send(Message::Init(format!("cloning randomizer: resetting"))).await?;
-                Command::new("git").arg("reset").arg("--hard").arg("FETCH_HEAD").current_dir(&repo_path).check("git reset").await?;
-            }
-            if !fs::exists(repo_path.join("ZOOTDEC.z64")).await? {
-                tx.send(Message::Init(format!("decompressing base rom"))).await?;
-                fs::write(repo_path.join("ZOOTDEC.z64"), decompress::decompress(&mut fs::read(&base_rom_path).await?)?).await?;
-            }
-            let cargo_manifest_path = repo_path.join("Cargo.toml");
-            if fs::exists(&cargo_manifest_path).await? {
-                let cargo_command = || Ok::<_, Error>(if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
-                    //TODO update Rust toolchain on WSL
-                    let mut cargo = Command::new(crate::WSL);
-                    if let Some(wsl_distro) = &wsl_distro {
-                        cargo.arg("--distribution");
-                        cargo.arg(wsl_distro);
-                    }
-                    cargo.arg("cargo");
-                    cargo
-                } else {
-                    let mut cargo = Command::new("cargo");
-                    if let Some(user_dirs) = UserDirs::new() {
-                        cargo.env("PATH", format!("{}:{}", user_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
-                    }
-                    cargo
-                });
-                #[cfg(target_os = "windows")] let rust_library_filename = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode { "rs.so" } else { "rs.dll" };
-                #[cfg(any(target_os = "linux", target_os = "macos"))] let rust_library_filename = "rs.so";
-                if matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) || !fs::exists(repo_path.join(rust_library_filename)).await? {
-                    //TODO update Rust
-                    tx.send(Message::Init(format!("building Rust code"))).await?;
-                    let mut cargo = cargo_command()?;
-                    cargo.arg("build");
-                    cargo.arg("--lib"); // old versions of the riir branch were organized as a single crate with multiple targets
-                    cargo.arg("--release");
-                    cargo.arg("--package=ootr-python");
-                    cargo.current_dir(&repo_path);
-                    cargo.check("cargo build").await?;
-                    tx.send(Message::Init(format!("copying Rust module"))).await?;
-                    #[cfg(target_os = "windows")] {
-                        if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
-                            let mut cp = Command::new(crate::WSL);
-                            if let Some(wsl_distro) = &wsl_distro {
-                                cp.arg("--distribution");
-                                cp.arg(wsl_distro);
-                            }
-                            cp.arg("cp").arg("target/release/librs.so").arg("rs.so").current_dir(&repo_path).check("wsl cp").await?;
-                        } else {
-                            fs::copy(repo_path.join("target").join("release").join("rs.dll"), repo_path.join("rs.pyd")).await?;
-                        }
-                    }
-                    #[cfg(target_os = "linux")] fs::copy(repo_path.join("target").join("release").join("librs.so"), repo_path.join("rs.so")).await?;
-                    #[cfg(target_os = "macos")] fs::copy(repo_path.join("target").join("release").join("librs.dylib"), repo_path.join("rs.so")).await?;
-                }
-                let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
-                if let Some(user_dirs) = UserDirs::new() {
-                    metadata_cmd.env("PATH", format!("{}:{}", user_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
-                }
-                if let Some(package) = metadata_cmd
-                    .manifest_path(cargo_manifest_path)
-                    .exec()?
-                    .packages
-                    .into_iter()
-                    .find(|package| package.name == "ootr-cli")
-                {
-                    use_rust_cli = package.version >= Version { major: 8, minor: 2, patch: 49, pre: "fenhl.1.riir.2".parse()?, build: semver::BuildMetadata::default() };
-                    supports_unsalted_seeds = package.version >= Version { major: 8, minor: 2, patch: 54, pre: "fenhl.2.riir.2".parse()?, build: semver::BuildMetadata::default() };
-                }
-                if use_rust_cli {
-                    tx.send(Message::Init(format!("building Rust CLI"))).await?;
-                    let mut cargo = cargo_command()?;
-                    cargo.arg("build");
-                    cargo.arg("--release");
-                    cargo.arg("--package=ootr-cli"); // old versions of the riir branch had ootr-python as the default crate
-                    cargo.current_dir(&repo_path);
-                    cargo.check("cargo build").await?;
-                }
-            } else {
-                let version_py = fs::read_to_string(repo_path.join("version.py")).await?;
-                if let Some(base_version) = version_py.lines()
-                    .filter_map(|line| regex_captures!("^__version__ = '([0-9.]+)'$", line))
-                    .find_map(|(_, base_version)| base_version.parse::<Version>().ok())
-                {
-                    if let Some(supplementary_version) = version_py.lines()
-                        .filter_map(|line| regex_captures!("^supplementary_version = ([0-9]+)$", line))
-                        .find_map(|(_, supplementary_version)| supplementary_version.parse::<u8>().ok())
-                    {
-                        supports_unsalted_seeds = (base_version, supplementary_version) >= (Version::new(8, 2, 54), 2);
-                    }
-                }
-            }
-            if fs::exists(repo_path.join("mypy.ini")).await? {
-                tx.send(Message::Init(format!("compiling Python code with mypyc"))).await?;
-                let mut mypyc = if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
-                    let mut mypyc = Command::new(crate::WSL);
-                    if let Some(wsl_distro) = &wsl_distro {
-                        mypyc.arg("--distribution");
-                        mypyc.arg(wsl_distro);
-                    }
-                    mypyc.arg("mypyc");
-                    mypyc
-                } else {
-                    Command::new("mypyc")
-                };
-                mypyc.current_dir(&repo_path).check("mypyc").await?;
-            }
-            (repo_path, random_seeds)
+            (
+                Cow::Borrowed(&**github_user),
+                Cow::Borrowed(&**repo),
+                Cow::Borrowed("FETCH_HEAD"),
+                gitdir().await?.join("github.com").join(github_user).join(repo).join("rev").join(rando_rev.to_string()),
+            )
         }
         RandoSetup::Rsl { ref github_user, ref repo, .. } => {
             tx.send(Message::Init(format!("cloning random settings script: determining repo path"))).await?;
-            let repo_parent = gitdir().await?.join("github.com").join(github_user).join(repo).join("rev");
-            let repo_path = repo_parent.join(rando_rev.to_string());
-            tx.send(Message::Init(format!("checking if repo exists"))).await?;
+            let repo_path = gitdir().await?.join("github.com").join(github_user).join(repo).join("rev").join(rando_rev.to_string());
+            tx.send(Message::Init(format!("checking if RSL repo exists"))).await?;
             if !fs::exists(&repo_path).await? {
-                tx.send(Message::Init(format!("creating repo path"))).await?;
+                tx.send(Message::Init(format!("creating RSL repo path"))).await?;
                 fs::create_dir_all(&repo_path).await?;
                 tx.send(Message::Init(format!("cloning random settings script: initializing repo"))).await?;
                 Command::new("git").arg("init").current_dir(&repo_path).check("git init").await?;
@@ -290,10 +180,150 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 .check(python.display().to_string()).await?
                 .stdout
             )?);
-            (repo_path, true)
+            let mut rando_github_user = String::from_utf8(Command::new(&python)
+                .arg("-c")
+                .arg("import rslversion; print(rslversion.__version__)")
+                .current_dir(&repo_path)
+                .check(python.display().to_string()).await?
+                .stdout
+            )?;
+            let rando_repo_slash = rando_github_user.find('/').ok_or(Error::RslVersion)?;
+            let rando_repo_name = rando_github_user.split_off(rando_repo_slash + 1);
+            rando_github_user.pop().expect("should end with slash found above");
+            let randomizer_commit = String::from_utf8(Command::new(&python)
+                .arg("-c")
+                .arg("import rslversion; print(rslversion.__version__)")
+                .current_dir(&repo_path)
+                .check(python.display().to_string()).await?
+                .stdout
+            )?;
+            (Cow::Owned(rando_github_user), Cow::Owned(rando_repo_name), Cow::Owned(randomizer_commit), repo_path.join("randomizer"))
         }
     };
-    let mut first_seed_rolled = false;
+    tx.send(Message::Init(format!("checking if randomizer repo exists"))).await?;
+    if !fs::exists(&rando_repo_path).await? {
+        tx.send(Message::Init(format!("creating randomizer repo path"))).await?;
+        fs::create_dir_all(&rando_repo_path).await?;
+        tx.send(Message::Init(format!("cloning randomizer: initializing repo"))).await?;
+        Command::new("git").arg("init").current_dir(&rando_repo_path).check("git init").await?;
+        tx.send(Message::Init(format!("cloning randomizer: adding remote"))).await?;
+        Command::new("git").arg("remote").arg("add").arg("origin").arg(format!("https://github.com/{rando_github_user}/{rando_repo_name}.git")).current_dir(&rando_repo_path).check("git remote add").await?;
+        tx.send(Message::Init(format!("cloning randomizer: fetching"))).await?;
+        Command::new("git").arg("fetch").arg("origin").arg(rando_rev.to_string()).arg("--depth=1").current_dir(&rando_repo_path).check("git fetch").await?;
+        tx.send(Message::Init(format!("cloning randomizer: resetting"))).await?;
+        Command::new("git").arg("reset").arg("--hard").arg(&*rando_git_rev).current_dir(&rando_repo_path).check("git reset").await?;
+    }
+    if !fs::exists(rando_repo_path.join("ZOOTDEC.z64")).await? {
+        tx.send(Message::Init(format!("decompressing base rom"))).await?;
+        fs::write(rando_repo_path.join("ZOOTDEC.z64"), decompress::decompress(&mut fs::read(&base_rom_path).await?)?).await?;
+    }
+    let cargo_manifest_path = rando_repo_path.join("Cargo.toml");
+    if fs::exists(&cargo_manifest_path).await? {
+        let cargo_command = || Ok::<_, Error>(if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
+            //TODO update Rust toolchain on WSL
+            let mut cargo = Command::new(crate::WSL);
+            if let Some(wsl_distro) = &wsl_distro {
+                cargo.arg("--distribution");
+                cargo.arg(wsl_distro);
+            }
+            cargo.arg("cargo");
+            cargo
+        } else {
+            let mut cargo = Command::new("cargo");
+            if let Some(user_dirs) = UserDirs::new() {
+                cargo.env("PATH", format!("{}:{}", user_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
+            }
+            cargo
+        });
+        #[cfg(target_os = "windows")] let rust_library_filename = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode { "rs.so" } else { "rs.dll" };
+        #[cfg(any(target_os = "linux", target_os = "macos"))] let rust_library_filename = "rs.so";
+        if matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) || !fs::exists(rando_repo_path.join(rust_library_filename)).await? {
+            //TODO update Rust
+            tx.send(Message::Init(format!("building Rust code"))).await?;
+            let mut cargo = cargo_command()?;
+            cargo.arg("build");
+            cargo.arg("--lib"); // old versions of the riir branch were organized as a single crate with multiple targets
+            cargo.arg("--release");
+            cargo.arg("--package=ootr-python");
+            cargo.current_dir(&rando_repo_path);
+            cargo.check("cargo build").await?;
+            tx.send(Message::Init(format!("copying Rust module"))).await?;
+            #[cfg(target_os = "windows")] {
+                if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
+                    let mut cp = Command::new(crate::WSL);
+                    if let Some(wsl_distro) = &wsl_distro {
+                        cp.arg("--distribution");
+                        cp.arg(wsl_distro);
+                    }
+                    cp.arg("cp").arg("target/release/librs.so").arg("rs.so").current_dir(&rando_repo_path).check("wsl cp").await?;
+                } else {
+                    fs::copy(rando_repo_path.join("target").join("release").join("rs.dll"), rando_repo_path.join("rs.pyd")).await?;
+                }
+            }
+            #[cfg(target_os = "linux")] fs::copy(rando_repo_path.join("target").join("release").join("librs.so"), rando_repo_path.join("rs.so")).await?;
+            #[cfg(target_os = "macos")] fs::copy(rando_repo_path.join("target").join("release").join("librs.dylib"), rando_repo_path.join("rs.so")).await?;
+        }
+        let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
+        if let Some(user_dirs) = UserDirs::new() {
+            metadata_cmd.env("PATH", format!("{}:{}", user_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
+        }
+        if let Some(package) = metadata_cmd
+            .manifest_path(cargo_manifest_path)
+            .exec()?
+            .packages
+            .into_iter()
+            .find(|package| package.name == "ootr-cli")
+        {
+            use_rust_cli = package.version >= Version { major: 8, minor: 2, patch: 49, pre: "fenhl.1.riir.2".parse()?, build: semver::BuildMetadata::default() };
+            supports_unsalted_seeds = package.version >= Version { major: 8, minor: 2, patch: 54, pre: "fenhl.2.riir.2".parse()?, build: semver::BuildMetadata::default() };
+        }
+        if use_rust_cli {
+            tx.send(Message::Init(format!("building Rust CLI"))).await?;
+            let mut cargo = cargo_command()?;
+            cargo.arg("build");
+            cargo.arg("--release");
+            cargo.arg("--package=ootr-cli"); // old versions of the riir branch had ootr-python as the default crate
+            cargo.current_dir(&rando_repo_path);
+            cargo.check("cargo build").await?;
+        }
+    } else {
+        let version_py = fs::read_to_string(rando_repo_path.join("version.py")).await?;
+        if let Some(base_version) = version_py.lines()
+            .filter_map(|line| regex_captures!("^__version__ = '([0-9.]+)'$", line))
+            .find_map(|(_, base_version)| base_version.parse::<Version>().ok())
+        {
+            if let Some(supplementary_version) = version_py.lines()
+                .filter_map(|line| regex_captures!("^supplementary_version = ([0-9]+)$", line))
+                .find_map(|(_, supplementary_version)| supplementary_version.parse::<u8>().ok())
+            {
+                supports_unsalted_seeds = (base_version, supplementary_version) >= (Version::new(8, 2, 54), 2);
+            }
+        }
+    }
+    if fs::exists(rando_repo_path.join("mypy.ini")).await? {
+        tx.send(Message::Init(format!("compiling Python code with mypyc"))).await?;
+        let mut mypyc = if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
+            let mut mypyc = Command::new(crate::WSL);
+            if let Some(wsl_distro) = &wsl_distro {
+                mypyc.arg("--distribution");
+                mypyc.arg(wsl_distro);
+            }
+            mypyc.arg("mypyc");
+            mypyc
+        } else {
+            Command::new("mypyc")
+        };
+        mypyc.current_dir(&rando_repo_path).check("mypyc").await?;
+    }
+    let (repo_path, random_seeds) = match setup {
+        RandoSetup::Normal { random_seeds, .. } => {
+            (rando_repo_path, random_seeds)
+        }
+        RandoSetup::Rsl { .. } => {
+            assert!(rando_repo_path.pop(), "rando_repo_path was root even though it was defined as subdirectory of repo_path");
+            (rando_repo_path, true)
+        }
+    };
     let mut msg_buf = Vec::default();
     'wait_ready: while let Some((duration, reason)) = wait_ready(priority_users).await? {
         tx.send(Message::Init(reason)).await?;
@@ -309,7 +339,11 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             }
         }
     }
-    tx.send(Message::Ready(1)).await?; // on first roll, the randomizer decompresses the base rom, and the RSL script downloads and extracts the randomizer, neither of which are reentrant
+    tx.send(Message::Ready(NonZeroU8::try_from(u8::try_from(if cores <= 0 {
+        std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN).get().try_into().unwrap_or(i8::MAX) + cores
+    } else {
+        cores
+    }).unwrap_or(1)).unwrap_or(NonZeroU8::MIN).get())).await?;
     let mut rando_tasks = FuturesUnordered::default();
     let mut abort_handles = HashMap::<_, Vec<_>>::default();
     let mut recheck_ready_at = None;
@@ -385,15 +419,6 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     Err(e) if e.is_cancelled() => {} // a seed task being cancelled is expected with --race
                     Err(e) => return Err(e.into()),
                 }
-                let cores = if first_seed_rolled {
-                    NonZeroU8::MIN
-                } else {
-                    NonZeroU8::try_from(u8::try_from(if cores <= 0 {
-                        std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN).get().try_into().unwrap_or(i8::MAX) + cores
-                    } else {
-                        cores
-                    }).unwrap_or(1)).unwrap_or(NonZeroU8::MIN)
-                }.get();
                 if let Some((duration, reason)) = wait_ready(priority_users).await? {
                     tx.send(Message::Init(reason)).await?;
                     if let Some(ref mut recheck_ready_at) = recheck_ready_at {
@@ -401,11 +426,10 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     } else {
                         recheck_ready_at = Some(Instant::now() + duration);
                     }
-                    waiting_cores += cores;
+                    waiting_cores += 1;
                 } else {
-                    tx.send(Message::Ready(cores)).await?;
+                    tx.send(Message::Ready(1)).await?;
                 }
-                first_seed_rolled = true;
             }
             msg = rx.recv(), if !rx_is_closed => if let Some(msg) = msg {
                 match msg {
