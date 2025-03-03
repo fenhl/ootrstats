@@ -1,4 +1,4 @@
-// A subset for the draft for the Tournoi Francophone Saison 4, not including hard settings or MQ.
+// A subset for the draft for the Tournoi Francophone Saison 4 (https://midos.house/event/fr/4), not including hard settings or MQ.
 // This removes most of the complexities of the draft format, such as the mutual exclusion of keysy and keysanity, or the extra yes/no question for mixed dungeon ER.
 
 groups: {
