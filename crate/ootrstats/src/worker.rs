@@ -85,6 +85,7 @@ pub enum Error {
     #[error(transparent)] CargoMetadata(#[from] cargo_metadata::Error),
     #[error(transparent)] Decompress(#[from] decompress::Error),
     #[error(transparent)] Env(#[from] env::VarError),
+    #[error(transparent)] ParseGitHash(#[from] gix_hash::decode::Error),
     #[cfg(unix)] #[error(transparent)] ParseInt(#[from] std::num::ParseIntError),
     #[error(transparent)] Roll(#[from] crate::RollError),
     #[error(transparent)] Semver(#[from] semver::Error),
@@ -134,7 +135,7 @@ async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[S
     Ok(if wait > Duration::default() { Some((wait, message)) } else { None })
 }
 
-pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, rando_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String]) -> Result<(), Error> {
+pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, git_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String]) -> Result<(), Error> {
     let mut rsl_version = None;
     let mut use_rust_cli = false;
     let mut supports_unsalted_seeds = false;
@@ -144,13 +145,13 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             (
                 Cow::Borrowed(&**github_user),
                 Cow::Borrowed(&**repo),
-                Cow::Borrowed("FETCH_HEAD"),
-                gitdir().await?.join("github.com").join(github_user).join(repo).join("rev").join(rando_rev.to_string()),
+                git_rev,
+                gitdir().await?.join("github.com").join(github_user).join(repo).join("rev").join(git_rev.to_string()),
             )
         }
         RandoSetup::Rsl { ref github_user, ref repo, .. } => {
             tx.send(Message::Init(format!("cloning random settings script: determining repo path"))).await?;
-            let repo_path = gitdir().await?.join("github.com").join(github_user).join(repo).join("rev").join(rando_rev.to_string());
+            let repo_path = gitdir().await?.join("github.com").join(github_user).join(repo).join("rev").join(git_rev.to_string());
             tx.send(Message::Init(format!("checking if RSL repo exists"))).await?;
             if !fs::exists(&repo_path).await? {
                 tx.send(Message::Init(format!("creating RSL repo path"))).await?;
@@ -160,7 +161,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 tx.send(Message::Init(format!("cloning random settings script: adding remote"))).await?;
                 Command::new("git").arg("remote").arg("add").arg("origin").arg(format!("https://github.com/{github_user}/{repo}.git")).current_dir(&repo_path).check("git remote add").await?;
                 tx.send(Message::Init(format!("cloning random settings script: fetching"))).await?;
-                Command::new("git").arg("fetch").arg("origin").arg(rando_rev.to_string()).arg("--depth=1").current_dir(&repo_path).check("git fetch").await?;
+                Command::new("git").arg("fetch").arg("origin").arg(git_rev.to_string()).arg("--depth=1").current_dir(&repo_path).check("git fetch").await?;
                 tx.send(Message::Init(format!("cloning random settings script: resetting"))).await?;
                 Command::new("git").arg("reset").arg("--hard").arg("FETCH_HEAD").current_dir(&repo_path).check("git reset").await?;
             }
@@ -197,7 +198,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 .check(python.display().to_string()).await?
                 .stdout
             )?;
-            (Cow::Owned(rando_github_user), Cow::Owned(rando_repo_name), Cow::Owned(randomizer_commit), repo_path.join("randomizer"))
+            (Cow::Owned(rando_github_user), Cow::Owned(rando_repo_name), randomizer_commit.parse()?, repo_path.join("randomizer"))
         }
     };
     tx.send(Message::Init(format!("checking if randomizer repo exists"))).await?;
@@ -209,9 +210,9 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
         tx.send(Message::Init(format!("cloning randomizer: adding remote"))).await?;
         Command::new("git").arg("remote").arg("add").arg("origin").arg(format!("https://github.com/{rando_github_user}/{rando_repo_name}.git")).current_dir(&rando_repo_path).check("git remote add").await?;
         tx.send(Message::Init(format!("cloning randomizer: fetching"))).await?;
-        Command::new("git").arg("fetch").arg("origin").arg(rando_rev.to_string()).arg("--depth=1").current_dir(&rando_repo_path).check("git fetch").await?;
+        Command::new("git").arg("fetch").arg("origin").arg(rando_git_rev.to_string()).arg("--depth=1").current_dir(&rando_repo_path).check("git fetch").await?;
         tx.send(Message::Init(format!("cloning randomizer: resetting"))).await?;
-        Command::new("git").arg("reset").arg("--hard").arg(&*rando_git_rev).current_dir(&rando_repo_path).check("git reset").await?;
+        Command::new("git").arg("reset").arg("--hard").arg("FETCH_HEAD").current_dir(&rando_repo_path).check("git reset").await?;
     }
     if !fs::exists(rando_repo_path.join("ZOOTDEC.z64")).await? {
         tx.send(Message::Init(format!("decompressing base rom"))).await?;
