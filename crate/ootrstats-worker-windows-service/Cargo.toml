@@ -11,4 +11,4 @@ mimalloc = "0.1.43"
 ootrstats-worker-daemon = { path = "../ootrstats-worker-daemon" }
 rocket = "0.5.1"
 thiserror = "2.0.11"
-windows-service = "0.7.0"
+windows-service = "0.8"

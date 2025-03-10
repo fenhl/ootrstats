@@ -50,7 +50,9 @@ use {
     itertools::Itertools as _,
     lazy_regex::regex_is_match,
     nonempty_collections::{
+        IntoIteratorExt as _,
         NEVec,
+        NonEmptyIterator as _,
         nev,
     },
     ootr_utils::spoiler::SpoilerLog,
@@ -687,9 +689,8 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                 for state in &mut seed_states {
                                     if let SeedState::Rolling { workers } = state {
                                         if workers.contains(&name) {
-                                            let new_workers = workers.iter().into_iter().filter(|worker| **worker != name).cloned().collect();
-                                            if let Some(new_workers) = NEVec::from_vec(new_workers) {
-                                                *workers = new_workers;
+                                            if let Some(new_workers) = workers.iter().filter(|worker| **worker != name).cloned().try_into_nonempty_iter() {
+                                                *workers = new_workers.collect();
                                             } else if should_cancel {
                                                 *state = SeedState::Cancelled;
                                             } else {
@@ -802,7 +803,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                         log!("worker {name} retrying seed {seed_idx} due to missing instruction count, stderr:");
                                         log!("{}", String::from_utf8_lossy(stderr));
                                         fs::remove_dir_all(seed_dir).await?;
-                                        if let Some(new_workers) = NEVec::from_vec(new_workers) {
+                                        if let Some(new_workers) = NEVec::try_from_vec(new_workers) {
                                             *worker_names = new_workers;
                                         } else {
                                             seed_states[usize::from(seed_idx)] = SeedState::Pending;
@@ -840,7 +841,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                 new_workers.swap_remove(pos);
                                 if args.retry_failures || parse_traceback(std::str::from_utf8(&error_log)?)?.1.contains("Cannot allocate memory") {
                                     fs::remove_dir_all(seed_dir).await.missing_ok()?;
-                                    if let Some(new_workers) = NEVec::from_vec(new_workers) {
+                                    if let Some(new_workers) = NEVec::try_from_vec(new_workers) {
                                         *worker_names = new_workers;
                                     } else {
                                         seed_states[usize::from(seed_idx)] = SeedState::Pending;
@@ -863,7 +864,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                             log!("worker {name} retrying seed {seed_idx} due to missing instruction count, stderr:");
                                             log!("{}", String::from_utf8_lossy(stderr));
                                             fs::remove_dir_all(seed_dir).await?;
-                                            if let Some(new_workers) = NEVec::from_vec(new_workers) {
+                                            if let Some(new_workers) = NEVec::try_from_vec(new_workers) {
                                                 *worker_names = new_workers;
                                             } else {
                                                 seed_states[usize::from(seed_idx)] = SeedState::Pending;

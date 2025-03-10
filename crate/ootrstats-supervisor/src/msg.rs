@@ -160,7 +160,7 @@ impl Message<'_> {
                                     if let Some(assigned_workers) = allowed_workers.get(&(seed_idx as SeedIdx));
                                     if assigned_workers.len() == NonZero::<usize>::MIN;
                                     then {
-                                        if assigned_workers.head == worker.name { assigned += 1 }
+                                        if *assigned_workers.first() == worker.name { assigned += 1 }
                                     } else {
                                         all_assigned = false;
                                     }
