@@ -100,6 +100,21 @@ mod config;
 mod msg;
 mod worker;
 
+fn parse_traceback(error_log: &str) -> Result<(&str, &str), Error> {
+    //TODO account for additional output from macOS `time`
+    let mut rev_lines = error_log.trim().lines().rev();
+    let mut msg = rev_lines.next().ok_or(Error::EmptyErrorLog)?;
+    let _ = rev_lines.next().ok_or(Error::MissingTraceback)?;
+    let mut location = rev_lines.next().ok_or(Error::MissingTraceback)?;
+    if rev_lines.any(|line| line.contains("Performance counter stats")) {
+        let _ = rev_lines.next().ok_or(Error::EmptyErrorLog);
+        msg = rev_lines.next().ok_or(Error::EmptyErrorLog)?;
+        let _ = rev_lines.next().ok_or(Error::MissingTraceback)?;
+        location = rev_lines.next().ok_or(Error::MissingTraceback)?;
+    }
+    Ok((location, msg))
+}
+
 enum ReaderMessage {
     Pending {
         seed_idx: SeedIdx,
@@ -636,23 +651,25 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                 };
                             }
                         }
-                        ReaderMessage::Failure { worker, seed_idx, instructions, rsl_instructions } => if args.retry_failures {
-                            fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
-                            seed_states[usize::from(seed_idx)] = SeedState::Pending;
-                        } else {
-                            allowed_workers.insert(seed_idx, nev![worker.clone()]);
-                            if is_bench && instructions.is_none() {
-                                // seed was already rolled but not benchmarked, roll a new seed instead
+                        ReaderMessage::Failure { worker, seed_idx, instructions, rsl_instructions } => {
+                            let error_log = Bytes::from(fs::read(stats_dir.join(seed_idx.to_string()).join("error.log")).await?);
+                            if args.retry_failures || parse_traceback(std::str::from_utf8(&error_log)?)?.1.contains("Cannot allocate memory") {
                                 fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
                                 seed_states[usize::from(seed_idx)] = SeedState::Pending;
                             } else {
-                                seed_states[usize::from(seed_idx)] = SeedState::Failure {
-                                    existing: true,
-                                    error_log: fs::read(stats_dir.join(seed_idx.to_string()).join("error.log")).await?.into(),
-                                    worker, instructions, rsl_instructions,
-                                };
+                                allowed_workers.insert(seed_idx, nev![worker.clone()]);
+                                if is_bench && instructions.is_none() {
+                                    // seed was already rolled but not benchmarked, roll a new seed instead
+                                    fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                                    seed_states[usize::from(seed_idx)] = SeedState::Pending;
+                                } else {
+                                    seed_states[usize::from(seed_idx)] = SeedState::Failure {
+                                        existing: true,
+                                        worker, instructions, rsl_instructions, error_log,
+                                    };
+                                }
                             }
-                        },
+                        }
                         ReaderMessage::Done => completed_readers += 1,
                     },
                     Event::WorkerDone(name, result) => if let Some(worker) = workers.iter_mut().find(|worker| worker.name == name) {
@@ -821,7 +838,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                 let mut new_workers = Vec::from(worker_names.clone());
                                 let pos = new_workers.iter().position(|worker| *worker == name).expect("got failure from a worker that wasn't rolling that seed");
                                 new_workers.swap_remove(pos);
-                                if args.retry_failures {
+                                if args.retry_failures || parse_traceback(std::str::from_utf8(&error_log)?)?.1.contains("Cannot allocate memory") {
                                     fs::remove_dir_all(seed_dir).await.missing_ok()?;
                                     if let Some(new_workers) = NEVec::from_vec(new_workers) {
                                         *worker_names = new_workers;
@@ -1059,11 +1076,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             let mut counts = HashMap::<_, HashMap<_, (SeedIdx, usize)>>::default();
             for (seed_idx, state) in seed_states.iter().enumerate() {
                 if let SeedState::Failure { error_log, .. } = state {
-                    let error_log = std::str::from_utf8(error_log)?;
-                    let mut lines = error_log.trim().lines();
-                    let msg = lines.next_back().ok_or(Error::EmptyErrorLog)?;
-                    let _ = lines.next_back().ok_or(Error::MissingTraceback)?;
-                    let location = lines.next_back().ok_or(Error::MissingTraceback)?;
+                    let (location, msg) = parse_traceback(std::str::from_utf8(error_log)?)?;
                     match counts.entry(location).or_default().entry(msg) {
                         hash_map::Entry::Occupied(mut entry) => entry.get_mut().1 += 1,
                         hash_map::Entry::Vacant(entry) => { entry.insert((seed_idx.try_into()?, 1)); }
