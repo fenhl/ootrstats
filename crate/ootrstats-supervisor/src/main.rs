@@ -373,9 +373,20 @@ impl wheel::CustomExit for Error {
                     for (worker, source) in errors {
                         eprintln!("\r");
                         eprintln!("{} in worker {worker}: {}\r", if source.is_network_error() { "network error" } else { "error" }, source.to_string().lines().format("\r\n"));
+                        let mut debug = format!("{source:?}");
+                        if debug.len() > 2000 && stderr().is_terminal() {
+                            let mut prefix_end = 1000;
+                            while !debug.is_char_boundary(prefix_end) {
+                                prefix_end -= 1;
+                            }
+                            let mut suffix_start = debug.len() - 1000;
+                            while !debug.is_char_boundary(suffix_start) {
+                                suffix_start += 1;
+                            }
+                            debug = format!("{} […] {}", &debug[..prefix_end], &debug[suffix_start..]);
+                        }
+                        eprintln!("debug info: {debug}\r");
                     }
-                    eprintln!("\r");
-                    eprintln!("debug info: {debug}\r");
                 }
             },
             _ => {
@@ -1114,6 +1125,11 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
         .filter_map(|worker| Some((worker.name, worker.error?)))
         .collect_vec();
     if !worker_errors.is_empty() {
+        log!("worker errors:");
+        for (worker, source) in &worker_errors {
+            log!("{} in worker {worker}: {source}", if source.is_network_error() { "network error" } else { "error" });
+            log!("debug info: {source:?}");
+        }
         return Err(Error::Worker { worker_errors, cancelled: cancelled_by_user })
     }
     Ok(cancelled_by_user)
