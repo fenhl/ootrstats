@@ -269,6 +269,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             metadata_cmd.env("PATH", format!("{}:{}", user_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
         }
         if let Some(package) = metadata_cmd
+            .env("RUSTC_WRAPPER", "") // to avoid sccache errors
             .manifest_path(cargo_manifest_path)
             .exec()?
             .packages
