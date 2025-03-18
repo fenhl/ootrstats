@@ -469,7 +469,7 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
 pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, rsl_version: &str, use_rust_cli: bool, supports_unsalted_seeds: bool, random_seed: bool, preset: Option<&str>, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let python = python().await?;
     #[cfg_attr(not(target_os = "windows"), allow(unused_mut))] let mut cmd_name = python.display().to_string();
-    let (supports_plando_filename_base, supports_seed, supports_no_salt) = if let Some((_, major, minor, patch, supplementary)) = regex_captures!(r"^([0-9]+)\.([0-9]+)\.([0-9]+) Fenhl-([0-9]+)$", &rsl_version.trim()) {
+    let (supports_plando_filename_base, supports_seed, supports_no_salt) = if let Some((_, major, minor, patch, supplementary)) = regex_captures!(r"^([0-9]+)\.([0-9]+)\.([0-9]+) Fenhl-([0-9]+)(?: riir-[0-9]+)?$", &rsl_version.trim()) {
         let rsl_version = (Version::new(major.parse()?, minor.parse()?, patch.parse()?), supplementary.parse()?);
         (rsl_version >= (Version::new(2, 8, 2), 0), rsl_version >= (Version::new(2, 8, 2), 3), rsl_version >= (Version::new(2, 8, 2), 3))
     } else if let Some((_, major, minor, patch, supplementary)) = regex_captures!(r"^([0-9]+)\.([0-9]+)\.([0-9]+) devmvp-([0-9]+)$", &rsl_version.trim()) {
