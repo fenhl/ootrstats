@@ -155,16 +155,18 @@ enum SeedState {
     },
     Cancelled,
     Success {
-        /// Whether the seed was read from disk.
-        existing: bool,
+        /// None if the seed was read from disk.
+        #[serde(skip)]
+        completed_at: Option<Instant>,
         worker: Arc<str>,
         instructions: Option<u64>,
         rsl_instructions: Option<u64>,
         spoiler_log: serde_json::Value,
     },
     Failure {
-        /// Whether the seed was read from disk.
-        existing: bool,
+        /// None if the seed was read from disk.
+        #[serde(skip)]
+        completed_at: Option<Instant>,
         worker: Arc<str>,
         instructions: Option<u64>,
         rsl_instructions: Option<u64>,
@@ -647,7 +649,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                 seed_states[usize::from(seed_idx)] = SeedState::Pending;
                             } else {
                                 seed_states[usize::from(seed_idx)] = SeedState::Success {
-                                    existing: true,
+                                    completed_at: None,
                                     spoiler_log: fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?,
                                     worker, instructions, rsl_instructions,
                                 };
@@ -666,7 +668,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                     seed_states[usize::from(seed_idx)] = SeedState::Pending;
                                 } else {
                                     seed_states[usize::from(seed_idx)] = SeedState::Failure {
-                                        existing: true,
+                                        completed_at: None,
                                         worker, instructions, rsl_instructions, error_log,
                                     };
                                 }
@@ -820,7 +822,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                             }
                                         }
                                         seed_states[usize::from(seed_idx)] = SeedState::Success {
-                                            existing: false,
+                                            completed_at: Some(Instant::now()),
                                             worker: name,
                                             spoiler_log: match spoiler_log {
                                                 Either::Left(_) => fs::read_json(stats_dir.join(seed_idx.to_string()).join("spoiler.json")).await?,
@@ -881,7 +883,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                                 }
                                             }
                                             seed_states[usize::from(seed_idx)] = SeedState::Failure {
-                                                existing: false,
+                                                completed_at: Some(Instant::now()),
                                                 worker: name,
                                                 instructions: instructions.as_ref().ok().copied(),
                                                 rsl_instructions: rsl_instructions.as_ref().ok().copied(),
@@ -966,6 +968,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             for worker in &mut workers {
                 // drop sender so the worker can shut down
                 worker.supervisor_tx = None;
+                worker.stopping = true;
             }
             // make sure worker_tx is dropped to prevent deadlock
             worker_tx = None;

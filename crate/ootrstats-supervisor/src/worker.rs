@@ -180,6 +180,7 @@ pub(crate) struct State {
     pub(crate) ready: u8,
     #[serde(skip)]
     pub(crate) supervisor_tx: Option<mpsc::Sender<SupervisorMessage>>,
+    pub(crate) stopping: bool,
     pub(crate) stopped: bool,
 }
 
@@ -190,6 +191,7 @@ impl State {
             error: None,
             ready: 0,
             supervisor_tx: None,
+            stopping: false,
             stopped: false,
             name,
         }

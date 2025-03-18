@@ -103,6 +103,8 @@ impl Message<'_> {
                     Print(format_args!("{label}: preparing...")),
                 ).at_unknown()?,
                 Self::Status { label, available_parallelism, completed_readers, retry_failures, seed_states, allowed_workers, start, start_local, workers } => {
+                    let all_assigned = (0..seed_states.len())
+                        .all(|seed_idx| allowed_workers.get(&(seed_idx as SeedIdx)).is_some_and(|assigned_workers| assigned_workers.len() == NonZero::<usize>::MIN));
                     for worker in workers {
                         if let Some(ref e) = worker.error {
                             let kind = if e.is_network_error() { "network error" } else { "error" };
@@ -136,7 +138,6 @@ impl Message<'_> {
                             let mut total_completed = 0u16;
                             let mut failures = 0u16;
                             let mut assigned = 0u16;
-                            let mut all_assigned = true;
                             for (seed_idx, state) in seed_states.into_iter().enumerate() {
                                 match state {
                                     SeedState::Success { worker: name, .. } => {
@@ -156,18 +157,20 @@ impl Message<'_> {
                                     | SeedState::Cancelled
                                         => {}
                                 }
-                                if_chain! {
-                                    if let Some(assigned_workers) = allowed_workers.get(&(seed_idx as SeedIdx));
-                                    if assigned_workers.len() == NonZero::<usize>::MIN;
-                                    then {
+                                if let Some(assigned_workers) = allowed_workers.get(&(seed_idx as SeedIdx)) {
+                                    if assigned_workers.len() == NonZero::<usize>::MIN {
                                         if *assigned_workers.first() == worker.name { assigned += 1 }
-                                    } else {
-                                        all_assigned = false;
                                     }
                                 }
                             }
                             let state = if worker.stopped {
                                 Cow::Borrowed("done")
+                            } else if worker.stopping {
+                                if let Some(ref msg) = worker.msg {
+                                    Cow::Owned(format!("stopping, {msg}"))
+                                } else {
+                                    Cow::Borrowed("stopping")
+                                }
                             } else if worker.supervisor_tx.is_none() {
                                 Cow::Borrowed("not started")
                             } else if let Some(ref msg) = worker.msg {
@@ -206,9 +209,10 @@ impl Message<'_> {
                             let mut started = 0u16;
                             let mut total = 0u16;
                             let mut completed = 0u16;
+                            let mut last_completed = None;
                             let mut skipped = 0u16;
                             for state in seed_states {
-                                match state {
+                                match *state {
                                     SeedState::Unchecked => unreachable!(),
                                     SeedState::Pending => total += 1,
                                     SeedState::Rolling { .. } => {
@@ -216,17 +220,29 @@ impl Message<'_> {
                                         started += 1;
                                     }
                                     SeedState::Cancelled => {}
-                                    SeedState::Success { existing, .. } => {
+                                    SeedState::Success { completed_at, .. } => {
                                         total += 1;
                                         started += 1;
                                         num_successes += 1;
-                                        if *existing { skipped += 1 } else { completed += 1 }
+                                        if let Some(completed_at) = completed_at {
+                                            completed += 1;
+                                            let last_completed = last_completed.get_or_insert(completed_at);
+                                            *last_completed = completed_at.max(*last_completed);
+                                        } else {
+                                            skipped += 1;
+                                        }
                                     }
-                                    SeedState::Failure { existing, .. } => {
+                                    SeedState::Failure { completed_at, .. } => {
                                         total += 1;
                                         started += 1;
                                         num_failures += 1;
-                                        if *existing { skipped += 1 } else { completed += 1 }
+                                        if let Some(completed_at) = completed_at {
+                                            completed += 1;
+                                            let last_completed = last_completed.get_or_insert(completed_at);
+                                            *last_completed = completed_at.max(*last_completed);
+                                        } else {
+                                            skipped += 1;
+                                        }
                                     }
                                 }
                             }
@@ -244,9 +260,38 @@ impl Message<'_> {
                                     )
                                 },
                                 if_chain! {
-                                    if completed > 0;
-                                    let ratio = (total - skipped) as f64 / completed as f64;
-                                    if let Ok(estimated_duration) = Duration::try_from_secs_f64(start.elapsed().as_secs_f64() * ratio);
+                                    if let Some(estimated_duration) = if all_assigned {
+                                        workers.iter()
+                                            .map(|worker| {
+                                                let mut total = 0u16;
+                                                let mut completed = 0u16;
+                                                let mut last_completed = None;
+                                                for (seed_idx, state) in seed_states.iter().enumerate() {
+                                                    if allowed_workers.get(&(seed_idx as SeedIdx)).is_none_or(|allowed_workers| allowed_workers.contains(&worker.name)) {
+                                                        match *state {
+                                                            SeedState::Unchecked => unreachable!(),
+                                                            SeedState::Pending | SeedState::Rolling { .. } => total += 1,
+                                                            SeedState::Cancelled | SeedState::Success { completed_at: None, .. } | SeedState::Failure { completed_at: None, .. } => {}
+                                                            SeedState::Success { completed_at: Some(completed_at), .. } | SeedState::Failure { completed_at: Some(completed_at), .. } => {
+                                                                total += 1;
+                                                                completed += 1;
+                                                                let last_completed = last_completed.get_or_insert(completed_at);
+                                                                *last_completed = completed_at.max(*last_completed);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                if total == 0 {
+                                                    Some(Duration::default())
+                                                } else {
+                                                    last_completed.map(|last_completed| (last_completed - start) * u32::from(total) / u32::from(completed))
+                                                }
+                                            })
+                                            .collect::<Option<Vec<_>>>()
+                                            .and_then(|worker_durations| worker_durations.into_iter().max())
+                                    } else {
+                                        last_completed.map(|last_completed| (last_completed - start) * u32::from(total - skipped) / u32::from(completed))
+                                    };
                                     if let Ok(estimated_duration) = TimeDelta::from_std(estimated_duration);
                                     then {
                                         (start_local + estimated_duration).format("%Y-%m-%d %H:%M:%S").to_string()
