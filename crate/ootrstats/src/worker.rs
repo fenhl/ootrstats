@@ -339,7 +339,10 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             }
         }
     }
-    tx.send(Message::Ready(NonZeroU8::try_from(u8::try_from(if cores <= 0 {
+    let (RandoSetup::Normal { seeds, .. } | RandoSetup::Rsl { seeds, .. }) = &setup;
+    tx.send(Message::Ready(NonZeroU8::try_from(u8::try_from(if let crate::Seeds::Fixed(_) = seeds {
+        1
+    } else if cores <= 0 {
         std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN).get().try_into().unwrap_or(i8::MAX) + cores
     } else {
         cores
