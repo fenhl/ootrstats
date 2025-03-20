@@ -1150,7 +1150,7 @@ async fn main(args: Args) -> Result<(), Error> {
                 ("Multiworld", Args { preset: Some(format!("mw")), ..args.clone() }),
                 ("Hell Mode", Args { preset: Some(format!("hell")), ..args.clone() }),
                 ("Random Settings", if args.github_user == "fenhl" {
-                    Args { rsl: true, branch: Some(if args.branch.is_some_and(|branch| branch == "riir") { format!("riir2") } else { format!("dev-fenhl") }), preset: Some(format!("fenhl")), ..args }
+                    Args { rsl: true, branch: args.branch.is_some_and(|branch| branch == "riir").then(|| format!("riir2")), preset: Some(format!("fenhl")), ..args }
                 } else {
                     Args { rsl: true, github_user: format!("fenhl"), branch: Some(format!("dev-mvp")), ..args }
                 }), //TODO check to make sure plando-random-settings branch is up to date with matthewkirby:master and the randomizer commit specified in rslversion.py is equal to the specified randomizer commit
