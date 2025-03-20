@@ -1112,7 +1112,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                     }
                 }
             }
-            Message::FailuresHeader.print(args.json_messages, &mut stdout)?;
+            Message::FailuresHeader { failures: counts.values().map(|msgs| msgs.values().map(|&(_, count)| count as u16).sum::<u16>()).sum() }.print(args.json_messages, &mut stdout)?;
             for msgs in counts.into_values().sorted_unstable_by_key(|msgs| -(msgs.values().map(|&(_, count)| count).sum::<usize>() as isize)).take(10) {
                 let count = msgs.values().map(|&(_, count)| count).sum::<usize>();
                 let mut msgs = msgs.into_iter().collect_vec();

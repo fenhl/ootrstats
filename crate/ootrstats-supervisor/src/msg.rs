@@ -77,7 +77,9 @@ pub(crate) enum Message<'a> {
         count: usize,
         output: Json,
     },
-    FailuresHeader,
+    FailuresHeader {
+        failures: u16,
+    },
     Failure {
         count: usize,
         top_msg: &'a str,
@@ -359,8 +361,8 @@ impl Message<'_> {
                 Self::Category { count, output } => crossterm::execute!(writer,
                     Print(format_args!("{count}x: {output}\r\n")),
                 ).at_unknown()?,
-                Self::FailuresHeader => crossterm::execute!(writer,
-                    Print("Top failure reasons by last line:\r\n"),
+                Self::FailuresHeader { failures } => crossterm::execute!(writer,
+                    Print(format_args!("{failures} failures, top failure reasons by last line:\r\n")),
                 ).at_unknown()?,
                 Self::Failure { count, top_msg, top_count, seed_idx, msgs } => if msgs.is_empty() {
                     crossterm::execute!(writer,
