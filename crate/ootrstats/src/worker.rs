@@ -317,13 +317,11 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
         };
         mypyc.current_dir(&rando_repo_path).check("mypyc").await?;
     }
-    let (repo_path, random_seeds) = match setup {
-        RandoSetup::Normal { random_seeds, .. } => {
-            (rando_repo_path, random_seeds)
-        }
+    let repo_path = match setup {
+        RandoSetup::Normal { .. } => rando_repo_path,
         RandoSetup::Rsl { .. } => {
             assert!(rando_repo_path.pop(), "rando_repo_path was root even though it was defined as subdirectory of repo_path");
-            (rando_repo_path, true)
+            rando_repo_path
         }
     };
     let mut msg_buf = Vec::default();
@@ -352,19 +350,21 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
     let mut waiting_cores = 0;
     let handle_seed = |seed_idx| {
         let run_future = match setup {
-            RandoSetup::Normal { ref settings, ref json_settings, world_counts, .. } => {
+            RandoSetup::Normal { ref settings, ref json_settings, world_counts, ref seeds, .. } => {
                 let wsl_distro = wsl_distro.clone();
                 let repo_path = repo_path.clone();
+                let seeds = seeds.clone();
                 let settings = settings.clone();
                 let json_settings = json_settings.clone();
-                Either::Left(async move { crate::run_rando(wsl_distro.as_deref(), &repo_path, use_rust_cli, supports_unsalted_seeds, random_seeds, &settings, &json_settings, world_counts, seed_idx, output_mode).await })
+                Either::Left(async move { crate::run_rando(wsl_distro.as_deref(), &repo_path, use_rust_cli, supports_unsalted_seeds, seeds, &settings, &json_settings, world_counts, seed_idx, output_mode).await })
             }
-            RandoSetup::Rsl { ref preset, .. } => {
+            RandoSetup::Rsl { ref preset, ref seeds, .. } => {
                 let wsl_distro = wsl_distro.clone();
                 let repo_path = repo_path.clone();
                 let rsl_version = rsl_version.clone().unwrap();
+                let seeds = seeds.clone();
                 let preset = preset.clone();
-                Either::Right(async move { crate::run_rsl(wsl_distro.as_deref(), &repo_path, &rsl_version, use_rust_cli, supports_unsalted_seeds, random_seeds, preset.as_deref(), seed_idx, output_mode).await })
+                Either::Right(async move { crate::run_rsl(wsl_distro.as_deref(), &repo_path, &rsl_version, use_rust_cli, supports_unsalted_seeds, seeds, preset.as_deref(), seed_idx, output_mode).await })
             }
         };
         let tx = tx.clone();

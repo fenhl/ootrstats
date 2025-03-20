@@ -58,12 +58,13 @@ pub enum RandoSetup {
         settings: RandoSettings,
         json_settings: serde_json::Map<String, serde_json::Value>,
         world_counts: bool,
-        random_seeds: bool,
+        seeds: Seeds,
     },
     Rsl {
         github_user: String,
         repo: String,
         preset: Option<String>,
+        seeds: Seeds,
     },
 }
 
@@ -71,16 +72,16 @@ impl RandoSetup {
     pub fn stats_dir(&self, rando_rev: gix_hash::ObjectId) -> PathBuf {
         //TODO more detailed categorization (after current benchmark is done): switch to stats_dir_new
         match self {
-            Self::Normal { github_user, repo, settings, json_settings, world_counts: false, random_seeds: false } if json_settings.is_empty() => Path::new("rando").join(github_user).join(repo).join(rando_rev.to_string()).join(settings.stats_dir()),
+            Self::Normal { github_user, repo, settings, json_settings, world_counts: false, seeds: Seeds::Default } if json_settings.is_empty() => Path::new("rando").join(github_user).join(repo).join(rando_rev.to_string()).join(settings.stats_dir()),
             Self::Normal { github_user, repo, settings, .. } => Path::new("rando").join(github_user).join(repo).join(rando_rev.to_string()).join("custom").join(settings.stats_dir()),
-            Self::Rsl { github_user, repo, preset: None } => Path::new("rsl").join(github_user).join(repo).join(rando_rev.to_string()),
-            Self::Rsl { github_user, repo, preset: Some(preset) } => Path::new("rsl").join(github_user).join(repo).join(rando_rev.to_string()).join(preset),
+            Self::Rsl { github_user, repo, preset: None, .. } => Path::new("rsl").join(github_user).join(repo).join(rando_rev.to_string()),
+            Self::Rsl { github_user, repo, preset: Some(preset), .. } => Path::new("rsl").join(github_user).join(repo).join(rando_rev.to_string()).join(preset),
         }
     }
 
     pub fn stats_dir_new(&self, rando_rev: gix_hash::ObjectId) -> PathBuf {
         match self {
-            Self::Normal { github_user, repo, settings, json_settings, world_counts, random_seeds } => {
+            Self::Normal { github_user, repo, settings, json_settings, world_counts, seeds } => {
                 let mut path = Path::new("rando")
                     .join(github_user)
                     .join(repo)
@@ -91,18 +92,27 @@ impl RandoSetup {
                     json_settings.hash(&mut hasher);
                     path = path.join(format!("j{:016x}", Hasher::finish(&hasher))).into();
                 }
-                path.join(match (world_counts, random_seeds) {
-                    (false, false) => "default",
-                    (false, true) => "r",
-                    (true, false) => "w",
-                    (true, true) => "wr",
-                })
+                match (world_counts, seeds) {
+                    (false, Seeds::Default) => path.join("default"),
+                    (false, Seeds::Random) => path.join("r"),
+                    (false, Seeds::Fixed(seed)) => path.join("s").join(seed),
+                    (true, Seeds::Default) => path.join("w"),
+                    (true, Seeds::Random) => path.join("wr"),
+                    (true, Seeds::Fixed(seed)) => path.join("ws").join(seed),
+                }
             }
-            Self::Rsl { github_user, repo, preset } => Path::new("rsl")
-                .join(github_user)
-                .join(repo)
-                .join(rando_rev.to_string())
-                .join(preset.as_deref().unwrap_or("default"))
+            Self::Rsl { github_user, repo, preset, seeds } => {
+                let path = Path::new("rsl")
+                    .join(github_user)
+                    .join(repo)
+                    .join(rando_rev.to_string())
+                    .join(preset.as_deref().unwrap_or("default"));
+                match seeds {
+                    Seeds::Default => path.join("default"),
+                    Seeds::Random => path.join("r"),
+                    Seeds::Fixed(seed) => path.join("s").join(seed),
+                }
+            }
         }
     }
 }
@@ -138,6 +148,13 @@ impl RandoSettings {
             }
         }
     }
+}
+
+#[derive(Clone, Protocol)]
+pub enum Seeds {
+    Default,
+    Random,
+    Fixed(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Protocol)]
@@ -225,7 +242,7 @@ async fn python() -> Result<PathBuf, RollError> {
     })
 }
 
-pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli: bool, supports_unsalted_seeds: bool, random_seed: bool, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
+pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli: bool, supports_unsalted_seeds: bool, seeds: Seeds, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let mut resolved_settings = collect![as HashMap<_, _>:
         Cow::Borrowed("check_version") => json!(true), // inverted Boolean, avoids spamming GitHub with randomizer update checks
         Cow::Borrowed("create_spoiler") => json!(true),
@@ -234,7 +251,7 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
         Cow::Borrowed("create_uncompressed_rom") => json!(output_mode == OutputMode::BenchUncompressed),
         Cow::Borrowed("create_compressed_rom") => json!(output_mode == OutputMode::Bench),
     ];
-    if supports_unsalted_seeds && !random_seed {
+    if supports_unsalted_seeds && !matches!(seeds, Seeds::Random) {
         resolved_settings.insert(Cow::Borrowed("salt_seed"), json!(false));
     }
     resolved_settings.extend(json_settings.iter().map(|(name, value)| (Cow::<str>::Borrowed(name), value.clone())));
@@ -357,8 +374,13 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
         }
     }
     cmd.arg("--settings=-");
-    if !random_seed {
-        cmd.arg(format!("--seed=ootrstats{seed_idx}"));
+    match seeds {
+        Seeds::Default => { cmd.arg(format!("--seed=ootrstats{seed_idx}")); }
+        Seeds::Random => {}
+        Seeds::Fixed(seed) => {
+            cmd.arg("--seed");
+            cmd.arg(seed);
+        }
     }
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::null());
@@ -466,7 +488,7 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
     })
 }
 
-pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, rsl_version: &str, use_rust_cli: bool, supports_unsalted_seeds: bool, random_seed: bool, preset: Option<&str>, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
+pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, rsl_version: &str, use_rust_cli: bool, supports_unsalted_seeds: bool, seeds: Seeds, preset: Option<&str>, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let python = python().await?;
     #[cfg_attr(not(target_os = "windows"), allow(unused_mut))] let mut cmd_name = python.display().to_string();
     let (supports_plando_filename_base, supports_seed, supports_no_salt) = if let Some((_, major, minor, patch, supplementary)) = regex_captures!(r"^([0-9]+)\.([0-9]+)\.([0-9]+) Fenhl-([0-9]+)(?: riir-[0-9]+)?$", &rsl_version.trim()) {
@@ -522,10 +544,22 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
     if supports_plando_filename_base {
         cmd.arg(format!("--plando_filename_base=ootrstats_{seed_idx}"));
     }
-    if supports_seed && !random_seed {
-        cmd.arg(format!("--seed=ootrstats{seed_idx}"));
-        if supports_no_salt {
-            cmd.arg("--no_salt");
+    if supports_seed {
+        match &seeds {
+            Seeds::Default => {
+                cmd.arg(format!("--seed=ootrstats{seed_idx}"));
+                if supports_no_salt {
+                    cmd.arg("--no_salt");
+                }
+            }
+            Seeds::Random => {}
+            Seeds::Fixed(seed) => {
+                cmd.arg("--seed");
+                cmd.arg(seed);
+                if supports_no_salt {
+                    cmd.arg("--no_salt");
+                }
+            }
         }
     }
     if let Some(preset) = preset {
@@ -541,7 +575,7 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
     if output.status.success() || output.status.code() == Some(3) {
         let stdout = BufRead::lines(&*output.stdout).try_collect::<_, Vec<_>, _>().at_command(cmd_name)?;
         let plando_filename = stdout.iter().rev().find_map(|line| line.strip_prefix("Plando File: ")).ok_or_else(|| RollError::SpoilerLogPath(output.clone()))?;
-        let mut roll_output = run_rando(wsl_distro, &repo_path.join("randomizer"), use_rust_cli, supports_unsalted_seeds, random_seed, &RandoSettings::Default, &collect![
+        let mut roll_output = run_rando(wsl_distro, &repo_path.join("randomizer"), use_rust_cli, supports_unsalted_seeds, seeds, &RandoSettings::Default, &collect![
             format!("rom") => json!("../data/oot-ntscu-1.0.n64"),
             format!("enable_distribution_file") => json!(true),
             format!("distribution_file") => json!(format!("../data/{plando_filename}")),

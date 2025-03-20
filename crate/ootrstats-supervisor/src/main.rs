@@ -87,6 +87,7 @@ use {
         RandoSettings,
         RandoSetup,
         SeedIdx,
+        Seeds,
         WSL,
         gitdir,
     },
@@ -211,6 +212,8 @@ struct Args {
     /// Generate seeds with varying world counts.
     #[clap(long, conflicts_with("rsl"))]
     world_counts: bool,
+    /// Generates a fixed seed. Useful for confirming suspected unseeded randomization.
+    seed: Option<String>,
     /// Generate .zpf/.zpfz patch files.
     #[clap(long, conflicts_with("rsl"))]
     patch: bool,
@@ -496,6 +499,13 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             github_user: args.github_user,
             repo: repo.into_owned(),
             preset: args.preset,
+            seeds: if let Some(seed) = args.seed {
+                Seeds::Fixed(seed)
+            } else if args.retry_failures {
+                Seeds::Random
+            } else {
+                Seeds::Default
+            },
         }
     } else {
         RandoSetup::Normal {
@@ -513,7 +523,13 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             },
             json_settings: args.json_settings,
             world_counts: args.world_counts,
-            random_seeds: args.retry_failures,
+            seeds: if let Some(seed) = args.seed {
+                Seeds::Fixed(seed)
+            } else if args.retry_failures {
+                Seeds::Random
+            } else {
+                Seeds::Default
+            },
         }
     };
     let stats_root = if let Some(stats_dir) = config.stats_dir.take() {
