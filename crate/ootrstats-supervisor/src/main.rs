@@ -213,6 +213,7 @@ struct Args {
     #[clap(long, conflicts_with("rsl"))]
     world_counts: bool,
     /// Generates a fixed seed. Useful for confirming suspected unseeded randomization.
+    #[clap(long)]
     seed: Option<String>,
     /// Generate .zpf/.zpfz patch files.
     #[clap(long, conflicts_with("rsl"))]
