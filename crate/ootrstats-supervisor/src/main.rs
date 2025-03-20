@@ -242,9 +242,6 @@ struct Args {
     /// Print status updates as machine-readable JSON.
     #[clap(long)]
     json_messages: bool,
-    /// Temporary option for migration, will become the default in a future version.
-    #[clap(long, hide = true)]
-    new_stats_dir_structure: bool,
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
 }
@@ -540,8 +537,8 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
         #[cfg(windows)] { project_dirs.data_dir().to_owned() }
         #[cfg(unix)] { BaseDirectories::new()?.place_data_file("ootrstats").at_unknown()? }
     };
-    let stats_dir = stats_root.join(if args.new_stats_dir_structure { setup.stats_dir_new(rando_rev) } else { setup.stats_dir(rando_rev) });
-    let baseline_stats_dir = baseline_rando_rev.map(|rando_rev| stats_root.join(if args.new_stats_dir_structure { setup.stats_dir_new(rando_rev) } else { setup.stats_dir(rando_rev) }));
+    let stats_dir = stats_root.join(setup.stats_dir(rando_rev));
+    let baseline_stats_dir = baseline_rando_rev.map(|rando_rev| stats_root.join(setup.stats_dir(rando_rev)));
     if args.clean {
         fs::remove_dir_all(&stats_dir).await.missing_ok()?;
     }

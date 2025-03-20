@@ -70,23 +70,13 @@ pub enum RandoSetup {
 
 impl RandoSetup {
     pub fn stats_dir(&self, rando_rev: gix_hash::ObjectId) -> PathBuf {
-        //TODO more detailed categorization (after current benchmark is done): switch to stats_dir_new
-        match self {
-            Self::Normal { github_user, repo, settings, json_settings, world_counts: false, seeds: Seeds::Default } if json_settings.is_empty() => Path::new("rando").join(github_user).join(repo).join(rando_rev.to_string()).join(settings.stats_dir()),
-            Self::Normal { github_user, repo, settings, .. } => Path::new("rando").join(github_user).join(repo).join(rando_rev.to_string()).join("custom").join(settings.stats_dir()),
-            Self::Rsl { github_user, repo, preset: None, .. } => Path::new("rsl").join(github_user).join(repo).join(rando_rev.to_string()),
-            Self::Rsl { github_user, repo, preset: Some(preset), .. } => Path::new("rsl").join(github_user).join(repo).join(rando_rev.to_string()).join(preset),
-        }
-    }
-
-    pub fn stats_dir_new(&self, rando_rev: gix_hash::ObjectId) -> PathBuf {
         match self {
             Self::Normal { github_user, repo, settings, json_settings, world_counts, seeds } => {
                 let mut path = Path::new("rando")
                     .join(github_user)
                     .join(repo)
                     .join(rando_rev.to_string())
-                    .join(settings.stats_dir_new()); //TODO rename to stats_dir
+                    .join(settings.stats_dir());
                 if !json_settings.is_empty() {
                     let mut hasher = StableSipHasher128::default();
                     json_settings.hash(&mut hasher);
@@ -126,17 +116,7 @@ pub enum RandoSettings {
 }
 
 impl RandoSettings {
-    //TODO more detailed categorization (after current benchmark is done): switch to stats_dir_new
     fn stats_dir(&self) -> Cow<'static, Path> {
-        match self {
-            Self::Default => Path::new("default").into(),
-            Self::Preset(preset) => Path::new("preset").join(preset).into(),
-            Self::String(settings) => Path::new("settings").join(settings).into(),
-            Self::Draft(_) => Path::new("draft").into(), //TODO add a hash of the draft spec as a subdirectory?
-        }
-    }
-
-    fn stats_dir_new(&self) -> Cow<'static, Path> {
         match self {
             Self::Default => Path::new("default").into(),
             Self::Preset(preset) => Path::new("preset").join(preset).into(),
