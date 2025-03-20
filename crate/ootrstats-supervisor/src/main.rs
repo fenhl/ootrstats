@@ -1000,7 +1000,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
         }
     }
     drop(cli_rx);
-    Message::Done { label, num_workers: workers.len() as u16, stats_dir: stats_dir.clone() }.print(args.json_messages, &mut stderr)?;
+    Message::Done { label, num_workers: workers.len() as u16, stats_dir }.print(args.json_messages, &mut stderr)?;
     match args.subcommand {
         None => {}
         Some(Subcommand::Bench { raw_data: false, uncompressed: _ }) => {
@@ -1112,7 +1112,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                     }
                 }
             }
-            Message::FailuresHeader { stats_dir }.print(args.json_messages, &mut stdout)?;
+            Message::FailuresHeader.print(args.json_messages, &mut stdout)?;
             for msgs in counts.into_values().sorted_unstable_by_key(|msgs| -(msgs.values().map(|&(_, count)| count).sum::<usize>() as isize)).take(10) {
                 let count = msgs.values().map(|&(_, count)| count).sum::<usize>();
                 let mut msgs = msgs.into_iter().collect_vec();
