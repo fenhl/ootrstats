@@ -3,6 +3,7 @@ use {
         borrow::Cow,
         collections::HashMap,
         env,
+        iter,
         num::{
             NonZeroU8,
             NonZeroUsize,
@@ -84,7 +85,7 @@ pub enum SupervisorMessage {
 pub enum Error {
     #[error(transparent)] CargoMetadata(#[from] cargo_metadata::Error),
     #[error(transparent)] Decompress(#[from] decompress::Error),
-    #[error(transparent)] Env(#[from] env::VarError),
+    #[error(transparent)] EnvJoinPaths(#[from] env::JoinPathsError),
     #[error(transparent)] ParseGitHash(#[from] gix_hash::decode::Error),
     #[cfg(unix)] #[error(transparent)] ParseInt(#[from] std::num::ParseIntError),
     #[error(transparent)] Roll(#[from] crate::RollError),
@@ -232,7 +233,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
         } else {
             let mut cargo = Command::new("cargo");
             if let Some(user_dirs) = UserDirs::new() {
-                cargo.env("PATH", format!("{}:{}", user_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
+                cargo.env("PATH", env::join_paths(iter::once(user_dirs.home_dir().join(".cargo").join("bin")).chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect::<Vec<_>>()).into_iter().flatten()))?);
             }
             cargo
         });
@@ -266,7 +267,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
         }
         let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
         if let Some(user_dirs) = UserDirs::new() {
-            metadata_cmd.env("PATH", format!("{}:{}", user_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
+            metadata_cmd.env("PATH", env::join_paths(iter::once(user_dirs.home_dir().join(".cargo").join("bin")).chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect::<Vec<_>>()).into_iter().flatten()))?);
         }
         if let Some(package) = metadata_cmd
             .env("RUSTC_WRAPPER", "") // to avoid sccache errors

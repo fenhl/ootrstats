@@ -8,6 +8,7 @@ use {
             Hasher,
         },
         io::prelude::*,
+        iter,
         path::{
             Path,
             PathBuf,
@@ -158,7 +159,7 @@ pub struct RollOutput {
 #[derive(Debug, thiserror::Error)]
 pub enum RollError {
     #[error(transparent)] Draft(#[from] draft::ResolveError),
-    #[error(transparent)] Env(#[from] env::VarError),
+    #[error(transparent)] EnvJoinPaths(#[from] env::JoinPathsError),
     #[error(transparent)] Json(#[from] serde_json::Error),
     #[error(transparent)] ParseInt(#[from] std::num::ParseIntError),
     #[error(transparent)] Wheel(#[from] wheel::Error),
@@ -548,7 +549,7 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
     cmd.stdin(Stdio::null());
     cmd.current_dir(repo_path);
     if let Some(user_dirs) = UserDirs::new() {
-        cmd.env("PATH", format!("{}:{}", user_dirs.home_dir().join(".cargo").join("bin").display(), env::var("PATH")?));
+        cmd.env("PATH", env::join_paths(iter::once(user_dirs.home_dir().join(".cargo").join("bin")).chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect::<Vec<_>>()).into_iter().flatten()))?);
     }
     let output = cmd.output().await.at_command(cmd_name.clone())?;
     let stderr = BufRead::lines(&*output.stderr).try_collect::<_, Vec<_>, _>().at_command(cmd_name.clone())?;
