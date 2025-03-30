@@ -36,6 +36,7 @@ pub enum ServerMessage {
         rsl_instructions: Result<u64, Bytes>,
         spoiler_log: Bytes,
         patch: Option<(String, Bytes)>,
+        rsl_plando: Option<Bytes>,
     },
     Failure {
         seed_idx: SeedIdx,
@@ -43,6 +44,7 @@ pub enum ServerMessage {
         instructions: Result<u64, Bytes>,
         rsl_instructions: Result<u64, Bytes>,
         error_log: Bytes,
+        rsl_plando: Option<Bytes>,
     },
     Error {
         display: String,

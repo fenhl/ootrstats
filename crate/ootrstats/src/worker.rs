@@ -65,6 +65,7 @@ pub enum Message {
         rsl_instructions: Result<u64, Bytes>,
         spoiler_log: Either<PathBuf, Bytes>,
         patch: Option<Either<(Option<Option<String>>, PathBuf), (String, Bytes)>>,
+        rsl_plando: Option<Either<PathBuf, Bytes>>,
     },
     Failure {
         seed_idx: SeedIdx,
@@ -72,6 +73,7 @@ pub enum Message {
         instructions: Result<u64, Bytes>,
         rsl_instructions: Result<u64, Bytes>,
         error_log: Bytes,
+        rsl_plando: Option<Either<PathBuf, Bytes>>,
     },
 }
 
@@ -375,12 +377,14 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
         let wsl_distro = wsl_distro.clone();
         tokio::spawn(async move {
             tx.send(match run_future.await? {
-                RollOutput { instructions, rsl_instructions, log: Ok(spoiler_log_path), patch } => Message::Success {
+                RollOutput { instructions, rsl_instructions, log: Ok(spoiler_log_path), patch, rsl_plando } => Message::Success {
                     spoiler_log: Either::Left(spoiler_log_path),
                     patch: patch.map(|(is_wsl, patch)| Either::Left((is_wsl.then(|| wsl_distro.clone()), patch))),
+                    rsl_plando: rsl_plando.map(Either::Left),
                     seed_idx, instructions, rsl_instructions,
                 },
-                RollOutput { instructions, rsl_instructions, log: Err(error_log), patch: _ } => Message::Failure {
+                RollOutput { instructions, rsl_instructions, log: Err(error_log), patch: _, rsl_plando } => Message::Failure {
+                    rsl_plando: rsl_plando.map(Either::Left),
                     seed_idx, instructions, rsl_instructions, error_log,
                 },
             }).await?;

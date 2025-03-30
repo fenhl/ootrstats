@@ -743,7 +743,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                     worker.msg = None;
                                 }
                             }
-                            ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
+                            ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, rsl_plando } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
                                 let seed_dir = stats_dir.join(seed_idx.to_string());
                                 fs::create_dir_all(&seed_dir).await?;
                                 let stats_spoiler_log_path = seed_dir.join("spoiler.json");
@@ -813,6 +813,30 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                         }
                                     }
                                 }
+                                if let Some(rsl_plando) = rsl_plando {
+                                    match rsl_plando {
+                                        Either::Left(rsl_plando_path) => {
+                                            let stats_rsl_plando_path = seed_dir.join("random_settings.json");
+                                            let is_same_drive = {
+                                                #[cfg(windows)] {
+                                                    rsl_plando_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                                    == stats_rsl_plando_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                                }
+                                                #[cfg(not(windows))] { true }
+                                            };
+                                            if is_same_drive {
+                                                fs::rename(rsl_plando_path, stats_rsl_plando_path).await?;
+                                            } else {
+                                                fs::copy(&rsl_plando_path, stats_rsl_plando_path).await?;
+                                                fs::remove_file(rsl_plando_path).await?;
+                                            }
+                                        }
+                                        Either::Right(rsl_plando) => {
+                                            let stats_rsl_plando_path = seed_dir.join("random_settings.json");
+                                            fs::write(stats_rsl_plando_path, rsl_plando).await?;
+                                        }
+                                    }
+                                }
                                 fs::write_json(seed_dir.join("metadata.json"), Metadata {
                                     instructions: Some(instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
                                     rsl_instructions: Some(rsl_instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
@@ -861,7 +885,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                             } else {
                                 // seed was already rolled but this worker's instance of this seed didn't get cancelled in time so we just ignore it
                             },
-                            ootrstats::worker::Message::Failure { seed_idx, instructions, rsl_instructions, error_log } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
+                            ootrstats::worker::Message::Failure { seed_idx, instructions, rsl_instructions, error_log, rsl_plando } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
                                 let seed_dir = stats_dir.join(seed_idx.to_string());
                                 let mut new_workers = Vec::from(worker_names.clone());
                                 let pos = new_workers.iter().position(|worker| *worker == name).expect("got failure from a worker that wasn't rolling that seed");
@@ -877,6 +901,30 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                     fs::create_dir_all(&seed_dir).await?;
                                     let stats_error_log_path = seed_dir.join("error.log");
                                     fs::write(stats_error_log_path, &error_log).await?;
+                                    if let Some(rsl_plando) = rsl_plando {
+                                        match rsl_plando {
+                                            Either::Left(rsl_plando_path) => {
+                                                let stats_rsl_plando_path = seed_dir.join("random_settings.json");
+                                                let is_same_drive = {
+                                                    #[cfg(windows)] {
+                                                        rsl_plando_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                                        == stats_rsl_plando_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                                    }
+                                                    #[cfg(not(windows))] { true }
+                                                };
+                                                if is_same_drive {
+                                                    fs::rename(rsl_plando_path, stats_rsl_plando_path).await?;
+                                                } else {
+                                                    fs::copy(&rsl_plando_path, stats_rsl_plando_path).await?;
+                                                    fs::remove_file(rsl_plando_path).await?;
+                                                }
+                                            }
+                                            Either::Right(rsl_plando) => {
+                                                let stats_rsl_plando_path = seed_dir.join("random_settings.json");
+                                                fs::write(stats_rsl_plando_path, rsl_plando).await?;
+                                            }
+                                        }
+                                    }
                                     fs::write_json(seed_dir.join("metadata.json"), Metadata {
                                         instructions: Some(instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),
                                         rsl_instructions: Some(rsl_instructions.as_ref().copied().map_err(|stderr| String::from_utf8_lossy(stderr).into_owned())),

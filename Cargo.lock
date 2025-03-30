@@ -2915,7 +2915,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats"
-version = "16.0.0"
+version = "17.0.0"
 dependencies = [
  "async-proto",
  "bytes",
@@ -2942,7 +2942,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-deploy"
-version = "16.0.0"
+version = "17.0.0"
 dependencies = [
  "clap",
  "ootrstats-supervisor",
@@ -2953,7 +2953,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-macros"
-version = "16.0.0"
+version = "17.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2962,7 +2962,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-supervisor"
-version = "16.0.0"
+version = "17.0.0"
 dependencies = [
  "async-proto",
  "bytes",
@@ -3000,7 +3000,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-daemon"
-version = "16.0.0"
+version = "17.0.0"
 dependencies = [
  "async-proto",
  "constant_time_eq",
@@ -3022,7 +3022,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-windows-service"
-version = "16.0.0"
+version = "17.0.0"
 dependencies = [
  "mimalloc",
  "ootrstats-worker-daemon",

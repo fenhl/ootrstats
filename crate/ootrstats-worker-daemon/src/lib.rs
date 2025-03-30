@@ -76,7 +76,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                     match msg {
                         ootrstats::worker::Message::Init(msg) => lock!(sink = sink; websocket::ServerMessage::Init(msg).write_ws021(&mut *sink).await)?,
                         ootrstats::worker::Message::Ready(ready) => lock!(sink = sink; websocket::ServerMessage::Ready(ready).write_ws021(&mut *sink).await)?,
-                        ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch } => {
+                        ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, rsl_plando } => {
                             let spoiler_log = match spoiler_log {
                                 Either::Left(spoiler_log_path) => {
                                     let spoiler_log = fs::read(&spoiler_log_path).await?.into();
@@ -112,9 +112,29 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                                 Some(Either::Right((ext, patch))) => Some((ext, patch)),
                                 None => None,
                             };
-                            lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch }.write_ws021(&mut *sink).await)?;
+                            let rsl_plando = match rsl_plando {
+                                Some(Either::Left(rsl_plando_path)) => {
+                                    let rsl_plando = fs::read(&rsl_plando_path).await?.into();
+                                    fs::remove_file(rsl_plando_path).await?;
+                                    Some(rsl_plando)
+                                }
+                                Some(Either::Right(rsl_plando)) => Some(rsl_plando),
+                                None => None,
+                            };
+                            lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, rsl_plando }.write_ws021(&mut *sink).await)?;
                         }
-                        ootrstats::worker::Message::Failure { seed_idx, instructions, rsl_instructions, error_log } => lock!(sink = sink; websocket::ServerMessage::Failure { seed_idx, instructions, rsl_instructions, error_log }.write_ws021(&mut *sink).await)?,
+                        ootrstats::worker::Message::Failure { seed_idx, instructions, rsl_instructions, error_log, rsl_plando } => {
+                            let rsl_plando = match rsl_plando {
+                                Some(Either::Left(rsl_plando_path)) => {
+                                    let rsl_plando = fs::read(&rsl_plando_path).await?.into();
+                                    fs::remove_file(rsl_plando_path).await?;
+                                    Some(rsl_plando)
+                                }
+                                Some(Either::Right(rsl_plando)) => Some(rsl_plando),
+                                None => None,
+                            };
+                            lock!(sink = sink; websocket::ServerMessage::Failure { seed_idx, instructions, rsl_instructions, error_log, rsl_plando }.write_ws021(&mut *sink).await)?;
+                        }
                     }
                 }
                 break
@@ -122,7 +142,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
             Some(msg) = worker_rx.recv() => match msg {
                 ootrstats::worker::Message::Init(msg) => lock!(sink = sink; websocket::ServerMessage::Init(msg).write_ws021(&mut *sink).await)?,
                 ootrstats::worker::Message::Ready(ready) => lock!(sink = sink; websocket::ServerMessage::Ready(ready).write_ws021(&mut *sink).await)?,
-                ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch } => {
+                ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, rsl_plando } => {
                     let spoiler_log = match spoiler_log {
                         Either::Left(spoiler_log_path) => {
                             let spoiler_log = fs::read(&spoiler_log_path).await?.into();
@@ -158,9 +178,29 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                         Some(Either::Right((ext, patch))) => Some((ext, patch)),
                         None => None,
                     };
-                    lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch }.write_ws021(&mut *sink).await)?;
+                    let rsl_plando = match rsl_plando {
+                        Some(Either::Left(rsl_plando_path)) => {
+                            let rsl_plando = fs::read(&rsl_plando_path).await?.into();
+                            fs::remove_file(rsl_plando_path).await?;
+                            Some(rsl_plando)
+                        }
+                        Some(Either::Right(rsl_plando)) => Some(rsl_plando),
+                        None => None,
+                    };
+                    lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, rsl_plando }.write_ws021(&mut *sink).await)?;
                 }
-                ootrstats::worker::Message::Failure { seed_idx, instructions, rsl_instructions, error_log } => lock!(sink = sink; websocket::ServerMessage::Failure { seed_idx, instructions, rsl_instructions, error_log }.write_ws021(&mut *sink).await)?,
+                ootrstats::worker::Message::Failure { seed_idx, instructions, rsl_instructions, error_log, rsl_plando } => {
+                    let rsl_plando = match rsl_plando {
+                        Some(Either::Left(rsl_plando_path)) => {
+                            let rsl_plando = fs::read(&rsl_plando_path).await?.into();
+                            fs::remove_file(rsl_plando_path).await?;
+                            Some(rsl_plando)
+                        }
+                        Some(Either::Right(rsl_plando)) => Some(rsl_plando),
+                        None => None,
+                    };
+                    lock!(sink = sink; websocket::ServerMessage::Failure { seed_idx, instructions, rsl_instructions, error_log, rsl_plando }.write_ws021(&mut *sink).await)?;
+                }
             },
             res = next_msg => match res?? {
                 websocket::ClientMessage::Handshake { .. } => break,

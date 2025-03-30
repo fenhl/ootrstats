@@ -154,6 +154,7 @@ pub struct RollOutput {
     pub log: Result<PathBuf, Bytes>,
     /// `(is_wsl, path)`
     pub patch: Option<(bool, PathBuf)>,
+    pub rsl_plando: Option<PathBuf>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -466,6 +467,7 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
             Err(output.stderr.into())
         },
         rsl_instructions: Ok(0),
+        rsl_plando: None,
     })
 }
 
@@ -561,7 +563,7 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
             format!("enable_distribution_file") => json!(true),
             format!("distribution_file") => json!(format!("../data/{plando_filename}")),
         ], false, seed_idx, output_mode).await?;
-        fs::remove_file(repo_path.join("data").join(plando_filename)).await?;
+        roll_output.rsl_plando = Some(repo_path.join("data").join(plando_filename));
         roll_output.rsl_instructions = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
             #[cfg(any(target_os = "linux", target_os = "windows"))] {
                 if_chain! {
