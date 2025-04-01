@@ -103,8 +103,9 @@ impl Message<'_> {
                     Print(format_args!("{label}: preparing...")),
                 ).at_unknown()?,
                 Self::Status { label, available_parallelism, completed_readers, retry_failures, seed_states, allowed_workers, start, start_local, workers } => {
-                    let all_assigned = (0..seed_states.len())
-                        .all(|seed_idx| allowed_workers.get(&(seed_idx as SeedIdx)).is_some_and(|assigned_workers| assigned_workers.len() == NonZero::<usize>::MIN));
+                    let all_assigned = seed_states.iter()
+                        .enumerate()
+                        .all(|(seed_idx, seed_state)| matches!(seed_state, SeedState::Unchecked) || allowed_workers.get(&(seed_idx as SeedIdx)).is_some_and(|assigned_workers| assigned_workers.len() == NonZero::<usize>::MIN));
                     for worker in workers {
                         if let Some(ref e) = worker.error {
                             let kind = if e.is_network_error() { "network error" } else { "error" };
