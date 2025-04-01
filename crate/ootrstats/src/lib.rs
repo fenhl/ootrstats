@@ -8,7 +8,6 @@ use {
             Hasher,
         },
         io::prelude::*,
-        iter,
         path::{
             Path,
             PathBuf,
@@ -551,7 +550,7 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
     cmd.stdin(Stdio::null());
     cmd.current_dir(repo_path);
     if let Some(user_dirs) = UserDirs::new() {
-        cmd.env("PATH", env::join_paths(iter::once(user_dirs.home_dir().join(".cargo").join("bin")).chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect::<Vec<_>>()).into_iter().flatten()))?);
+        cmd.env("PATH", env::join_paths([user_dirs.home_dir().join(".cargo").join("bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")].into_iter().chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect::<Vec<_>>()).into_iter().flatten()))?);
     }
     let output = cmd.output().await.at_command(cmd_name.clone())?;
     let stderr = BufRead::lines(&*output.stderr).try_collect::<_, Vec<_>, _>().at_command(cmd_name.clone())?;

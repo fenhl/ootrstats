@@ -3,7 +3,6 @@ use {
         borrow::Cow,
         collections::HashMap,
         env,
-        iter,
         num::{
             NonZeroU8,
             NonZeroUsize,
@@ -235,7 +234,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
         } else {
             let mut cargo = Command::new("cargo");
             if let Some(user_dirs) = UserDirs::new() {
-                cargo.env("PATH", env::join_paths(iter::once(user_dirs.home_dir().join(".cargo").join("bin")).chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect::<Vec<_>>()).into_iter().flatten()))?);
+                cargo.env("PATH", env::join_paths([user_dirs.home_dir().join(".cargo").join("bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")].into_iter().chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect::<Vec<_>>()).into_iter().flatten()))?);
             }
             cargo
         });
@@ -269,7 +268,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
         }
         let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
         if let Some(user_dirs) = UserDirs::new() {
-            metadata_cmd.env("PATH", env::join_paths(iter::once(user_dirs.home_dir().join(".cargo").join("bin")).chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect::<Vec<_>>()).into_iter().flatten()))?);
+            metadata_cmd.env("PATH", env::join_paths([user_dirs.home_dir().join(".cargo").join("bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")].into_iter().chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect::<Vec<_>>()).into_iter().flatten()))?);
         }
         if let Some(package) = metadata_cmd
             .env("RUSTC_WRAPPER", "") // to avoid sccache errors
