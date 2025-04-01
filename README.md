@@ -124,6 +124,7 @@ The supervisor can be interrupted cleanly using <kbd>C</kbd> or <kbd>D</kbd>. If
 * `-w`, `--worker`: Use only the specified worker(s). May be specified multiple times. Cannot be combined with `--exclude-worker`.
 * `-x`, `--exclude-worker`: Don't use the specified worker(s). May be specified multiple times. Cannot be combined with `--worker`.
 * `--json-messages`: Produce status updates on stderr and command results on stdout in [JSON Lines](https://jsonlines.org/) format instead of the normal human-readable status display and command output.
+* `--baseline-rev`: Randomizer (or RSL script if combined with `--rsl`) git revision to compare against when benchmarking. Specifying this will ensure that each seed is rolled by the same worker as the corresponding baseline seed.
 
 ## Subcommands
 

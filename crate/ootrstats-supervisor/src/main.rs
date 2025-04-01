@@ -242,6 +242,9 @@ struct Args {
     /// Print status updates as machine-readable JSON.
     #[clap(long)]
     json_messages: bool,
+    /// Randomizer or RSL script git revision to compare against when benchmarking.
+    #[clap(long)]
+    baseline_rev: Option<gix::ObjectId>,
     #[clap(subcommand)]
     subcommand: Option<Subcommand>,
 }
@@ -471,7 +474,9 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
         gix::open(dir)?.head_id()?.detach()
     };
     let baseline_rando_rev = 'baseline_rando_rev: {
-        if is_bench && args.github_user == "fenhl" {
+        if let Some(rev) = args.baseline_rev {
+            Some(rev)
+        } else if is_bench && args.github_user == "fenhl" {
             if args.rev.is_some() {
                 None
             } else {
