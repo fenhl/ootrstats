@@ -284,6 +284,7 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
             }
             #[cfg(not(target_os = "windows"))] { Command::new(repo_path.join("target").join("release").join("ootr-cli")) }
         };
+        cmd.env("PATH", env::join_paths([PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")].into_iter().chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect::<Vec<_>>()).into_iter().flatten()))?);
         cmd.arg("--no-log");
         match settings {
             RandoSettings::Default => {}
