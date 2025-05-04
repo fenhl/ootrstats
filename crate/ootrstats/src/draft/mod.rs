@@ -50,6 +50,8 @@ enum StepKind {
 
 #[derive(Clone, Hash, Protocol)]
 enum Settings {
+    Fr5TriforceCountPerWorld,
+    Fr5TriforceGoalPerWorld,
     Bool(bool),
     Number(serde_json::Number),
     String(String),
@@ -84,6 +86,8 @@ pub enum ResolveError {
 impl Settings {
     fn resolve(&self, groups: &BTreeMap<String, BTreeMap<String, Setting>>, picks: &HashMap<&str, &str>) -> Result<Json, ResolveError> {
         Ok(match self {
+            Self::Fr5TriforceCountPerWorld => Json::Number(serde_json::Number::from_f64((picks["fr_5_triforce_count_per_world"].parse::<f64>().unwrap() * 1.5).round()).unwrap()),
+            Self::Fr5TriforceGoalPerWorld => Json::Number(serde_json::Number::from_f64(picks["fr_5_triforce_count_per_world"].parse::<f64>().unwrap()).unwrap()),
             Self::Bool(b) => Json::Bool(*b),
             Self::Number(n) => Json::Number(n.clone()),
             Self::String(s) => Json::String(s.clone()),
@@ -149,6 +153,8 @@ impl Spec {
         let mut rng = rng();
         let mut has_picked = HashSet::new();
         let mut picked_settings = HashMap::<&str, &str>::default();
+        let fr_5_triforce_count_per_world = rng.random_range(50..=100).to_string();
+        picked_settings.insert("fr_5_triforce_count_per_world", &fr_5_triforce_count_per_world);
         for (team, step) in steps {
             match step {
                 StepKind::Ban { skippable } => {

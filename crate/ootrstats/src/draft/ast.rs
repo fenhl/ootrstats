@@ -280,9 +280,19 @@ impl Parse for Settings {
             }
             Self::Match { setting, arms, fallback }
         } else if lookahead.peek(Ident) {
-            Self::Setting(input.parse::<Ident>()?.to_string())
+            let ident = input.parse::<Ident>()?.to_string();
+            if ident == "fr_5_triforce_count_per_world" {
+                Self::Fr5TriforceCountPerWorld
+            } else if ident == "fr_5_triforce_goal_per_world" {
+                Self::Fr5TriforceGoalPerWorld
+            } else {
+                Self::Setting(ident)
+            }
         } else if lookahead.peek(LitBool) {
             Self::Bool(input.parse::<LitBool>()?.value)
+        } else if lookahead.peek(LitFloat) {
+            let lit = input.parse::<LitFloat>()?;
+            Self::Number(serde_json::Number::from_f64(lit.base10_parse::<f64>()?).ok_or_else(|| input.error("invalid JSON number"))?)
         } else if lookahead.peek(LitInt) {
             let lit = input.parse::<LitInt>()?;
             Self::Number(lit.base10_parse::<u64>()?.into())
