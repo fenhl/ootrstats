@@ -64,6 +64,8 @@ pub enum Message {
         rsl_instructions: Result<u64, Bytes>,
         spoiler_log: Either<PathBuf, Bytes>,
         patch: Option<Either<(Option<Option<String>>, PathBuf), (String, Bytes)>>,
+        compressed_rom: Option<Either<(Option<Option<String>>, PathBuf), Bytes>>,
+        uncompressed_rom: Option<Either<PathBuf, Bytes>>,
         rsl_plando: Option<Either<PathBuf, Bytes>>,
     },
     Failure {
@@ -222,7 +224,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
     }
     let cargo_manifest_path = rando_repo_path.join("Cargo.toml");
     if fs::exists(&cargo_manifest_path).await? {
-        let cargo_command = || Ok::<_, Error>(if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
+        let cargo_command = || Ok::<_, Error>(if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench { .. }) {
             //TODO update Rust toolchain on WSL
             let mut cargo = Command::new(crate::WSL);
             if let Some(wsl_distro) = &wsl_distro {
@@ -238,9 +240,9 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             }
             cargo
         });
-        #[cfg(target_os = "windows")] let rust_library_filename = if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode { "rs.so" } else { "rs.dll" };
+        #[cfg(target_os = "windows")] let rust_library_filename = if let OutputMode::Bench { .. } = output_mode { "rs.so" } else { "rs.dll" };
         #[cfg(any(target_os = "linux", target_os = "macos"))] let rust_library_filename = "rs.so";
-        if matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) || !fs::exists(rando_repo_path.join(rust_library_filename)).await? {
+        if matches!(output_mode, OutputMode::Bench { .. }) || !fs::exists(rando_repo_path.join(rust_library_filename)).await? {
             //TODO update Rust
             tx.send(Message::Init(format!("building Rust code"))).await?;
             let mut cargo = cargo_command()?;
@@ -252,7 +254,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             cargo.check("cargo build").await?;
             tx.send(Message::Init(format!("copying Rust module"))).await?;
             #[cfg(target_os = "windows")] {
-                if let OutputMode::Bench | OutputMode::BenchUncompressed = output_mode {
+                if let OutputMode::Bench { .. } = output_mode {
                     let mut cp = Command::new(crate::WSL);
                     if let Some(wsl_distro) = &wsl_distro {
                         cp.arg("--distribution");
@@ -306,7 +308,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
     }
     if fs::exists(rando_repo_path.join("mypy.ini")).await? {
         tx.send(Message::Init(format!("compiling Python code with mypyc"))).await?;
-        let mut mypyc = if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench | OutputMode::BenchUncompressed) {
+        let mut mypyc = if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench { .. }) {
             let mut mypyc = Command::new(crate::WSL);
             if let Some(wsl_distro) = &wsl_distro {
                 mypyc.arg("--distribution");
@@ -376,13 +378,15 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
         let wsl_distro = wsl_distro.clone();
         tokio::spawn(async move {
             tx.send(match run_future.await? {
-                RollOutput { instructions, rsl_instructions, log: Ok(spoiler_log_path), patch, rsl_plando } => Message::Success {
+                RollOutput { instructions, rsl_instructions, log: Ok(spoiler_log_path), patch, compressed_rom, uncompressed_rom, rsl_plando } => Message::Success {
                     spoiler_log: Either::Left(spoiler_log_path),
                     patch: patch.map(|(is_wsl, patch)| Either::Left((is_wsl.then(|| wsl_distro.clone()), patch))),
+                    compressed_rom: compressed_rom.map(|(is_wsl, compressed_rom)| Either::Left((is_wsl.then(|| wsl_distro.clone()), compressed_rom))),
+                    uncompressed_rom: uncompressed_rom.map(Either::Left),
                     rsl_plando: rsl_plando.map(Either::Left),
                     seed_idx, instructions, rsl_instructions,
                 },
-                RollOutput { instructions, rsl_instructions, log: Err(error_log), patch: _, rsl_plando } => Message::Failure {
+                RollOutput { instructions, rsl_instructions, log: Err(error_log), patch: _, compressed_rom: _, uncompressed_rom: _, rsl_plando } => Message::Failure {
                     rsl_plando: rsl_plando.map(Either::Left),
                     seed_idx, instructions, rsl_instructions, error_log,
                 },

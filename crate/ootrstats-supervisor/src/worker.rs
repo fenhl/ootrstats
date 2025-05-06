@@ -130,9 +130,11 @@ impl Kind {
                         res = timeout(Duration::from_secs(60), stream.next().then(|opt| if let Some(res) = opt { Either::Left(future::ready(res)) } else { Either::Right(future::pending()) })) => match res? {
                             Ok(websocket::ServerMessage::Init(msg)) => tx.send((name.clone(), Message::Init(msg))).await?,
                             Ok(websocket::ServerMessage::Ready(ready)) => tx.send((name.clone(), Message::Ready(ready))).await?,
-                            Ok(websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, rsl_plando }) => tx.send((name.clone(), Message::Success {
+                            Ok(websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, compressed_rom, uncompressed_rom, rsl_plando }) => tx.send((name.clone(), Message::Success {
                                 spoiler_log: Either::Right(spoiler_log),
                                 patch: patch.map(Either::Right),
+                                compressed_rom: compressed_rom.map(Either::Right),
+                                uncompressed_rom: uncompressed_rom.map(Either::Right),
                                 rsl_plando: rsl_plando.map(Either::Right),
                                 seed_idx, instructions, rsl_instructions,
                             })).await?,
@@ -154,9 +156,11 @@ impl Kind {
                                 match res {
                                     Ok(websocket::ServerMessage::Init(msg)) => tx.send((name.clone(), Message::Init(msg))).await?,
                                     Ok(websocket::ServerMessage::Ready(ready)) => tx.send((name.clone(), Message::Ready(ready))).await?,
-                                    Ok(websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, rsl_plando }) => tx.send((name.clone(), Message::Success {
+                                    Ok(websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, compressed_rom, uncompressed_rom, rsl_plando }) => tx.send((name.clone(), Message::Success {
                                         spoiler_log: Either::Right(spoiler_log),
                                         patch: patch.map(Either::Right),
+                                        compressed_rom: compressed_rom.map(Either::Right),
+                                        uncompressed_rom: uncompressed_rom.map(Either::Right),
                                         rsl_plando: rsl_plando.map(Either::Right),
                                         seed_idx, instructions, rsl_instructions,
                                     })).await?,

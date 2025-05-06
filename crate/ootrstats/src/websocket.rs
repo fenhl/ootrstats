@@ -36,6 +36,8 @@ pub enum ServerMessage {
         rsl_instructions: Result<u64, Bytes>,
         spoiler_log: Bytes,
         patch: Option<(String, Bytes)>,
+        compressed_rom: Option<Bytes>,
+        uncompressed_rom: Option<Bytes>,
         rsl_plando: Option<Bytes>,
     },
     Failure {

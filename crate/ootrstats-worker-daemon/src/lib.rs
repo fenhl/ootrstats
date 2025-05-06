@@ -76,7 +76,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                     match msg {
                         ootrstats::worker::Message::Init(msg) => lock!(sink = sink; websocket::ServerMessage::Init(msg).write_ws021(&mut *sink).await)?,
                         ootrstats::worker::Message::Ready(ready) => lock!(sink = sink; websocket::ServerMessage::Ready(ready).write_ws021(&mut *sink).await)?,
-                        ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, rsl_plando } => {
+                        ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, compressed_rom, uncompressed_rom, rsl_plando } => {
                             let spoiler_log = match spoiler_log {
                                 Either::Left(spoiler_log_path) => {
                                     let spoiler_log = fs::read(&spoiler_log_path).await?.into();
@@ -112,6 +112,42 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                                 Some(Either::Right((ext, patch))) => Some((ext, patch)),
                                 None => None,
                             };
+                            let compressed_rom = match compressed_rom {
+                                Some(Either::Left((wsl, compressed_rom_path))) => Some(if let Some(wsl_distro) = wsl {
+                                    let mut cmd = Command::new(WSL);
+                                    if let Some(wsl_distro) = &wsl_distro {
+                                        cmd.arg("--distribution");
+                                        cmd.arg(wsl_distro);
+                                    }
+                                    cmd.arg("cat");
+                                    cmd.arg(&compressed_rom_path);
+                                    let compressed_rom = cmd.check("wsl cat").await?.stdout.into();
+                                    let mut cmd = Command::new(WSL);
+                                    if let Some(wsl_distro) = &wsl_distro {
+                                        cmd.arg("--distribution");
+                                        cmd.arg(wsl_distro);
+                                    }
+                                    cmd.arg("rm");
+                                    cmd.arg(compressed_rom_path);
+                                    cmd.check("wsl rm").await?;
+                                    compressed_rom
+                                } else {
+                                    let compressed_rom = fs::read(&compressed_rom_path).await?.into();
+                                    fs::remove_file(compressed_rom_path).await?;
+                                    compressed_rom
+                                }),
+                                Some(Either::Right(compressed_rom)) => Some(compressed_rom),
+                                None => None,
+                            };
+                            let uncompressed_rom = match uncompressed_rom {
+                                Some(Either::Left(uncompressed_rom_path)) => {
+                                    let uncompressed_rom = fs::read(&uncompressed_rom_path).await?.into();
+                                    fs::remove_file(uncompressed_rom_path).await?;
+                                    Some(uncompressed_rom)
+                                }
+                                Some(Either::Right(uncompressed_rom)) => Some(uncompressed_rom),
+                                None => None,
+                            };
                             let rsl_plando = match rsl_plando {
                                 Some(Either::Left(rsl_plando_path)) => {
                                     let rsl_plando = fs::read(&rsl_plando_path).await?.into();
@@ -121,7 +157,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                                 Some(Either::Right(rsl_plando)) => Some(rsl_plando),
                                 None => None,
                             };
-                            lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, rsl_plando }.write_ws021(&mut *sink).await)?;
+                            lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, compressed_rom, uncompressed_rom, rsl_plando }.write_ws021(&mut *sink).await)?;
                         }
                         ootrstats::worker::Message::Failure { seed_idx, instructions, rsl_instructions, error_log, rsl_plando } => {
                             let rsl_plando = match rsl_plando {
@@ -142,7 +178,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
             Some(msg) = worker_rx.recv() => match msg {
                 ootrstats::worker::Message::Init(msg) => lock!(sink = sink; websocket::ServerMessage::Init(msg).write_ws021(&mut *sink).await)?,
                 ootrstats::worker::Message::Ready(ready) => lock!(sink = sink; websocket::ServerMessage::Ready(ready).write_ws021(&mut *sink).await)?,
-                ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, rsl_plando } => {
+                ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, compressed_rom, uncompressed_rom, rsl_plando } => {
                     let spoiler_log = match spoiler_log {
                         Either::Left(spoiler_log_path) => {
                             let spoiler_log = fs::read(&spoiler_log_path).await?.into();
@@ -178,6 +214,42 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                         Some(Either::Right((ext, patch))) => Some((ext, patch)),
                         None => None,
                     };
+                    let compressed_rom = match compressed_rom {
+                        Some(Either::Left((wsl, compressed_rom_path))) => Some(if let Some(wsl_distro) = wsl {
+                            let mut cmd = Command::new(WSL);
+                            if let Some(wsl_distro) = &wsl_distro {
+                                cmd.arg("--distribution");
+                                cmd.arg(wsl_distro);
+                            }
+                            cmd.arg("cat");
+                            cmd.arg(&compressed_rom_path);
+                            let compressed_rom = cmd.check("wsl cat").await?.stdout.into();
+                            let mut cmd = Command::new(WSL);
+                            if let Some(wsl_distro) = &wsl_distro {
+                                cmd.arg("--distribution");
+                                cmd.arg(wsl_distro);
+                            }
+                            cmd.arg("rm");
+                            cmd.arg(compressed_rom_path);
+                            cmd.check("wsl rm").await?;
+                            compressed_rom
+                        } else {
+                            let compressed_rom = fs::read(&compressed_rom_path).await?.into();
+                            fs::remove_file(compressed_rom_path).await?;
+                            compressed_rom
+                        }),
+                        Some(Either::Right(compressed_rom)) => Some(compressed_rom),
+                        None => None,
+                    };
+                    let uncompressed_rom = match uncompressed_rom {
+                        Some(Either::Left(uncompressed_rom_path)) => {
+                            let uncompressed_rom = fs::read(&uncompressed_rom_path).await?.into();
+                            fs::remove_file(uncompressed_rom_path).await?;
+                            Some(uncompressed_rom)
+                        }
+                        Some(Either::Right(uncompressed_rom)) => Some(uncompressed_rom),
+                        None => None,
+                    };
                     let rsl_plando = match rsl_plando {
                         Some(Either::Left(rsl_plando_path)) => {
                             let rsl_plando = fs::read(&rsl_plando_path).await?.into();
@@ -187,7 +259,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                         Some(Either::Right(rsl_plando)) => Some(rsl_plando),
                         None => None,
                     };
-                    lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, rsl_plando }.write_ws021(&mut *sink).await)?;
+                    lock!(sink = sink; websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, compressed_rom, uncompressed_rom, rsl_plando }.write_ws021(&mut *sink).await)?;
                 }
                 ootrstats::worker::Message::Failure { seed_idx, instructions, rsl_instructions, error_log, rsl_plando } => {
                     let rsl_plando = match rsl_plando {

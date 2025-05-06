@@ -38,7 +38,9 @@ And the following optional entries:
 
 ## Workers
 
-A worker is a computer that rolls seeds. Each worker configuration is a JSON object with the following required entries:
+A worker is a computer that rolls seeds. Note that `ootrstats` assumes that all workers are owned by the same user. If you use `ootrstats` in a distributed manner, please be careful not to accidentally share copyrighted content with others.
+
+Each worker configuration is a JSON object with the following required entries:
 
 * `name`: A string which will be displayed on the progress display on the command line, as well as in error messages.
 * `kind`: One of the section headers listed below.
@@ -114,6 +116,8 @@ The supervisor can be interrupted cleanly using <kbd>C</kbd> or <kbd>D</kbd>. If
 * `--world-counts`: Each seed will override the value of the `world_count` setting to be equal to its seed ID (plus 1 because seed IDs start at 0). Restricts the `--num-seeds` option to a maximum of 255. Cannot be combined with `--rsl`.
 * `--seed`: Generate the given fixed seed each time. Useful for confirming suspected unseeded randomization.
 * `--patch`: Generate `.zpf`/`.zpfz` patch files and include them in the [`statsDir`](#configuration). Cannot be combined with `--rsl` or with the `bench` subcommand.
+* `--rom`: Generate compressed `.z64` rom files and include them in the [`statsDir`](#configuration). Cannot be combined with `--rsl` or with the `bench` subcommand.
+* `--uncompressed-rom`: Generate uncompressed `.n64` rom files and include them in the [`statsDir`](#configuration). Cannot be combined with `--rsl` or with the `bench` subcommand.
 
 ### `ootrstats` options
 
