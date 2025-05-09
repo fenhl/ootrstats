@@ -56,7 +56,6 @@ pub(crate) enum WorkerKind {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)] Wheel(#[from] wheel::Error),
-    #[cfg(unix)] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
     #[cfg(unix)]
     #[error("config file not found")]
     MissingConfigFile,
@@ -68,7 +67,7 @@ pub enum Error {
 impl Config {
     pub async fn load() -> Result<Self, Error> {
         #[cfg(unix)] {
-            if let Some(config_path) = BaseDirectories::new()?.find_config_file("ootrstats.json") {
+            if let Some(config_path) = BaseDirectories::new().find_config_file("ootrstats.json") {
                 Ok(fs::read_json(config_path).await?)
             } else {
                 Err(Error::MissingConfigFile)

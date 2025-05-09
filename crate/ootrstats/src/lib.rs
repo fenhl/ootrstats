@@ -170,7 +170,6 @@ pub enum RollError {
     #[error(transparent)] Json(#[from] serde_json::Error),
     #[error(transparent)] ParseInt(#[from] std::num::ParseIntError),
     #[error(transparent)] Wheel(#[from] wheel::Error),
-    #[cfg(target_os = "macos")] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
     #[cfg(windows)]
     #[error("user folder not found")]
     MissingHomeDir,

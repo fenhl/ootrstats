@@ -24,7 +24,6 @@ pub(crate) struct Config {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)] Wheel(#[from] wheel::Error),
-    #[cfg(unix)] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
     #[cfg(unix)]
     #[error("config file not found")]
     MissingConfigFile,
@@ -36,7 +35,7 @@ pub enum Error {
 impl Config {
     pub(crate) async fn load() -> Result<Self, Error> {
         #[cfg(unix)] {
-            if let Some(config_path) = BaseDirectories::new()?.find_config_file("ootrstats-worker-daemon.json") {
+            if let Some(config_path) = BaseDirectories::new().find_config_file("ootrstats-worker-daemon.json") {
                 Ok(fs::read_json(config_path).await?)
             } else {
                 Err(Error::MissingConfigFile)

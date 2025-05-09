@@ -287,7 +287,6 @@ enum Error {
     #[error(transparent)] ReaderSend(#[from] mpsc::error::SendError<ReaderMessage>),
     #[error(transparent)] Utf8(#[from] std::str::Utf8Error),
     #[error(transparent)] Wheel(#[from] wheel::Error),
-    #[cfg(unix)] #[error(transparent)] Xdg(#[from] xdg::BaseDirectoriesError),
     #[error("cancelled by user")]
     Cancelled,
     #[error("error parsing draft spec: {source}")]
@@ -337,7 +336,6 @@ impl IsNetworkError for Error {
             | Self::TooManyWorlds
             | Self::WorkerNotFound
                 => false,
-            #[cfg(unix)] Self::Xdg(_) => false,
             #[cfg(windows)] Self::MissingHomeDir => false,
             Self::Wheel(e) => e.is_network_error(),
             Self::Worker { worker_errors, .. } => worker_errors.iter().all(|(_, e)| e.is_network_error()),
@@ -546,7 +544,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
     } else {
         #[cfg(windows)] let project_dirs = ProjectDirs::from("net", "Fenhl", "ootrstats").ok_or(Error::MissingHomeDir)?;
         #[cfg(windows)] { project_dirs.data_dir().to_owned() }
-        #[cfg(unix)] { BaseDirectories::new()?.place_data_file("ootrstats").at_unknown()? }
+        #[cfg(unix)] { BaseDirectories::new().place_data_file("ootrstats").at_unknown()? }
     };
     let stats_dir = stats_root.join(setup.stats_dir(rando_rev));
     let baseline_stats_dir = baseline_rando_rev.map(|rando_rev| stats_root.join(setup.stats_dir(rando_rev)));

@@ -14,7 +14,7 @@ clap = { version = "4.5.1", features = ["derive"] }
 crossterm = { version = "0.29", features = ["event-stream"] }
 either = "1.10.0"
 futures = "0.3.30"
-gix = "0.71"
+gix = "0.72"
 if_chain = "1.0.2"
 itertools = "0.14"
 jaq-core = "1.4.0"
@@ -42,4 +42,4 @@ wheel = { git = "https://github.com/fenhl/wheel", branch = "main", features = ["
 directories = "6"
 
 [target."cfg(unix)".dependencies]
-xdg = "2.5.2"
+xdg = "3"
