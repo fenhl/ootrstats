@@ -205,7 +205,7 @@ async fn python() -> Result<PathBuf, RollError> {
         #[cfg(windows)] { UserDirs::new().ok_or(RollError::MissingHomeDir)?.home_dir().join("scoop").join("apps").join("python").join("current").join("python.exe") }
         #[cfg(target_os = "linux")] {
             if fs::exists("/etc/NIXOS").await? {
-                PathBuf::from("/run/current-system/sw/bin/python")
+                PathBuf::from("python")
             } else {
                 let python = PathBuf::from("/usr/bin/python3");
                 if python.exists() {
