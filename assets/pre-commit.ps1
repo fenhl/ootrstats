@@ -18,3 +18,9 @@ if (-not $?)
 {
     throw 'Native Failure'
 }
+
+wsl -d nixos-m2 nix build --no-link
+if (-not $?)
+{
+    throw 'Native Failure'
+}
