@@ -471,23 +471,26 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
         } else {
             None
         },
-        compressed_rom: if output.status.success() {
-            if let Some(compressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created compressed ROM at: ")) {
+        compressed_rom: if_chain! {
+            if output.status.success();
+            if let Some(compressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created compressed ROM at: "));
+            if fs::exists(compressed_rom_path).await?;
+            then {
                 Some((cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench { .. }), PathBuf::from(compressed_rom_path)))
             } else {
                 None
             }
-        } else {
-            None
         },
-        uncompressed_rom: if output.status.success() {
-            if let Some(uncompressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Saving Uncompressed ROM: ")) {
-                Some(repo_path.join("Output").join(uncompressed_rom_path))
+        uncompressed_rom: if_chain! {
+            if output.status.success();
+            if let Some(uncompressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Saving Uncompressed ROM: "));
+            let uncompressed_rom_path = repo_path.join("Output").join(uncompressed_rom_path);
+            if fs::exists(&uncompressed_rom_path).await?;
+            then {
+                Some(uncompressed_rom_path)
             } else {
                 None
             }
-        } else {
-            None
         },
         log: if output.status.success() {
             Ok(repo_path.join("Output").join(stderr.iter().rev().find_map(|line| line.strip_prefix("Created spoiler log at: ")).ok_or_else(|| RollError::SpoilerLogPath(output))?))
