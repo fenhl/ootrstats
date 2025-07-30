@@ -116,7 +116,7 @@ impl Kind {
             }
             Self::WebSocket { tls, hostname, password, base_rom_path, wsl_distro, priority_users } => {
                 tx.send((name.clone(), Message::Init(format!("connecting WebSocket")))).await?;
-                let (sink, stream) = async_proto::websocket026(format!("{}://{hostname}/v{}", if tls { "wss" } else { "ws" }, Version::parse(env!("CARGO_PKG_VERSION"))?.major)).await?;
+                let (sink, stream) = async_proto::websocket027(format!("{}://{hostname}/v{}", if tls { "wss" } else { "ws" }, Version::parse(env!("CARGO_PKG_VERSION"))?.major)).await?;
                 let mut sink = pin!(sink);
                 let mut stream = Box::pin(stream.fuse()) as Pin<Box<dyn FusedStream<Item = _> + Send>>;
                 tx.send((name.clone(), Message::Init(format!("handshaking")))).await?;
@@ -144,7 +144,7 @@ impl Kind {
                             })).await?,
                             Ok(websocket::ServerMessage::Error { display, debug }) => return Err(Error::Remote { debug, display }),
                             Ok(websocket::ServerMessage::Ping) => {}
-                            Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite026(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => stream = Box::pin(stream::empty()),
+                            Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite027(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => stream = Box::pin(stream::empty()),
                             Err(e) => return Err(e.into()),
                         },
                         res = rx.recv() => if let Some(msg) = res {
@@ -170,7 +170,7 @@ impl Kind {
                                     })).await?,
                                     Ok(websocket::ServerMessage::Error { display, debug }) => return Err(Error::Remote { debug, display }),
                                     Ok(websocket::ServerMessage::Ping) => {}
-                                    Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite026(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => break,
+                                    Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite027(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => break,
                                     Err(e) => return Err(e.into()),
                                 }
                             }

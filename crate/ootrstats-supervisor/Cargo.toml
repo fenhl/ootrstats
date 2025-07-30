@@ -7,7 +7,7 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-async-proto = { version = "0.25", features = ["tokio-tungstenite026"] }
+async-proto = { version = "0.26", features = ["tokio-tungstenite027"] }
 bytes = { version = "1.5.0", features = ["serde"] }
 chrono = { version = "0.4.34", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.5.1", features = ["derive"] }
@@ -35,8 +35,8 @@ serde_with = "3.9.0"
 syn = { version = "2.0.66", default-features = false, features = ["parsing"] }
 thiserror = "2"
 tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }
-tokio-tungstenite = { version = "0.26", default-features = false, features = ["rustls-tls-webpki-roots"] }
-wheel = { git = "https://github.com/fenhl/wheel", branch = "main", features = ["async-proto", "serde", "serde_json", "tungstenite026"] }
+tokio-tungstenite = { version = "0.27", default-features = false, features = ["rustls-tls-webpki-roots"] }
+wheel = { git = "https://github.com/fenhl/wheel", branch = "main", features = ["async-proto", "serde", "serde_json", "tungstenite027"] }
 
 [target."cfg(windows)".dependencies]
 directories = "6"
