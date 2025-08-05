@@ -18,6 +18,7 @@ pub enum ClientMessage {
         setup: RandoSetup,
         output_mode: OutputMode,
         priority_users: Vec<String>,
+        race: bool,
         wsl_distro: Option<String>,
         hide_reboot: bool,
         hide_sleep: bool,

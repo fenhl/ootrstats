@@ -8,6 +8,7 @@ use {
             NonZeroUsize,
         },
         path::PathBuf,
+        sync::Arc,
         time::Duration,
     },
     async_proto::Protocol,
@@ -26,6 +27,7 @@ use {
     },
     if_chain::if_chain,
     lazy_regex::regex_captures,
+    parking_lot::RwLock,
     rand::{
         prelude::*,
         rng,
@@ -53,6 +55,7 @@ use {
     },
 };
 #[cfg(unix)] use std::io;
+#[cfg(windows)] use tokio::time::sleep;
 
 pub enum Message {
     Init(String),
@@ -128,8 +131,8 @@ async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[S
         let get_process_stdout = String::from_utf8_lossy(&get_process.stdout);
         //TODO this checks the entire Get-Process output for the given username. Usernames appearing in the table header can cause false positives. Consider requesting XML output from pwsh and parsing that
         if let Some(priority_user) = priority_users.iter().find(|&priority_user| get_process_stdout.contains(priority_user)) {
-            let jitter = rng().random_range(0..120);
-            let new_wait = Duration::from_secs(14 * 60 + jitter);
+            let jitter = rng().random_range(0..10);
+            let new_wait = Duration::from_secs(55 + jitter);
             if new_wait > wait {
                 wait = new_wait;
                 message = format!("waiting for {priority_user} to sign out");
@@ -139,7 +142,7 @@ async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[S
     Ok(if wait > Duration::default() { Some((wait, message)) } else { None })
 }
 
-pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, git_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String]) -> Result<(), Error> {
+pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, git_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String], #[cfg_attr(not(windows), allow(unused))] race: bool) -> Result<(), Error> {
     let mut rsl_version = None;
     let mut use_rust_cli = false;
     let mut supports_unsalted_seeds = false;
@@ -352,7 +355,28 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
         cores
     }).unwrap_or(1)).unwrap_or(NonZeroU8::MIN).get())).await?;
     let mut rando_tasks = FuturesUnordered::default();
-    let mut abort_handles = HashMap::<_, Vec<_>>::default();
+    let abort_handles = Arc::<RwLock<HashMap<_, Vec<tokio::task::AbortHandle>>>>::default();
+    #[cfg(windows)] let priority_user_login_checker = if race && !priority_users.is_empty() {
+        let abort_handles = abort_handles.clone();
+        let priority_users = priority_users.to_owned();
+        tokio::spawn(async move {
+            loop {
+                let jitter = rng().random_range(0..10);
+                sleep(Duration::from_secs(55 + jitter)).await;
+                // check if any priority users are signed in
+                let get_process = Command::new("pwsh").arg("-c").arg("Get-Process -IncludeUserName | Select-Object -Unique -Property UserName").check("pwsh Get-Process").await?;
+                let get_process_stdout = String::from_utf8_lossy(&get_process.stdout);
+                //TODO this checks the entire Get-Process output for the given username. Usernames appearing in the table header can cause false positives. Consider requesting XML output from pwsh and parsing that
+                if priority_users.iter().any(|priority_user| get_process_stdout.contains(priority_user)) {
+                    for abort_handle in abort_handles.read().values().flatten() {
+                        abort_handle.abort();
+                    }
+                }
+            }
+        })
+    } else {
+        tokio::spawn(future::ok::<_, Error>(()))
+    };
     let mut recheck_ready_at = None;
     let mut waiting_cores = 0;
     let handle_seed = |seed_idx| {
@@ -398,10 +422,10 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
         match msg {
             SupervisorMessage::Roll(seed_idx) => {
                 let rando_task = handle_seed(seed_idx);
-                abort_handles.entry(seed_idx).or_default().push(rando_task.abort_handle());
+                abort_handles.write().entry(seed_idx).or_default().push(rando_task.abort_handle());
                 rando_tasks.push(rando_task);
             }
-            SupervisorMessage::Cancel(seed_idx) => for abort_handle in abort_handles.get(&seed_idx).into_iter().flatten() {
+            SupervisorMessage::Cancel(seed_idx) => for abort_handle in abort_handles.read().get(&seed_idx).into_iter().flatten() {
                 abort_handle.abort();
             },
         }
@@ -448,10 +472,10 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 match msg {
                     SupervisorMessage::Roll(seed_idx) => {
                         let rando_task = handle_seed(seed_idx);
-                        abort_handles.entry(seed_idx).or_default().push(rando_task.abort_handle());
+                        abort_handles.write().entry(seed_idx).or_default().push(rando_task.abort_handle());
                         rando_tasks.push(rando_task);
                     }
-                    SupervisorMessage::Cancel(seed_idx) => for abort_handle in abort_handles.get(&seed_idx).into_iter().flatten() {
+                    SupervisorMessage::Cancel(seed_idx) => for abort_handle in abort_handles.read().get(&seed_idx).into_iter().flatten() {
                         abort_handle.abort();
                     },
                 }
@@ -461,6 +485,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             else => break,
         }
     }
+    #[cfg(windows)] priority_user_login_checker.abort();
     //TODO config option to automatically delete repo path (always/if it didn't already exist)
     Ok(())
 }

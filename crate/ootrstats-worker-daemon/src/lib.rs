@@ -58,7 +58,7 @@ enum Error {
 }
 
 async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::stream::DuplexStream, rocket_ws::Message>>>, stream: &mut SplitStream<rocket_ws::stream::DuplexStream>, #[cfg_attr(not(windows), allow(unused))] unhide_reboot: &mut bool, #[cfg_attr(not(windows), allow(unused))] unhide_sleep: &mut bool) -> Result<(), Error> {
-    let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_distro, rando_rev, setup, output_mode, priority_users, hide_reboot, hide_sleep } = websocket::ClientMessage::read_ws021(stream).await? else { return Ok(()) };
+    let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_distro, rando_rev, setup, output_mode, priority_users, race, hide_reboot, hide_sleep } = websocket::ClientMessage::read_ws021(stream).await? else { return Ok(()) };
     if !constant_time_eq(received_password.as_bytes(), correct_password.as_bytes()) { return Ok(()) }
     #[cfg(windows)] {
         if hide_reboot {
@@ -77,7 +77,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
     let (worker_tx, mut worker_rx) = mpsc::channel(256);
     let (mut supervisor_tx, supervisor_rx) = mpsc::channel(256);
     let mut stream = Some(stream);
-    let mut work = pin!(ootrstats::worker::work(worker_tx, supervisor_rx, PathBuf::from(base_rom_path.clone()), 0, wsl_distro, rando_rev, setup, output_mode, &priority_users));
+    let mut work = pin!(ootrstats::worker::work(worker_tx, supervisor_rx, PathBuf::from(base_rom_path.clone()), 0, wsl_distro, rando_rev, setup, output_mode, &priority_users, race));
     loop {
         let next_msg = if let Some(ref mut stream) = stream {
             Either::Left(timeout(Duration::from_secs(60), websocket::ClientMessage::read_ws021(*stream)))

@@ -1077,7 +1077,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                         uncompressed_rom: args.uncompressed_rom,
                                         compressed_rom: args.rom,
                                     }
-                                }).map(move |res| (name.clone(), res)));
+                                }, args.race).map(move |res| (name.clone(), res)));
                             }
                         }
                     }
