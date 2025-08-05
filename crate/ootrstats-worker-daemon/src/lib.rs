@@ -87,6 +87,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
         select! {
             res = &mut work => {
                 let () = res?;
+                println!("work task finished, processing remaining messages...");
                 while let Some(msg) = worker_rx.recv().await {
                     match msg {
                         ootrstats::worker::Message::Init(msg) => lock!(sink = sink; websocket::ServerMessage::Init(msg).write_ws021(&mut *sink).await)?,
@@ -188,6 +189,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
                         }
                     }
                 }
+                println!("done processing remaining messages");
                 break
             }
             Some(msg) = worker_rx.recv() => match msg {
@@ -305,6 +307,7 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
             },
         }
     }
+    println!("end of WebSocket session");
     Ok(())
 }
 
