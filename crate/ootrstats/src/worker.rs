@@ -13,6 +13,7 @@ use {
     },
     async_proto::Protocol,
     bytes::Bytes,
+    bytesize::ByteSize,
     directories::UserDirs,
     either::Either,
     futures::{
@@ -26,6 +27,7 @@ use {
         },
     },
     if_chain::if_chain,
+    itertools::Itertools as _,
     lazy_regex::regex_captures,
     parking_lot::RwLock,
     rand::{
@@ -33,6 +35,10 @@ use {
         rng,
     },
     semver::Version,
+    systemstat::{
+        Platform as _,
+        System,
+    },
     tokio::{
         select,
         process::Command,
@@ -44,7 +50,10 @@ use {
     },
     wheel::{
         fs,
-        traits::AsyncCommandOutputExt as _,
+        traits::{
+            AsyncCommandOutputExt as _,
+            IoResultExt as _,
+        },
     },
     crate::{
         OutputMode,
@@ -110,9 +119,28 @@ pub enum Error {
 ///
 /// * The duration after which this function may be called again to recheck.
 /// * The reason for the wait as a human-readable string.
-async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[String]) -> Result<Option<(Duration, String)>, Error> {
+async fn wait_ready(min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_points: &[PathBuf], #[cfg_attr(not(windows), allow(unused))] priority_users: &[String]) -> Result<Option<(Duration, String)>, Error> {
     let mut wait = Duration::default();
     let mut message = String::default();
+    if min_disk > ByteSize::default() || min_disk_percent > 0.0 {
+        let sys = System::new();
+        if let Some((vol, fs)) = min_disk_mount_points.into_iter()
+            .map(|vol| Ok::<_, Error>((vol, sys.mount_at(vol).at(vol)?)))
+            .process_results(|mut iter| iter.find(|(_, fs)| ByteSize::b(fs.avail.as_u64()) < min_disk || (fs.avail.as_u64() as f64 / fs.total.as_u64() as f64) < min_disk_percent / 100.0))?
+        {
+            let jitter = rng().random_range(0..10);
+            let new_wait = Duration::from_secs(55 + jitter);
+            if new_wait > wait {
+                wait = new_wait;
+                message = format!(
+                    "waiting for disk space on {} to be freed ({} available, {} required)",
+                    vol.display(),
+                    fs.avail,
+                    min_disk.max(ByteSize::b((fs.total.as_u64() as f64 * (min_disk_percent / 100.0)).ceil() as u64)),
+                );
+            }
+        }
+    }
     #[cfg(unix)] match fs::read_to_string("/sys/class/thermal/thermal_zone0/temp").await {
         Ok(temp) => if temp.trim().parse::<i32>()? >= 80000 {
             let jitter = rng().random_range(0..10);
@@ -142,7 +170,7 @@ async fn wait_ready(#[cfg_attr(not(windows), allow(unused))] priority_users: &[S
     Ok(if wait > Duration::default() { Some((wait, message)) } else { None })
 }
 
-pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, git_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, priority_users: &[String], #[cfg_attr(not(windows), allow(unused))] race: bool) -> Result<(), Error> {
+pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, git_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_points: &[PathBuf], priority_users: &[String], #[cfg_attr(not(windows), allow(unused))] race: bool) -> Result<(), Error> {
     let mut rsl_version = None;
     let mut use_rust_cli = false;
     let mut supports_unsalted_seeds = false;
@@ -239,7 +267,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
         } else {
             let mut cargo = Command::new("cargo");
             if let Some(user_dirs) = UserDirs::new() {
-                cargo.env("PATH", env::join_paths([user_dirs.home_dir().join(".cargo").join("bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")].into_iter().chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect::<Vec<_>>()).into_iter().flatten()))?);
+                cargo.env("PATH", env::join_paths([user_dirs.home_dir().join(".cargo").join("bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")].into_iter().chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect_vec()).into_iter().flatten()))?);
             }
             cargo
         });
@@ -273,7 +301,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
         }
         let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
         if let Some(user_dirs) = UserDirs::new() {
-            metadata_cmd.env("PATH", env::join_paths([user_dirs.home_dir().join(".cargo").join("bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")].into_iter().chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect::<Vec<_>>()).into_iter().flatten()))?);
+            metadata_cmd.env("PATH", env::join_paths([user_dirs.home_dir().join(".cargo").join("bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")].into_iter().chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect_vec()).into_iter().flatten()))?);
         }
         if let Some(package) = metadata_cmd
             .env("RUSTC_WRAPPER", "") // to avoid sccache errors
@@ -332,7 +360,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
         }
     };
     let mut msg_buf = Vec::default();
-    'wait_ready: while let Some((duration, reason)) = wait_ready(priority_users).await? {
+    'wait_ready: while let Some((duration, reason)) = wait_ready(min_disk, min_disk_percent, min_disk_mount_points, priority_users).await? {
         tx.send(Message::Init(reason)).await?;
         let recheck_ready_at = Instant::now() + duration;
         loop {
@@ -442,7 +470,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             }
         };
         select! {
-            Some(()) = recheck_ready => if let Some((duration, reason)) = wait_ready(priority_users).await? {
+            Some(()) = recheck_ready => if let Some((duration, reason)) = wait_ready(min_disk, min_disk_percent, min_disk_mount_points, priority_users).await? {
                 tx.send(Message::Init(reason)).await?;
                 recheck_ready_at = Some(Instant::now() + duration);
             } else {
@@ -456,7 +484,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                     Err(e) if e.is_cancelled() => {} // a seed task being cancelled is expected with --race
                     Err(e) => return Err(e.into()),
                 }
-                if let Some((duration, reason)) = wait_ready(priority_users).await? {
+                if let Some((duration, reason)) = wait_ready(min_disk, min_disk_percent, min_disk_mount_points, priority_users).await? {
                     tx.send(Message::Init(reason)).await?;
                     if let Some(ref mut recheck_ready_at) = recheck_ready_at {
                         *recheck_ready_at = (*recheck_ready_at).min(Instant::now() + duration);

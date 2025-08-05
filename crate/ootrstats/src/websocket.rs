@@ -1,6 +1,7 @@
 use {
     async_proto::Protocol,
     bytes::Bytes,
+    bytesize::ByteSize,
     crate::{
         OutputMode,
         RandoSetup,
@@ -17,6 +18,9 @@ pub enum ClientMessage {
         rando_rev: gix_hash::ObjectId,
         setup: RandoSetup,
         output_mode: OutputMode,
+        min_disk: ByteSize,
+        min_disk_percent: f64,
+        min_disk_mount_points: Vec<String>,
         priority_users: Vec<String>,
         race: bool,
         wsl_distro: Option<String>,

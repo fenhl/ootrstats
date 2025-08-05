@@ -62,9 +62,9 @@ dependencies = [
 
 [[package]]
 name = "anstream"
-version = "0.6.19"
+version = "0.6.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "301af1932e46185686725e0fad2f8f2aa7da69dd70bf6ecc44d6b703844a3933"
+checksum = "3ae563653d1938f79b1ab1b5e668c87c76a9930414574a6583a7b7e11a8e6192"
 dependencies = [
  "anstyle",
  "anstyle-parse",
@@ -92,22 +92,22 @@ dependencies = [
 
 [[package]]
 name = "anstyle-query"
-version = "1.1.3"
+version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c8bdeb6047d8983be085bab0ba1472e6dc604e7041dbf6fcd5e71523014fae9"
+checksum = "9e231f6134f61b71076a3eab506c379d4f36122f2af15a9ff04415ea4c3339e2"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
 name = "anstyle-wincon"
-version = "3.0.9"
+version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "403f75924867bb1033c59fbf0797484329750cfbe3c4325cd33127941fabc882"
+checksum = "3e0633414522a32ffaac8ac6cc8f748e090c5717661fddeea04219e2344f5f2a"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -156,13 +156,14 @@ dependencies = [
 
 [[package]]
 name = "async-proto"
-version = "0.26.1"
+version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36ba995958aeb8e5232f0317bd908a100d2e7ec677dee807b67435f900bd6df5"
+checksum = "cfb26225a86007e7398d8a36e9c4647c2c32dd1d2968ede48658ec4fe118a4ae"
 dependencies = [
- "async-proto-derive 0.26.1",
+ "async-proto-derive 0.26.2",
  "byteorder",
  "bytes",
+ "bytesize 2.0.1",
  "fallible_collections",
  "futures",
  "gix-hash 0.19.0",
@@ -187,9 +188,9 @@ dependencies = [
 
 [[package]]
 name = "async-proto-derive"
-version = "0.26.1"
+version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f51ab345f9e7666b2b370509c677cc0b7e9653df0525c780404789aa451e379"
+checksum = "0cb7faa3063055e9ea8362e56d147fb9ba7adb474c52539e277190b3fe8d1927"
 dependencies = [
  "itertools",
  "proc-macro2",
@@ -401,6 +402,9 @@ name = "bytesize"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3c8f83209414aacf0eeae3cf730b18d6981697fba62f200fcfb92b9f082acba"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "camino"
@@ -4010,10 +4014,11 @@ dependencies = [
 
 [[package]]
 name = "ootrstats"
-version = "20.0.0"
+version = "21.0.0"
 dependencies = [
- "async-proto 0.26.1",
+ "async-proto 0.26.2",
  "bytes",
+ "bytesize 2.0.1",
  "cargo_metadata 0.21.0",
  "collect-mac",
  "decompress",
@@ -4030,6 +4035,7 @@ dependencies = [
  "semver",
  "serde_json_path_to_error",
  "syn 2.0.104",
+ "systemstat",
  "thiserror 2.0.12",
  "tokio",
  "wheel",
@@ -4038,7 +4044,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-deploy"
-version = "20.0.0"
+version = "21.0.0"
 dependencies = [
  "clap",
  "ootrstats-supervisor",
@@ -4049,7 +4055,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-macros"
-version = "20.0.0"
+version = "21.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4058,10 +4064,11 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-supervisor"
-version = "20.0.0"
+version = "21.0.0"
 dependencies = [
- "async-proto 0.26.1",
+ "async-proto 0.26.2",
  "bytes",
+ "bytesize 2.0.1",
  "chrono",
  "clap",
  "crossterm",
@@ -4096,13 +4103,14 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-daemon"
-version = "20.0.0"
+version = "21.0.0"
 dependencies = [
- "async-proto 0.26.1",
+ "async-proto 0.26.2",
  "constant_time_eq",
  "directories",
  "either",
  "futures",
+ "itertools",
  "log-lock",
  "mimalloc",
  "ootrstats",
@@ -4120,7 +4128,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-windows-service"
-version = "20.0.0"
+version = "21.0.0"
 dependencies = [
  "mimalloc",
  "ootrstats-worker-daemon",
@@ -5126,6 +5134,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "systemstat"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5021f5184d44b26fb184acd689671bbe1e4bbd24bbdaa6bc7ec383fad32d2033"
+dependencies = [
+ "bytesize 1.3.3",
+ "lazy_static",
+ "libc",
+ "nom",
+ "time",
+ "winapi",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5818,7 +5840,7 @@ name = "wheel"
 version = "0.15.0"
 source = "git+https://github.com/fenhl/wheel?branch=main#b5fc533a6c7148252aa1faa05679be3d7ad095b3"
 dependencies = [
- "async-proto 0.26.1",
+ "async-proto 0.26.2",
  "async-trait",
  "clap",
  "console-subscriber",

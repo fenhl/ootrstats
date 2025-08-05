@@ -9,6 +9,7 @@ workspace = true
 [dependencies]
 async-proto = { version = "0.26", features = ["tokio-tungstenite027"] }
 bytes = { version = "1.5.0", features = ["serde"] }
+bytesize = { version = "2.0.1", features = ["serde"] }
 chrono = { version = "0.4.34", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.5.1", features = ["derive"] }
 crossterm = { version = "0.29", features = ["event-stream"] }

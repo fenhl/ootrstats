@@ -48,6 +48,9 @@ Each worker configuration is a JSON object with the following required entries:
 And the following optional entry:
 
 * `bench`: If `false`, this worker is skipped when the `bench` subcommand is used. The default is `true`.
+* `minDisk`: The worker will not start rolling new seeds while the available disk space is less than this amount. Set to `"0 B"` to disable this check. The default is `"5 GiB"`.
+* `minDiskPercent`: The worker will not start rolling new seeds while the available disk space is less than this percentage of the total disk size. Set to `0` to disable this check. The default is `5`.
+* `minDiskMountPoints`: An array of file systems to check for `minDisk` and `minDiskPercent`. Defaults to `["C:\\"]` on Windows, `["/"]` on other platforms.
 
 Depending on the `kind`, there are additional entries:
 

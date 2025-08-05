@@ -1067,7 +1067,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                     if let Some(worker_tx) = &worker_tx {
                         for worker in &mut workers {
                             if worker.supervisor_tx.is_none() && !worker.stopped && pending_seeds.iter().any(|seed_idx| allowed_workers.get(seed_idx).is_none_or(|allowed_workers| allowed_workers.contains(&worker.name))) {
-                                let worker::Config { name, kind, .. } = config.workers.iter().find(|config| config.name == worker.name).expect("unconfigured worker");
+                                let worker::Config { name, kind, min_disk, min_disk_percent, min_disk_mount_points, .. } = config.workers.iter().find(|config| config.name == worker.name).expect("unconfigured worker");
                                 worker_tasks.push(worker.connect(worker_tx.clone(), kind.clone(), rando_rev, &setup, if let Some(Subcommand::Bench { uncompressed, .. }) = args.subcommand {
                                     if args.patch { unimplemented!("The `bench` subcommand currently cannot generate patch files") }
                                     OutputMode::Bench { uncompressed }
@@ -1077,7 +1077,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                         uncompressed_rom: args.uncompressed_rom,
                                         compressed_rom: args.rom,
                                     }
-                                }, args.race).map(move |res| (name.clone(), res)));
+                                }, *min_disk, *min_disk_percent, min_disk_mount_points.clone(), args.race).map(move |res| (name.clone(), res)));
                             }
                         }
                     }

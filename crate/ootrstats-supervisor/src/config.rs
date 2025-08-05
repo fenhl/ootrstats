@@ -3,6 +3,7 @@ use {
         path::PathBuf,
         sync::Arc,
     },
+    bytesize::ByteSize,
     serde::Deserialize,
     wheel::fs,
 };
@@ -18,8 +19,15 @@ pub struct Config {
     pub workers: Vec<Worker>,
 }
 
+fn make_5gib() -> ByteSize { ByteSize::gib(5) }
 fn make_neg_one() -> i8 { -1 }
+fn make_five() -> f64 { 5.0 }
 fn make_true() -> bool { true }
+
+fn make_default_mount_points() -> Vec<PathBuf> {
+    #[cfg(windows)] { vec![PathBuf::from("C:\\")] }
+    #[cfg(not(windows))] { vec![PathBuf::from("/")] }
+}
 
 #[derive(Deserialize)]
 pub struct Worker {
@@ -28,6 +36,12 @@ pub struct Worker {
     pub(crate) kind: WorkerKind,
     #[serde(default = "make_true")]
     pub(crate) bench: bool,
+    #[serde(default = "make_5gib")]
+    pub(crate) min_disk: ByteSize,
+    #[serde(default = "make_five")]
+    pub(crate) min_disk_percent: f64,
+    #[serde(default = "make_default_mount_points")]
+    pub(crate) min_disk_mount_points: Vec<PathBuf>,
 }
 
 #[derive(Clone, Deserialize)]
