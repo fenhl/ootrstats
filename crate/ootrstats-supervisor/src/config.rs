@@ -50,6 +50,10 @@ pub(crate) enum WorkerKind {
         wsl_distro: Option<String>,
         #[serde(default)]
         priority_users: Vec<String>,
+        #[serde(default)]
+        hide_reboot: bool,
+        #[serde(default)]
+        hide_sleep: bool,
     },
 }
 

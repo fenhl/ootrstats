@@ -19,6 +19,8 @@ pub enum ClientMessage {
         output_mode: OutputMode,
         priority_users: Vec<String>,
         wsl_distro: Option<String>,
+        hide_reboot: bool,
+        hide_sleep: bool,
     },
     Supervisor(SupervisorMessage),
     Ping,

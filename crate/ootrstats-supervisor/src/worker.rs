@@ -114,13 +114,13 @@ impl Kind {
                     }
                 }
             }
-            Self::WebSocket { tls, hostname, password, base_rom_path, wsl_distro, priority_users } => {
+            Self::WebSocket { tls, hostname, password, base_rom_path, wsl_distro, priority_users, hide_reboot, hide_sleep } => {
                 tx.send((name.clone(), Message::Init(format!("connecting WebSocket")))).await?;
                 let (sink, stream) = async_proto::websocket027(format!("{}://{hostname}/v{}", if tls { "wss" } else { "ws" }, Version::parse(env!("CARGO_PKG_VERSION"))?.major)).await?;
                 let mut sink = pin!(sink);
                 let mut stream = Box::pin(stream.fuse()) as Pin<Box<dyn FusedStream<Item = _> + Send>>;
                 tx.send((name.clone(), Message::Init(format!("handshaking")))).await?;
-                sink.send(websocket::ClientMessage::Handshake { password, base_rom_path, wsl_distro, rando_rev, setup, output_mode, priority_users }).await?;
+                sink.send(websocket::ClientMessage::Handshake { password, base_rom_path, wsl_distro, rando_rev, setup, output_mode, priority_users, hide_reboot, hide_sleep }).await?;
                 tx.send((name.clone(), Message::Init(format!("waiting for reply from worker")))).await?;
                 let mut ping_interval = interval(Duration::from_secs(30));
                 ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);

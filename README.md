@@ -85,6 +85,8 @@ And the following optional entries:
 * `tls`: Whether to use a secure WebSocket connection. If enabled, the worker needs a TLS certificate. The default is `true`.
 * `wslDistro`: The distribution name to use if the randomizer is run inside [WSL](https://learn.microsoft.com/windows/wsl/about), i.e. for the `bench` subcommand if this worker is running on Windows. Defaults to the distribution configured as the default in WSL.
 * `priorityUsers`: A list of usernames. The worker will not start rolling any new seeds while any of these users are signed in. Only supported by workers running on Windows.
+* `hideReboot`: Whether to hide the “Restart” option from the system UI while rolling seeds. Note that this does not prevent the worker from being rebooted by other means, e.g. the command line. The default is `false`. Only supported by workers running on Windows.
+* `hideSleep`: Whether to hide the “Sleep” option from the system UI while rolling seeds. Note that this does not prevent the worker from sleeping for other reasons, e.g. automatic timeout. The default is `false`. Only supported by workers running on Windows.
 
 # Usage
 

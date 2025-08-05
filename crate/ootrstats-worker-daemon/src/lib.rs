@@ -49,6 +49,7 @@ enum Error {
     #[error(transparent)] Elapsed(#[from] tokio::time::error::Elapsed),
     #[error(transparent)] Read(#[from] async_proto::ReadError),
     #[error(transparent)] Wheel(#[from] wheel::Error),
+    #[cfg(windows)] #[error(transparent)] Windows(#[from] windows_result::Error),
     #[error(transparent)] Worker(#[from] ootrstats::worker::Error),
     #[error(transparent)] WorkerSend(#[from] mpsc::error::SendError<ootrstats::worker::SupervisorMessage>),
     #[error(transparent)] Write(#[from] async_proto::WriteError),
@@ -56,9 +57,23 @@ enum Error {
     PatchFilename,
 }
 
-async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::stream::DuplexStream, rocket_ws::Message>>>, stream: &mut SplitStream<rocket_ws::stream::DuplexStream>) -> Result<(), Error> {
-    let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_distro, rando_rev, setup, output_mode, priority_users } = websocket::ClientMessage::read_ws021(stream).await? else { return Ok(()) };
+async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::stream::DuplexStream, rocket_ws::Message>>>, stream: &mut SplitStream<rocket_ws::stream::DuplexStream>, #[cfg_attr(not(windows), allow(unused))] unhide_reboot: &mut bool, #[cfg_attr(not(windows), allow(unused))] unhide_sleep: &mut bool) -> Result<(), Error> {
+    let websocket::ClientMessage::Handshake { password: received_password, base_rom_path, wsl_distro, rando_rev, setup, output_mode, priority_users, hide_reboot, hide_sleep } = websocket::ClientMessage::read_ws021(stream).await? else { return Ok(()) };
     if !constant_time_eq(received_password.as_bytes(), correct_password.as_bytes()) { return Ok(()) }
+    #[cfg(windows)] {
+        if hide_reboot {
+            windows_registry::LOCAL_MACHINE.create("SOFTWARE\\Microsoft\\PolicyManager\\default\\Start\\HideRestart")?.set_u32("value", 1)?;
+            *unhide_reboot = true;
+        }
+        if hide_sleep {
+            windows_registry::LOCAL_MACHINE.create("SOFTWARE\\Microsoft\\PolicyManager\\default\\Start\\HideSleep")?.set_u32("value", 1)?;
+            *unhide_sleep = true;
+        }
+    }
+    #[cfg(not(windows))] {
+        let _ = hide_reboot;
+        let _ = hide_sleep;
+    }
     let (worker_tx, mut worker_rx) = mpsc::channel(256);
     let (mut supervisor_tx, supervisor_rx) = mpsc::channel(256);
     let mut stream = Some(stream);
@@ -305,8 +320,22 @@ fn index(correct_password: &State<String>, ws: WebSocket) -> rocket_ws::Channel<
                 sleep(Duration::from_secs(30)).await;
             }
         });
-        let work_result = work(&correct_password, sink.clone(), &mut stream).await;
+        let mut unhide_reboot = false;
+        let mut unhide_sleep = false;
+        #[cfg_attr(not(windows), allow(unused_mut))] let mut work_result = work(&correct_password, sink.clone(), &mut stream, &mut unhide_reboot, &mut unhide_sleep).await;
         ping_task.abort();
+        #[cfg(windows)] {
+            if unhide_reboot {
+                if let Err(e) = windows_registry::LOCAL_MACHINE.create("SOFTWARE\\Microsoft\\PolicyManager\\default\\Start\\HideRestart").and_then(|key| key.set_u32("value", 0)) {
+                    work_result = work_result.and_then(|_| Err(e.into()));
+                }
+            }
+            if unhide_sleep {
+                if let Err(e) = windows_registry::LOCAL_MACHINE.create("SOFTWARE\\Microsoft\\PolicyManager\\default\\Start\\HideSleep").and_then(|key| key.set_u32("value", 0)) {
+                    work_result = work_result.and_then(|_| Err(e.into()));
+                }
+            }
+        }
         match work_result {
             Ok(()) => {}
             Err(e) => lock!(sink = sink; websocket::ServerMessage::Error {

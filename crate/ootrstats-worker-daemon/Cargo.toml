@@ -24,6 +24,8 @@ wheel = { git = "https://github.com/fenhl/wheel", branch = "main", features = ["
 
 [target."cfg(windows)".dependencies]
 directories = "6"
+windows-registry = "0.5.3"
+windows-result = "0.3.4"
 
 [target."cfg(unix)".dependencies]
 xdg = "3"
