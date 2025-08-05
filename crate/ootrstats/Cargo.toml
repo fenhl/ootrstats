@@ -9,13 +9,13 @@ workspace = true
 [dependencies]
 async-proto = { version = "0.26", features = ["bytes", "gix-hash", "serde_json"] }
 bytes = "1.5.0"
-cargo_metadata = "0.19.1"
+cargo_metadata = "0.21"
 collect-mac = "0.1.0"
 decompress = { git = "https://github.com/fenhl/OoT_Decompressor", branch = "riir" }
 directories = "6"
 either = "1.10.0"
 futures = "0.3.30"
-gix-hash = "0.18"
+gix-hash = "0.19"
 if_chain = "1.0.2"
 itertools = "0.14"
 lazy-regex = "3.1.0"

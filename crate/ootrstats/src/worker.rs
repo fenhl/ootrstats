@@ -278,7 +278,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             .exec()?
             .packages
             .into_iter()
-            .find(|package| package.name == "ootr-cli")
+            .find(|package| &*package.name == "ootr-cli")
         {
             use_rust_cli = package.version >= Version { major: 8, minor: 2, patch: 49, pre: "fenhl.1.riir.2".parse()?, build: semver::BuildMetadata::default() };
             supports_unsalted_seeds = package.version >= Version { major: 8, minor: 2, patch: 54, pre: "fenhl.2.riir.2".parse()?, build: semver::BuildMetadata::default() };

@@ -14,7 +14,7 @@ clap = { version = "4.5.1", features = ["derive"] }
 crossterm = { version = "0.29", features = ["event-stream"] }
 either = "1.10.0"
 futures = "0.3.30"
-gix = "0.72"
+gix = "0.73"
 if_chain = "1.0.2"
 itertools = "0.14"
 jaq-core = "1.4.0"
@@ -23,7 +23,7 @@ jaq-parse = "1.0.2"
 jaq-std = "1.4.0"
 lazy-regex = "3.1.0"
 mimalloc = "0.1.43"
-nonempty-collections = { version = "0.3", features = ["serde"] }
+nonempty-collections = { version = "1", features = ["serde"] }
 ootr-utils = { git = "https://github.com/midoshouse/rust-ootr-utils", branch = "main" }
 ootrstats = { path = "../ootrstats" }
 proc-macro2 = { version = "1.0.85", default-features = false, features = ["span-locations"] }

@@ -14,7 +14,7 @@ prev_failure = []
 prev_rsl_success = []
 prev_rsl_failure = []
 for line in subprocess.run(
-    ['cargo', 'run', '--release', '--', '--github-user=fenhl', *sys.argv[1:], 'bench', '--raw-data', '--uncompressed'],
+    ['cargo', 'run', '--release', '--', '--github-user=fenhl', '--suite', *sys.argv[1:], 'bench', '--raw-data', '--uncompressed'],
     stdout=subprocess.PIPE, encoding='utf-8', check=True,
 ).stdout.splitlines():
     kind, count, worker = line.split(' ', 2)
@@ -33,7 +33,7 @@ latest_failure = []
 latest_rsl_success = []
 latest_rsl_failure = []
 for line in subprocess.run(
-    ['cargo', 'run', '--release', '--', '--github-user=fenhl', '--branch=riir', *sys.argv[1:], 'bench', '--raw-data', '--uncompressed'],
+    ['cargo', 'run', '--release', '--', '--github-user=fenhl', '--branch=riir', '--suite', *sys.argv[1:], 'bench', '--raw-data', '--uncompressed'],
     stdout=subprocess.PIPE, encoding='utf-8', check=True,
 ).stdout.splitlines():
     kind, count, worker = line.split(' ', 2)
