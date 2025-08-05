@@ -662,15 +662,22 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
 
         select! {
             event = async {
-                select! {
+                log!(
+                    "waiting for event, readers {}, reader_rx {}, worker_tasks {}, worker_rx {}",
+                    if readers.is_empty() { "empty" } else { "present" },
+                    if reader_rx.is_closed() { "closed" } else { "open" },
+                    if worker_tasks.is_empty() { "empty" } else { "present" },
+                    if worker_rx.is_closed() { "closed" } else { "open" },
+                ); // debugging workers getting stuck stopping
+                Ok::<_, Error>(select! {
                     Some(res) = readers.next() => Event::ReaderDone(res),
                     Some(msg) = reader_rx.recv() => Event::ReaderMessage(msg),
                     Some((name, res)) = worker_tasks.next() => Event::WorkerDone(name, res),
                     Some((name, msg)) = worker_rx.recv() => Event::WorkerMessage(name, msg),
                     else => Event::End,
-                }
+                })
             } => {
-                match event {
+                match event? {
                     Event::ReaderDone(res) => { let () = res??; }
                     Event::ReaderMessage(msg) => match msg {
                         ReaderMessage::Pending { seed_idx, allowed_workers: seed_allowed_workers } => {

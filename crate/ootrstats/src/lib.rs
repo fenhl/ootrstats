@@ -396,7 +396,7 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
         }
         if !matches!(output_mode, OutputMode::Normal { uncompressed_rom: true, .. }) {
             if let Some(uncompressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Saving Uncompressed ROM: ")) {
-                fs::remove_file(repo_path.join("Output").join(uncompressed_rom_path)).await?;
+                fs::remove_file(repo_path.join("Output").join(uncompressed_rom_path)).await.missing_ok()?;
             }
         }
         if !matches!(output_mode, OutputMode::Normal { compressed_rom: true, .. }) {
@@ -474,7 +474,6 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
         compressed_rom: if_chain! {
             if output.status.success();
             if let Some(compressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created compressed ROM at: "));
-            if fs::exists(compressed_rom_path).await?;
             then {
                 Some((cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench { .. }), PathBuf::from(compressed_rom_path)))
             } else {
