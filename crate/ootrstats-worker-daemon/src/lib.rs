@@ -276,9 +276,13 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
             },
             res = next_msg => match res?? {
                 websocket::ClientMessage::Handshake { .. } => break,
-                websocket::ClientMessage::Supervisor(msg) => supervisor_tx.send(msg).await?,
+                websocket::ClientMessage::Supervisor(msg) => {
+                    println!("got supervisor message: {msg:?}");
+                    supervisor_tx.send(msg).await?;
+                }
                 websocket::ClientMessage::Ping => {}
                 websocket::ClientMessage::Goodbye => {
+                    println!("got goodbye message");
                     // drop sender so the worker can shut down
                     supervisor_tx = mpsc::channel(1).0;
                     stream = None;
