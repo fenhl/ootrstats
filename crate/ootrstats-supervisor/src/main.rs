@@ -555,7 +555,11 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
     if args.clean {
         fs::remove_dir_all(&stats_dir).await.missing_ok()?;
     }
-    let available_parallelism = std::thread::available_parallelism().unwrap_or(NonZero::<usize>::MIN).try_into().unwrap_or(NonZero::<SeedIdx>::MAX).min(args.num_seeds);
+    let available_parallelism = if args.world_counts {
+        NonZero::<SeedIdx>::MIN // ensure seeds are started in order
+    } else {
+        std::thread::available_parallelism().unwrap_or(NonZero::<usize>::MIN).try_into().unwrap_or(NonZero::<SeedIdx>::MAX).min(args.num_seeds)
+    };
     let start = Instant::now();
     let start_local = Local::now();
     let mut seed_states = Vec::from_iter(iter::repeat_with(|| SeedState::Unchecked).take(args.num_seeds.get().into()));
