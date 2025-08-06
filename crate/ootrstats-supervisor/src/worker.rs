@@ -106,7 +106,7 @@ impl Kind {
         match self {
             Self::Local { base_rom_path, wsl_distro, cores } => {
                 let (inner_tx, mut inner_rx) = mpsc::channel(256);
-                let mut work = pin!(ootrstats::worker::work(inner_tx, rx, base_rom_path.clone(), cores, wsl_distro, rando_rev, setup, output_mode, min_disk, min_disk_percent, min_disk_mount_points.as_deref(), &[], race));
+                let mut work = pin!(ootrstats::worker::work(false, inner_tx, rx, base_rom_path.clone(), cores, wsl_distro, rando_rev, setup, output_mode, min_disk, min_disk_percent, min_disk_mount_points.as_deref(), &[], race));
                 loop {
                     select! {
                         res = &mut work => {

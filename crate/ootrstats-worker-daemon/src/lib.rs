@@ -79,13 +79,14 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
     let (mut supervisor_tx, supervisor_rx) = mpsc::channel(256);
     let mut stream = Some(stream);
     let min_disk_mount_points = min_disk_mount_points.map(|mp| mp.into_iter().map(PathBuf::from).collect_vec());
-    let mut work = pin!(ootrstats::worker::work(worker_tx, supervisor_rx, PathBuf::from(base_rom_path.clone()), 0, wsl_distro, rando_rev, setup, output_mode, min_disk, min_disk_percent, min_disk_mount_points.as_deref(), &priority_users, race));
+    let mut work = pin!(ootrstats::worker::work(true, worker_tx, supervisor_rx, PathBuf::from(base_rom_path.clone()), 0, wsl_distro, rando_rev, setup, output_mode, min_disk, min_disk_percent, min_disk_mount_points.as_deref(), &priority_users, race));
     loop {
         let next_msg = if let Some(ref mut stream) = stream {
             Either::Left(timeout(Duration::from_secs(60), websocket::ClientMessage::read_ws021(*stream)))
         } else {
             Either::Right(future::pending())
         };
+        println!("daemon loop, worker_rx = {worker_rx:?}, stream = {}", match next_msg { Either::Left(_) => "Some(_)", Either::Right(_) => "None" });
         select! {
             res = &mut work => {
                 let () = res?;

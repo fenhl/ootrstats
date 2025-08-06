@@ -178,7 +178,7 @@ async fn wait_ready(min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_po
     Ok(if wait > Duration::default() { Some((wait, message)) } else { None })
 }
 
-pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, git_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_points: Option<&[PathBuf]>, priority_users: &[String], #[cfg_attr(not(windows), allow(unused))] race: bool) -> Result<(), Error> {
+pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, git_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_points: Option<&[PathBuf]>, priority_users: &[String], #[cfg_attr(not(windows), allow(unused))] race: bool) -> Result<(), Error> {
     let mut rsl_version = None;
     let mut use_rust_cli = false;
     let mut supports_unsalted_seeds = false;
@@ -477,6 +477,9 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
                 Either::Right(future::ready(None))
             }
         };
+        if verbose {
+            println!("worker loop, rx_is_closed = {rx_is_closed:?}, recheck_ready_at = {recheck_ready_at:?}, rando_tasks = {rando_tasks:?}, rx = {rx:?}");
+        }
         select! {
             Some(()) = recheck_ready => if let Some((duration, reason)) = wait_ready(min_disk, min_disk_percent, min_disk_mount_points, priority_users).await? {
                 tx.send(Message::Init(reason)).await?;
@@ -489,7 +492,7 @@ pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMe
             Some(res) = rando_tasks.next() => {
                 match res {
                     Ok(res) => { let () = res?; }
-                    Err(e) if e.is_cancelled() => {} // a seed task being cancelled is expected with --race
+                    Err(e) if race && e.is_cancelled() => {}
                     Err(e) => return Err(e.into()),
                 }
                 if let Some((duration, reason)) = wait_ready(min_disk, min_disk_percent, min_disk_mount_points, priority_users).await? {
