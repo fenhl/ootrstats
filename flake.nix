@@ -30,7 +30,7 @@
                         "log-lock-0.2.5" = "sha256-YuS4YzhVDI6kclnad4LCaiUf2/jPesI9ECaR+cS8Ua0=";
                         "ootr-utils-0.6.3" = "sha256-RzqUlguQmYYkiHs/5UKf3eQEcIh4k5mVGGwRwqjqbso=";
                         "rocket-util-0.2.15" = "sha256-j/kxIwbiBlzWIRl0CfGep1GiRvbq8MfeZse0CxntD/E=";
-                        "wheel-0.15.0" = "sha256-nNn6Rwnc/6ZLzJdgR2to2xPpgo2mKPMs6dtDHzIbPMc=";
+                        "wheel-0.15.0" = "sha256-VUB7MZR/wzJifztgmey88G9/L00+yC8xghieCwMlacU=";
                     };
                 };
             };
