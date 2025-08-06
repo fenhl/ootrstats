@@ -1085,17 +1085,19 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                 'outer: for worker in &mut workers {
                     while worker.error.is_none() && worker.ready > 0 {
                         if let Some((seed_idx, _)) = seed_states.iter().enumerate().find(|(seed_idx, state)| matches!(state, SeedState::Pending) && allowed_workers.get(&(*seed_idx as SeedIdx)).is_none_or(|allowed_workers| allowed_workers.contains(&worker.name))) {
+                            log!("assigning pending seed {seed_idx} to worker {}", worker.name);
                             if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
                                 worker.error.get_or_insert(worker::Error::Receive { message });
                                 cancel!(workers);
                                 break 'outer
                             }
-                        } else if args.race {
+                        } else if args.race && completed_readers == available_parallelism.get() { // don't assign the same seed multiple times if there might still be pending seeds
                             let seed_idx = seed_states.iter()
                                 .enumerate()
                                 .filter_map(|(seed_idx, state)| if let SeedState::Rolling { workers } = state { Some((seed_idx, workers.len())) } else { None })
                                 .min_by_key(|&(_, num_workers)| num_workers);
-                            if let Some((seed_idx, _)) = seed_idx {
+                            if let Some((seed_idx, num_workers)) = seed_idx {
+                                log!("--race: adding worker {} to seed {seed_idx} (which is already running {num_workers} times)", worker.name);
                                 if let Err(mpsc::error::SendError(message)) = worker.roll(&mut seed_states, seed_idx.try_into()?).await {
                                     worker.error.get_or_insert(worker::Error::Receive { message });
                                     cancel!(workers);
