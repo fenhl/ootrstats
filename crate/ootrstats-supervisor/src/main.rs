@@ -1123,6 +1123,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
         }
         Message::Status {
             retry_failures: args.retry_failures,
+            world_counts: args.world_counts,
             seed_states: &seed_states,
             allowed_workers: &allowed_workers,
             workers: &workers,

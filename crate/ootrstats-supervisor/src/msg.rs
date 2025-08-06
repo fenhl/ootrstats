@@ -25,6 +25,7 @@ use {
         },
     },
     if_chain::if_chain,
+    itertools::Itertools as _,
     nonempty_collections::NEVec,
     serde::Serialize,
     serde_json::Value as Json,
@@ -49,6 +50,7 @@ pub(crate) enum Message<'a> {
         available_parallelism: NonZero<u16>,
         completed_readers: u16,
         retry_failures: bool,
+        world_counts: bool,
         seed_states: &'a [SeedState],
         allowed_workers: &'a HashMap<SeedIdx, NEVec<Arc<str>>>,
         #[serde(skip)]
@@ -102,7 +104,7 @@ impl Message<'_> {
                 Self::Preparing(Some(label)) => crossterm::execute!(writer,
                     Print(format_args!("{label}: preparing...")),
                 ).at_unknown()?,
-                Self::Status { label, available_parallelism, completed_readers, retry_failures, seed_states, allowed_workers, start, start_local, workers } => {
+                Self::Status { label, available_parallelism, completed_readers, retry_failures, world_counts, seed_states, allowed_workers, start, start_local, workers } => {
                     let all_assigned = seed_states.iter()
                         .enumerate()
                         .all(|(seed_idx, seed_state)| matches!(seed_state, SeedState::Unchecked) || allowed_workers.get(&(seed_idx as SeedIdx)).is_some_and(|assigned_workers| assigned_workers.len() == NonZero::<usize>::MIN));
@@ -134,7 +136,7 @@ impl Message<'_> {
                                 }
                             }
                         } else {
-                            let mut running = 0u16;
+                            let mut running = Vec::default();
                             let mut completed = 0u16;
                             let mut total_completed = 0u16;
                             let mut failures = 0u16;
@@ -152,7 +154,7 @@ impl Message<'_> {
                                             failures += 1;
                                         }
                                     }
-                                    SeedState::Rolling { workers } => running += u16::try_from(workers.iter().into_iter().filter(|name| **name == worker.name).count())?,
+                                    SeedState::Rolling { workers } => running.extend(workers.iter().into_iter().filter(|name| **name == worker.name).map(|_| seed_idx)),
                                     | SeedState::Unchecked
                                     | SeedState::Pending
                                     | SeedState::Cancelled
@@ -175,13 +177,21 @@ impl Message<'_> {
                             } else if worker.supervisor_tx.is_none() {
                                 Cow::Borrowed("not started")
                             } else if let Some(ref msg) = worker.msg {
-                                if running > 0 {
-                                    Cow::Owned(format!("{running} running, {msg}"))
-                                } else {
+                                if running.is_empty() {
                                     Cow::Borrowed(&**msg)
+                                } else {
+                                    Cow::Owned(format!("{} running, {msg}", running.len()))
                                 }
                             } else {
-                                Cow::Owned(format!("{running} running"))
+                                if running.is_empty() {
+                                    Cow::Borrowed("0 running")
+                                } else {
+                                    if world_counts {
+                                        Cow::Owned(format!("{} running: {}", running.len(), running.into_iter().map(|seed_idx| seed_idx + 1).format(", ")))
+                                    } else {
+                                        Cow::Owned(format!("{} running", running.len()))
+                                    }
+                                }
                             };
                             crossterm::execute!(writer,
                                 Print(format_args!(
