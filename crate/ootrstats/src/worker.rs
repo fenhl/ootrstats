@@ -518,11 +518,15 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
                         abort_handles.write().entry(seed_idx).or_default().push(rando_task.abort_handle());
                         rando_tasks.push(rando_task);
                     }
-                    SupervisorMessage::Cancel(seed_idx) => for abort_handle in abort_handles.read().get(&seed_idx).into_iter().flatten() {
-                        abort_handle.abort();
-                    },
+                    SupervisorMessage::Cancel(seed_idx) => {
+                        if verbose { println!("work() got supervisor message: {msg:?}") }
+                        for abort_handle in abort_handles.read().get(&seed_idx).into_iter().flatten() {
+                            abort_handle.abort();
+                        }
+                    }
                 }
             } else {
+                if verbose { println!("work() supervisor rx closed") }
                 // stop awaiting recheck_ready
             },
             else => break,
@@ -530,5 +534,6 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
     }
     #[cfg(windows)] priority_user_login_checker.abort();
     //TODO config option to automatically delete repo path (always/if it didn't already exist)
+    if verbose { println!("end of work()") }
     Ok(())
 }
