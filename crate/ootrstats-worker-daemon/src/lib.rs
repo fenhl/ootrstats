@@ -86,7 +86,11 @@ async fn work(correct_password: &str, sink: Arc<Mutex<SplitSink<rocket_ws::strea
         } else {
             Either::Right(future::pending())
         };
-        println!("daemon loop, worker_rx = {worker_rx:?}, stream = {}", match next_msg { Either::Left(_) => "Some(_)", Either::Right(_) => "None" });
+        println!(
+            "daemon loop, worker_rx {}, stream = {}",
+            if worker_rx.is_closed() { "closed" } else { "open" },
+            match next_msg { Either::Left(_) => "Some(_)", Either::Right(_) => "None" },
+        );
         select! {
             res = &mut work => {
                 let () = res?;
