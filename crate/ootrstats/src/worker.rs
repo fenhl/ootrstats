@@ -478,7 +478,11 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
             }
         };
         if verbose {
-            println!("worker loop, rx_is_closed = {rx_is_closed:?}, recheck_ready_at = {recheck_ready_at:?}, rando_tasks = {rando_tasks:?}, rx = {rx:?}");
+            println!(
+                "worker loop, rx {}, recheck_ready_at = {recheck_ready_at:?}, rando_tasks {}",
+                if rx_is_closed { "closed" } else { "open" },
+                if rando_tasks.is_empty() { "empty" } else { "present" },
+            );
         }
         select! {
             Some(()) = recheck_ready => if let Some((duration, reason)) = wait_ready(min_disk, min_disk_percent, min_disk_mount_points, priority_users).await? {
