@@ -24,11 +24,6 @@ fn make_neg_one() -> i8 { -1 }
 fn make_five() -> f64 { 5.0 }
 fn make_true() -> bool { true }
 
-fn make_default_mount_points() -> Vec<PathBuf> {
-    #[cfg(windows)] { vec![PathBuf::from("C:\\")] }
-    #[cfg(not(windows))] { vec![PathBuf::from("/")] }
-}
-
 #[derive(Deserialize)]
 pub struct Worker {
     pub name: Arc<str>,
@@ -40,8 +35,7 @@ pub struct Worker {
     pub(crate) min_disk: ByteSize,
     #[serde(default = "make_five")]
     pub(crate) min_disk_percent: f64,
-    #[serde(default = "make_default_mount_points")]
-    pub(crate) min_disk_mount_points: Vec<PathBuf>,
+    pub(crate) min_disk_mount_points: Option<Vec<PathBuf>>,
 }
 
 #[derive(Clone, Deserialize)]

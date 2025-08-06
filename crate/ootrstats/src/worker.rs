@@ -115,16 +115,24 @@ pub enum Error {
     RslVersion,
 }
 
+fn make_default_mount_points() -> Vec<PathBuf> {
+    #[cfg(windows)] { vec![PathBuf::from("C:\\")] }
+    #[cfg(not(windows))] { vec![PathBuf::from("/")] }
+}
+
 /// If the worker is not ready to roll a new seed right now, this returns:
 ///
 /// * The duration after which this function may be called again to recheck.
 /// * The reason for the wait as a human-readable string.
-async fn wait_ready(min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_points: &[PathBuf], #[cfg_attr(not(windows), allow(unused))] priority_users: &[String]) -> Result<Option<(Duration, String)>, Error> {
+async fn wait_ready(min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_points: Option<&[PathBuf]>, #[cfg_attr(not(windows), allow(unused))] priority_users: &[String]) -> Result<Option<(Duration, String)>, Error> {
     let mut wait = Duration::default();
     let mut message = String::default();
     if min_disk > ByteSize::default() || min_disk_percent > 0.0 {
         let sys = System::new();
-        if let Some((vol, fs)) = min_disk_mount_points.into_iter()
+        if let Some((vol, fs)) = min_disk_mount_points
+            .map(Cow::Borrowed)
+            .unwrap_or_else(|| make_default_mount_points().into())
+            .into_iter()
             .map(|vol| Ok::<_, Error>((vol, sys.mount_at(vol).at(vol)?)))
             .process_results(|mut iter| iter.find(|(_, fs)| ByteSize::b(fs.avail.as_u64()) < min_disk || (fs.avail.as_u64() as f64 / fs.total.as_u64() as f64) < min_disk_percent / 100.0))?
         {
@@ -170,7 +178,7 @@ async fn wait_ready(min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_po
     Ok(if wait > Duration::default() { Some((wait, message)) } else { None })
 }
 
-pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, git_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_points: &[PathBuf], priority_users: &[String], #[cfg_attr(not(windows), allow(unused))] race: bool) -> Result<(), Error> {
+pub async fn work(tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, git_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_points: Option<&[PathBuf]>, priority_users: &[String], #[cfg_attr(not(windows), allow(unused))] race: bool) -> Result<(), Error> {
     let mut rsl_version = None;
     let mut use_rust_cli = false;
     let mut supports_unsalted_seeds = false;

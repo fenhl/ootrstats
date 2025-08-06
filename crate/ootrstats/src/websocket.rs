@@ -20,7 +20,7 @@ pub enum ClientMessage {
         output_mode: OutputMode,
         min_disk: ByteSize,
         min_disk_percent: f64,
-        min_disk_mount_points: Vec<String>,
+        min_disk_mount_points: Option<Vec<String>>,
         priority_users: Vec<String>,
         race: bool,
         wsl_distro: Option<String>,

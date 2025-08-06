@@ -102,11 +102,11 @@ impl IsNetworkError for Error {
 }
 
 impl Kind {
-    async fn run(self, name: Arc<str>, tx: mpsc::Sender<(Arc<str>, Message)>, mut rx: mpsc::Receiver<SupervisorMessage>, rando_rev: gix::ObjectId, setup: RandoSetup, output_mode: OutputMode, min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_points: Vec<PathBuf>, race: bool) -> Result<(), Error> {
+    async fn run(self, name: Arc<str>, tx: mpsc::Sender<(Arc<str>, Message)>, mut rx: mpsc::Receiver<SupervisorMessage>, rando_rev: gix::ObjectId, setup: RandoSetup, output_mode: OutputMode, min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_points: Option<Vec<PathBuf>>, race: bool) -> Result<(), Error> {
         match self {
             Self::Local { base_rom_path, wsl_distro, cores } => {
                 let (inner_tx, mut inner_rx) = mpsc::channel(256);
-                let mut work = pin!(ootrstats::worker::work(inner_tx, rx, base_rom_path.clone(), cores, wsl_distro, rando_rev, setup, output_mode, min_disk, min_disk_percent, &min_disk_mount_points, &[], race));
+                let mut work = pin!(ootrstats::worker::work(inner_tx, rx, base_rom_path.clone(), cores, wsl_distro, rando_rev, setup, output_mode, min_disk, min_disk_percent, min_disk_mount_points.as_deref(), &[], race));
                 loop {
                     select! {
                         res = &mut work => {
@@ -133,7 +133,7 @@ impl Kind {
                 let mut stream = Box::pin(stream.fuse()) as Pin<Box<dyn FusedStream<Item = _> + Send>>;
                 tx.send((name.clone(), Message::Init(format!("handshaking")))).await?;
                 sink.send(websocket::ClientMessage::Handshake {
-                    min_disk_mount_points: min_disk_mount_points.into_iter().map(|p| p.into_os_string().into_string()).collect::<Result<_, _>>()?,
+                    min_disk_mount_points: min_disk_mount_points.map(|mp| mp.into_iter().map(|p| p.into_os_string().into_string()).collect::<Result<_, _>>()).transpose()?,
                     password, base_rom_path, wsl_distro, rando_rev, setup, output_mode, min_disk, min_disk_percent, priority_users, race, hide_reboot, hide_sleep,
                 }).await?;
                 tx.send((name.clone(), Message::Init(format!("waiting for reply from worker")))).await?;
@@ -224,7 +224,7 @@ impl State {
         }
     }
 
-    pub(crate) fn connect(&mut self, worker_tx: mpsc::Sender<(Arc<str>, Message)>, kind: Kind, rando_rev: gix::ObjectId, setup: &RandoSetup, output_mode: OutputMode, min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_points: Vec<PathBuf>, race: bool) -> JoinHandle<Result<(), Error>> {
+    pub(crate) fn connect(&mut self, worker_tx: mpsc::Sender<(Arc<str>, Message)>, kind: Kind, rando_rev: gix::ObjectId, setup: &RandoSetup, output_mode: OutputMode, min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_points: Option<Vec<PathBuf>>, race: bool) -> JoinHandle<Result<(), Error>> {
         self.error = None;
         let (supervisor_tx, supervisor_rx) = mpsc::channel(256);
         self.supervisor_tx = Some(supervisor_tx);
