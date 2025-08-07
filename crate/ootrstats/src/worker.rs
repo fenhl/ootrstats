@@ -467,7 +467,7 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
         }
     }
     loop {
-        let rx_is_closed = rx.is_closed();
+        let rx_is_closed = rx.is_closed() && rx.is_empty();
         let recheck_ready = if_chain! {
             if !rx_is_closed;
             if let Some(recheck_ready_at) = recheck_ready_at;
@@ -512,6 +512,7 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
                 }
             }
             msg = rx.recv(), if !rx_is_closed => if let Some(msg) = msg {
+                if verbose { println!("work() got supervisor message: {msg:?}") }
                 match msg {
                     SupervisorMessage::Roll(seed_idx) => {
                         let rando_task = handle_seed(seed_idx);
@@ -519,7 +520,6 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
                         rando_tasks.push(rando_task);
                     }
                     SupervisorMessage::Cancel(seed_idx) => {
-                        if verbose { println!("work() got supervisor message: {msg:?}") }
                         for abort_handle in abort_handles.read().get(&seed_idx).into_iter().flatten() {
                             abort_handle.abort();
                         }
