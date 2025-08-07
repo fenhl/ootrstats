@@ -222,7 +222,8 @@ impl Message<'_> {
                             let mut completed = 0u16;
                             let mut last_completed = None;
                             let mut skipped = 0u16;
-                            for state in seed_states {
+                            let mut continuous = 0;
+                            for (seed_idx, state) in seed_states.into_iter().enumerate() {
                                 match *state {
                                     SeedState::Unchecked => unreachable!(),
                                     SeedState::Pending => total += 1,
@@ -235,6 +236,9 @@ impl Message<'_> {
                                         total += 1;
                                         started += 1;
                                         num_successes += 1;
+                                        if continuous == seed_idx {
+                                            continuous += 1;
+                                        }
                                         if let Some(completed_at) = completed_at {
                                             completed += 1;
                                             let last_completed = last_completed.get_or_insert(completed_at);
@@ -247,6 +251,9 @@ impl Message<'_> {
                                         total += 1;
                                         started += 1;
                                         num_failures += 1;
+                                        if continuous == seed_idx {
+                                            continuous += 1;
+                                        }
                                         if let Some(completed_at) = completed_at {
                                             completed += 1;
                                             let last_completed = last_completed.get_or_insert(completed_at);
@@ -259,8 +266,13 @@ impl Message<'_> {
                             }
                             let rolled = num_successes + num_failures;
                             format!(
-                                "{}{started}/{total} seeds started, {rolled} rolled{}, ETA {}",
+                                "{}{started}/{total} seeds started, {rolled} rolled{}{}, ETA {}",
                                 if let Some(label) = label { format!("{label}: ") } else { String::default() },
+                                if world_counts {
+                                    format!(" (continuous up to {continuous} worlds)")
+                                } else {
+                                    String::default()
+                                },
                                 if retry_failures {
                                     String::default()
                                 } else {
