@@ -23,6 +23,7 @@ use {
             StreamExt as _,
         },
     },
+    if_chain::if_chain,
     nonempty_collections::nev,
     semver::Version,
     serde::Serialize,
@@ -55,6 +56,18 @@ use {
 pub(crate) type Config = crate::config::Worker;
 pub(crate) type Kind = crate::config::WorkerKind;
 
+fn display_websocket_error(e: &tungstenite::Error) -> String {
+    if_chain! {
+        if let tungstenite::Error::Http(response) = e;
+        if response.status() == tungstenite::http::StatusCode::NOT_FOUND;
+        then {
+            format!("{e}. Perhaps the worker needs to be updated?")
+        } else {
+            e.to_string()
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error, SerializeDisplay)]
 pub(crate) enum Error {
     #[error(transparent)] Elapsed(#[from] tokio::time::error::Elapsed),
@@ -62,7 +75,7 @@ pub(crate) enum Error {
     #[error(transparent)] Read(#[from] async_proto::ReadError),
     #[error(transparent)] Semver(#[from] semver::Error),
     #[error(transparent)] Send(#[from] mpsc::error::SendError<(Arc<str>, Message)>),
-    #[error(transparent)] WebSocket(#[from] tungstenite::Error),
+    #[error("{}", display_websocket_error(.0))] WebSocket(#[from] tungstenite::Error),
     #[error(transparent)] Write(#[from] async_proto::WriteError),
     #[error("non-UTF-8 string")]
     OsString(OsString),
@@ -95,7 +108,7 @@ impl IsNetworkError for Error {
                 => false,
             Self::Elapsed(_) => true,
             Self::Read(e) => e.is_network_error(),
-            Self::WebSocket(e) => e.is_network_error(),
+            Self::WebSocket(e) => e.is_network_error() || if let tungstenite::Error::Http(response) = e { response.status() == tungstenite::http::StatusCode::NOT_FOUND } else { false },
             Self::Write(e) => e.is_network_error(),
         }
     }
