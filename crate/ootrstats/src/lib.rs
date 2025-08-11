@@ -208,7 +208,14 @@ pub async fn gitdir() -> wheel::Result<Cow<'static, Path>> {
 
 async fn python() -> Result<PathBuf, RollError> {
     Ok({
-        #[cfg(windows)] { UserDirs::new().ok_or(RollError::MissingHomeDir)?.home_dir().join("scoop").join("apps").join("python").join("current").join("python.exe") }
+        #[cfg(windows)] {
+            let python = UserDirs::new().ok_or(RollError::MissingHomeDir)?.home_dir().join("scoop").join("apps").join("python").join("current").join("python.exe");
+            if python.exists() {
+                python
+            } else {
+                PathBuf::from("python")
+            }
+        }
         #[cfg(target_os = "linux")] {
             if fs::exists("/etc/NIXOS").await? {
                 PathBuf::from("python")
