@@ -40,6 +40,7 @@ use {
         System,
     },
     tokio::{
+        io::AsyncWriteExt as _,
         select,
         process::Command,
         sync::mpsc,
@@ -101,6 +102,7 @@ pub enum Error {
     #[error(transparent)] CargoMetadata(#[from] cargo_metadata::Error),
     #[error(transparent)] Decompress(#[from] decompress::Error),
     #[error(transparent)] EnvJoinPaths(#[from] env::JoinPathsError),
+    #[error(transparent)] Json(#[from] serde_json::Error),
     #[error(transparent)] ParseGitHash(#[from] gix_hash::decode::Error),
     #[cfg(unix)] #[error(transparent)] ParseInt(#[from] std::num::ParseIntError),
     #[error(transparent)] Roll(#[from] crate::RollError),
@@ -182,14 +184,21 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
     let mut rsl_version = None;
     let mut use_rust_cli = false;
     let mut supports_unsalted_seeds = false;
-    let (rando_github_user, rando_repo_name, rando_git_rev, mut rando_repo_path) = match setup {
-        RandoSetup::Normal { ref github_user, ref repo, .. } => {
+    let (rando_github_user, rando_repo_name, rando_git_rev, mut rando_repo_path, plando_tempfile) = match setup {
+        RandoSetup::Normal { ref github_user, ref repo, ref plando, .. } => {
             tx.send(Message::Init(format!("cloning randomizer: determining repo path"))).await?;
             (
                 Cow::Borrowed(&**github_user),
                 Cow::Borrowed(&**repo),
                 git_rev,
                 gitdir().await?.join("github.com").join(github_user).join(repo).join("rev").join(git_rev.to_string()),
+                if plando.is_empty() {
+                    None
+                } else {
+                    let tempfile = tempfile::Builder::new().prefix("plando_").suffix(".json").tempfile().at_unknown()?;
+                    tokio::fs::File::from_std(tempfile.reopen().at(&tempfile)?).write_all(&serde_json::to_vec_pretty(plando)?).await.at(&tempfile)?;
+                    Some(tempfile.into_temp_path())
+                },
             )
         }
         RandoSetup::Rsl { ref github_user, ref repo, .. } => {
@@ -241,7 +250,7 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
                 .check(python.display().to_string()).await?
                 .stdout
             )?;
-            (Cow::Owned(rando_github_user), Cow::Owned(rando_repo_name), randomizer_commit.parse()?, repo_path.join("randomizer"))
+            (Cow::Owned(rando_github_user), Cow::Owned(rando_repo_name), randomizer_commit.parse()?, repo_path.join("randomizer"), None)
         }
     };
     tx.send(Message::Init(format!("checking if randomizer repo exists"))).await?;
@@ -423,7 +432,8 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
                 let seeds = seeds.clone();
                 let settings = settings.clone();
                 let json_settings = json_settings.clone();
-                Either::Left(async move { crate::run_rando(wsl_distro.as_deref(), &repo_path, use_rust_cli, supports_unsalted_seeds, seeds, &settings, &json_settings, world_counts, seed_idx, output_mode).await })
+                let plando = plando_tempfile.as_ref().map(|tempfile| tempfile.to_path_buf());
+                Either::Left(async move { crate::run_rando(wsl_distro.as_deref(), &repo_path, use_rust_cli, supports_unsalted_seeds, seeds, &settings, &json_settings, plando.as_deref(), world_counts, seed_idx, output_mode).await })
             }
             RandoSetup::Rsl { ref preset, ref seeds, .. } => {
                 let wsl_distro = wsl_distro.clone();
@@ -533,6 +543,10 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
         }
     }
     #[cfg(windows)] priority_user_login_checker.abort();
+    if let Some(tempfile) = plando_tempfile {
+        let temp_path = tempfile.to_path_buf();
+        tempfile.close().at(temp_path)?;
+    }
     //TODO config option to automatically delete repo path (always/if it didn't already exist)
     if verbose { println!("end of work()") }
     Ok(())

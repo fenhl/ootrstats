@@ -118,6 +118,7 @@ The supervisor can be interrupted cleanly using <kbd>C</kbd> or <kbd>D</kbd>. If
 * `--settings`: The settings string to use for the randomizer. Cannot be combined with `--preset`, `--rsl`, or `--suite`.
 * `--draft`: Simulates a settings draft from the given file. See [`assets/draft`](/assets/draft) for examples. Cannot be combined with `--preset`, `--settings`, or `--rsl`.
 * `--json-settings`: Specifies a JSON object of settings on the command line that will override the given preset, settings string, or draft picks. Cannot be combined with `--rsl`.
+* `--plando`: Specifies a JSON object of a plandomizer file on the command line. Cannot be combined with `--rsl`.
 * `--world-counts`: Each seed will override the value of the `world_count` setting to be equal to its seed ID (plus 1 because seed IDs start at 0). Restricts the `--num-seeds` option to a maximum of 255. Cannot be combined with `--rsl`.
 * `--seed`: Generate the given fixed seed each time. Useful for confirming suspected unseeded randomization.
 * `--patch`: Generate `.zpf`/`.zpfz` patch files and include them in the [`statsDir`](#configuration). Cannot be combined with `--rsl` or with the `bench` subcommand.

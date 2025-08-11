@@ -53,6 +53,7 @@ pub(crate) enum Message<'a> {
         world_counts: bool,
         seed_states: &'a [SeedState],
         allowed_workers: &'a HashMap<SeedIdx, NEVec<Arc<str>>>,
+        retried_failures: &'a [u32],
         #[serde(skip)]
         start: Instant,
         #[serde(skip)]
@@ -104,7 +105,7 @@ impl Message<'_> {
                 Self::Preparing(Some(label)) => crossterm::execute!(writer,
                     Print(format_args!("{label}: preparing...")),
                 ).at_unknown()?,
-                Self::Status { label, available_parallelism, completed_readers, retry_failures, world_counts, seed_states, allowed_workers, start, start_local, workers } => {
+                Self::Status { label, available_parallelism, completed_readers, retry_failures, world_counts, seed_states, allowed_workers, retried_failures, start, start_local, workers } => {
                     let all_assigned = seed_states.iter()
                         .enumerate()
                         .all(|(seed_idx, seed_state)| matches!(seed_state, SeedState::Unchecked) || allowed_workers.get(&(seed_idx as SeedIdx)).is_some_and(|assigned_workers| assigned_workers.len() == NonZero::<usize>::MIN));
@@ -274,7 +275,11 @@ impl Message<'_> {
                                     String::default()
                                 },
                                 if retry_failures {
-                                    String::default()
+                                    let num_failures = retried_failures.iter().sum::<u32>();
+                                    format!(
+                                        ", {num_failures} failure{} retried",
+                                        if num_failures == 1 { "" } else { "s" },
+                                    )
                                 } else {
                                     format!(
                                         ", {num_failures} failure{} ({}%)",

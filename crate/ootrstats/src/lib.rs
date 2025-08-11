@@ -57,6 +57,7 @@ pub enum RandoSetup {
         repo: String,
         settings: RandoSettings,
         json_settings: serde_json::Map<String, serde_json::Value>,
+        plando: serde_json::Map<String, serde_json::Value>,
         world_counts: bool,
         seeds: Seeds,
     },
@@ -71,7 +72,7 @@ pub enum RandoSetup {
 impl RandoSetup {
     pub fn stats_dir(&self, rando_rev: gix_hash::ObjectId) -> PathBuf {
         match self {
-            Self::Normal { github_user, repo, settings, json_settings, world_counts, seeds } => {
+            Self::Normal { github_user, repo, settings, json_settings, plando, world_counts, seeds } => {
                 let mut path = Path::new("rando")
                     .join(github_user)
                     .join(repo)
@@ -81,6 +82,11 @@ impl RandoSetup {
                     let mut hasher = StableSipHasher128::default();
                     json_settings.hash(&mut hasher);
                     path = path.join(format!("j{:016x}", Hasher::finish(&hasher))).into();
+                }
+                if !plando.is_empty() {
+                    let mut hasher = StableSipHasher128::default();
+                    plando.hash(&mut hasher);
+                    path = path.join(format!("p{:016x}", Hasher::finish(&hasher))).into();
                 }
                 match (world_counts, seeds) {
                     (false, Seeds::Default) => path.join("default"),
@@ -229,7 +235,7 @@ async fn python() -> Result<PathBuf, RollError> {
     })
 }
 
-pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli: bool, supports_unsalted_seeds: bool, seeds: Seeds, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
+pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli: bool, supports_unsalted_seeds: bool, seeds: Seeds, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, plando: Option<&Path>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let mut resolved_settings = collect![as HashMap<_, _>:
         Cow::Borrowed("check_version") => json!(true), // inverted Boolean, avoids spamming GitHub with randomizer update checks
         Cow::Borrowed("create_spoiler") => json!(true),
@@ -242,6 +248,10 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
         resolved_settings.insert(Cow::Borrowed("salt_seed"), json!(false));
     }
     resolved_settings.extend(json_settings.iter().map(|(name, value)| (Cow::<str>::Borrowed(name), value.clone())));
+    if let Some(plando) = plando {
+        resolved_settings.insert(Cow::Borrowed("enable_distribution_file"), json!(true));
+        resolved_settings.insert(Cow::Borrowed("distribution_file"), json!(plando));
+    }
     if world_counts {
         resolved_settings.insert(Cow::Borrowed("world_count"), json!(seed_idx + 1));
     }
@@ -590,9 +600,7 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
         let plando_filename = stdout.iter().rev().find_map(|line| line.strip_prefix("Plando File: ")).ok_or_else(|| RollError::SpoilerLogPath(output.clone()))?;
         let mut roll_output = run_rando(wsl_distro, &repo_path.join("randomizer"), use_rust_cli, supports_unsalted_seeds, seeds, &RandoSettings::Default, &collect![
             format!("rom") => json!("../data/oot-ntscu-1.0.n64"),
-            format!("enable_distribution_file") => json!(true),
-            format!("distribution_file") => json!(format!("../data/{plando_filename}")),
-        ], false, seed_idx, output_mode).await?;
+        ], Some(Path::new(&format!("../data/{plando_filename}"))), false, seed_idx, output_mode).await?;
         roll_output.rsl_plando = Some(repo_path.join("data").join(plando_filename));
         roll_output.rsl_instructions = if let OutputMode::Bench { .. } = output_mode {
             #[cfg(any(target_os = "linux", target_os = "windows"))] {

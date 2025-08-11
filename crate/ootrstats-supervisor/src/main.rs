@@ -209,6 +209,9 @@ struct Args {
     /// Specifies a JSON object of settings on the command line that will override the given preset or settings string.
     #[clap(long, conflicts_with("rsl"), default_value = "{}", value_parser = parse_json_object)]
     json_settings: serde_json::Map<String, serde_json::Value>,
+    /// Specifies a JSON object of a plandomizer file on the command line.
+    #[clap(long, default_value = "{}", conflicts_with("rsl"), value_parser = parse_json_object)]
+    plando: serde_json::Map<String, serde_json::Value>,
     /// Generate seeds with varying world counts.
     #[clap(long, conflicts_with("rsl"))]
     world_counts: bool,
@@ -533,6 +536,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                 RandoSettings::Default
             },
             json_settings: args.json_settings,
+            plando: args.plando,
             world_counts: args.world_counts,
             seeds: if let Some(seed) = args.seed {
                 Seeds::Fixed(seed)
@@ -563,6 +567,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
     let start = Instant::now();
     let start_local = Local::now();
     let mut seed_states = Vec::from_iter(iter::repeat_with(|| SeedState::Unchecked).take(args.num_seeds.get().into()));
+    let mut retried_failures = vec![0; args.num_seeds.get().into()];
     let mut allowed_workers = HashMap::new();
     let (reader_tx, mut reader_rx) = mpsc::channel(args.num_seeds.get().min(256).into());
     let mut readers = (0..available_parallelism.get()).map(|task_idx| {
@@ -708,6 +713,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                             let error_log = Bytes::from(fs::read(stats_dir.join(seed_idx.to_string()).join("error.log")).await?);
                             if args.retry_failures || parse_traceback(&worker, std::str::from_utf8(&error_log)?)?.1.contains("Cannot allocate memory") {
                                 fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
+                                retried_failures[usize::from(seed_idx)] += 1;
                                 seed_states[usize::from(seed_idx)] = SeedState::Pending;
                             } else {
                                 allowed_workers.insert(seed_idx, nev![worker.clone()]);
@@ -984,6 +990,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                 new_workers.swap_remove(pos);
                                 if args.retry_failures || parse_traceback(&name, std::str::from_utf8(&error_log)?)?.1.contains("Cannot allocate memory") {
                                     fs::remove_dir_all(seed_dir).await.missing_ok()?;
+                                    retried_failures[usize::from(seed_idx)] += 1;
                                     if let Some(new_workers) = NEVec::try_from_vec(new_workers) {
                                         *worker_names = new_workers;
                                     } else {
@@ -1130,6 +1137,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             world_counts: args.world_counts,
             seed_states: &seed_states,
             allowed_workers: &allowed_workers,
+            retried_failures: &retried_failures,
             workers: &workers,
             label, available_parallelism, completed_readers, start, start_local,
         }.print(args.json_messages, &mut stderr)?;

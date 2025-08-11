@@ -27,6 +27,7 @@ semver = "1.0.23"
 serde_json = { package = "serde_json_path_to_error", version = "0.1" }
 syn = { version = "2.0.66", default-features = false, features = ["parsing"] }
 systemstat = "0.2.5"
+tempfile = "3.20.0"
 thiserror = "2"
 tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }
 wheel = { git = "https://github.com/fenhl/wheel", branch = "main" }
