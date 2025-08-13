@@ -145,7 +145,7 @@ async fn wait_ready(min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_po
                 message = format!(
                     "waiting for disk space on {} to be freed ({} available, {} required)",
                     vol.display(),
-                    fs.avail,
+                    ByteSize::b(fs.avail.as_u64()),
                     min_disk.max(ByteSize::b((fs.total.as_u64() as f64 * (min_disk_percent / 100.0)).ceil() as u64)),
                 );
             }
