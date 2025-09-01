@@ -242,7 +242,7 @@ async fn python() -> Result<PathBuf, RollError> {
     })
 }
 
-pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli: bool, supports_unsalted_seeds: bool, seeds: Seeds, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, plando: Option<&Path>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
+pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli: bool, supports_unsalted_seeds: bool, creates_log_by_default: bool, seeds: Seeds, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, plando: Option<&Path>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let mut resolved_settings = collect![as HashMap<_, _>:
         Cow::Borrowed("check_version") => json!(true), // inverted Boolean, avoids spamming GitHub with randomizer update checks
         Cow::Borrowed("create_spoiler") => json!(true),
@@ -308,7 +308,9 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
             #[cfg(not(target_os = "windows"))] { Command::new(repo_path.join("target").join("release").join("ootr-cli")) }
         };
         cmd.env("PATH", env::join_paths([PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")].into_iter().chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect_vec()).into_iter().flatten()))?);
-        cmd.arg("--no-log");
+        if creates_log_by_default {
+            cmd.arg("--no-log");
+        }
         match settings {
             RandoSettings::Default => {}
             RandoSettings::Preset(preset) => {
@@ -364,7 +366,9 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
         };
         cmd.arg("-c");
         cmd.arg("import OoTRandomizer; OoTRandomizer.start()"); // called this way to allow mypyc optimization to work
-        cmd.arg("--no_log");
+        if creates_log_by_default {
+            cmd.arg("--no_log");
+        }
         match settings {
             RandoSettings::Default => {}
             RandoSettings::Preset(preset) => {
@@ -518,7 +522,7 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
     })
 }
 
-pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, rsl_version: &str, use_rust_cli: bool, supports_unsalted_seeds: bool, seeds: Seeds, preset: Option<&str>, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
+pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, rsl_version: &str, use_rust_cli: bool, supports_unsalted_seeds: bool, creates_log_by_default: bool, seeds: Seeds, preset: Option<&str>, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let python = python().await?;
     #[cfg_attr(not(target_os = "windows"), allow(unused_mut))] let mut cmd_name = python.display().to_string();
     let (supports_plando_filename_base, supports_seed, supports_no_salt) = if let Some((_, major, minor, patch, supplementary)) = regex_captures!(r"^([0-9]+)\.([0-9]+)\.([0-9]+) Fenhl-([0-9]+)(?: riir-[0-9]+)?$", &rsl_version.trim()) {
@@ -605,7 +609,7 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
     if output.status.success() || output.status.code() == Some(3) {
         let stdout = BufRead::lines(&*output.stdout).try_collect::<_, Vec<_>, _>().at_command(cmd_name)?;
         let plando_filename = stdout.iter().rev().find_map(|line| line.strip_prefix("Plando File: ")).ok_or_else(|| RollError::SpoilerLogPath(output.clone()))?;
-        let mut roll_output = run_rando(wsl_distro, &repo_path.join("randomizer"), use_rust_cli, supports_unsalted_seeds, seeds, &RandoSettings::Default, &collect![
+        let mut roll_output = run_rando(wsl_distro, &repo_path.join("randomizer"), use_rust_cli, supports_unsalted_seeds, creates_log_by_default, seeds, &RandoSettings::Default, &collect![
             format!("rom") => json!("../data/oot-ntscu-1.0.n64"),
         ], Some(Path::new(&format!("../data/{plando_filename}"))), false, seed_idx, output_mode).await?;
         roll_output.rsl_plando = Some(repo_path.join("data").join(plando_filename));
