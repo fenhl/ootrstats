@@ -443,7 +443,7 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
                 let rsl_version = rsl_version.clone().unwrap();
                 let seeds = seeds.clone();
                 let preset = preset.clone();
-                Either::Right(async move { crate::run_rsl(wsl_distro.as_deref(), &repo_path, &rsl_version, use_rust_cli, supports_unsalted_seeds, creates_log_by_default, seeds, preset.as_deref(), seed_idx, output_mode).await })
+                Either::Right(async move { crate::run_rsl(wsl_distro.as_deref(), &repo_path, &rsl_version, use_rust_cli, supports_unsalted_seeds, creates_log_by_default, seeds, preset.as_ref(), seed_idx, output_mode).await })
             }
         };
         let tx = tx.clone();

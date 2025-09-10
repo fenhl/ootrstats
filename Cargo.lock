@@ -164,6 +164,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "bytesize 2.0.1",
+ "either",
  "fallible_collections",
  "futures",
  "gix-hash 0.19.0",
@@ -4014,7 +4015,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats"
-version = "23.0.0"
+version = "24.0.0"
 dependencies = [
  "async-proto 0.26.2",
  "bytes",
@@ -4045,7 +4046,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-deploy"
-version = "23.0.0"
+version = "24.0.0"
 dependencies = [
  "clap",
  "ootrstats-supervisor",
@@ -4056,7 +4057,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-macros"
-version = "23.0.0"
+version = "24.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4065,7 +4066,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-supervisor"
-version = "23.0.0"
+version = "24.0.0"
 dependencies = [
  "async-proto 0.26.2",
  "bytes",
@@ -4104,7 +4105,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-daemon"
-version = "23.0.0"
+version = "24.0.0"
 dependencies = [
  "async-proto 0.26.2",
  "constant_time_eq",
@@ -4129,7 +4130,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-windows-service"
-version = "23.0.0"
+version = "24.0.0"
 dependencies = [
  "mimalloc",
  "ootrstats-worker-daemon",

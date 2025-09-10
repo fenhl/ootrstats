@@ -21,6 +21,7 @@ use {
         BaseDirs,
         UserDirs,
     },
+    either::Either,
     if_chain::if_chain,
     itertools::Itertools as _,
     lazy_regex::regex_captures,
@@ -64,7 +65,7 @@ pub enum RandoSetup {
     Rsl {
         github_user: String,
         repo: String,
-        preset: Option<String>,
+        preset: Option<Either<String, serde_json::Map<String, serde_json::Value>>>,
         seeds: Seeds,
     },
 }
@@ -101,8 +102,16 @@ impl RandoSetup {
                 let path = Path::new("rsl")
                     .join(github_user)
                     .join(repo)
-                    .join(rando_rev.to_string())
-                    .join(preset.as_deref().unwrap_or("default"));
+                    .join(rando_rev.to_string());
+                let path = match preset {
+                    None => path.join("default"),
+                    Some(Either::Left(name)) => path.join(name),
+                    Some(Either::Right(weights)) => {
+                        let mut hasher = StableSipHasher128::default();
+                        weights.hash(&mut hasher);
+                        path.join(format!("j{:016x}", Hasher::finish(&hasher)))
+                    }
+                };
                 match seeds {
                     Seeds::Default => path.join("default"),
                     Seeds::Random => path.join("r"),
@@ -522,7 +531,7 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
     })
 }
 
-pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, rsl_version: &str, use_rust_cli: bool, supports_unsalted_seeds: bool, creates_log_by_default: bool, seeds: Seeds, preset: Option<&str>, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
+pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, rsl_version: &str, use_rust_cli: bool, supports_unsalted_seeds: bool, creates_log_by_default: bool, seeds: Seeds, preset: Option<&Either<String, serde_json::Map<String, serde_json::Value>>>, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let python = python().await?;
     #[cfg_attr(not(target_os = "windows"), allow(unused_mut))] let mut cmd_name = python.display().to_string();
     let (supports_plando_filename_base, supports_seed, supports_no_salt) = if let Some((_, major, minor, patch, supplementary)) = regex_captures!(r"^([0-9]+)\.([0-9]+)\.([0-9]+) Fenhl-([0-9]+)(?: riir-[0-9]+)?$", &rsl_version.trim()) {
@@ -596,15 +605,29 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
             }
         }
     }
-    if let Some(preset) = preset {
-        cmd.arg(format!("--override=weights/{preset}_override.json"));
-    }
     cmd.stdin(Stdio::null());
+    let mut input = None;
+    if let Some(preset) = preset {
+        match preset {
+            Either::Left(name) => { cmd.arg(format!("--override=weights/{name}_override.json")); }
+            Either::Right(weights) => {
+                cmd.arg("--override=-");
+                cmd.stdin(Stdio::piped());
+                input = Some(serde_json::to_vec(&weights)?);
+            }
+        }
+    }
     cmd.current_dir(repo_path);
     if let Some(user_dirs) = UserDirs::new() {
         cmd.env("PATH", env::join_paths([user_dirs.home_dir().join(".cargo").join("bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")].into_iter().chain(env::var_os("PATH").map(|path| env::split_paths(&path).collect_vec()).into_iter().flatten()))?);
     }
-    let output = cmd.output().await.at_command(cmd_name.clone())?;
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    let mut process = cmd.spawn().at_command(cmd_name.clone())?;
+    if let Some(input) = input {
+        process.stdin.as_mut().expect("piped stdin missing").write_all(&input).await.at_command(cmd_name.clone())?;
+    }
+    let output = process.wait_with_output().await.at_command(cmd_name.clone())?;
     let stderr = BufRead::lines(&*output.stderr).try_collect::<_, Vec<_>, _>().at_command(cmd_name.clone())?;
     if output.status.success() || output.status.code() == Some(3) {
         let stdout = BufRead::lines(&*output.stdout).try_collect::<_, Vec<_>, _>().at_command(cmd_name)?;

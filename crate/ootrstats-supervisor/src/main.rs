@@ -207,7 +207,7 @@ struct Args {
     #[clap(long, conflicts_with("rsl"), conflicts_with("preset"), conflicts_with("settings"))]
     draft: Option<PathBuf>,
     /// Specifies a JSON object of settings on the command line that will override the given preset or settings string.
-    #[clap(long, conflicts_with("rsl"), default_value = "{}", value_parser = parse_json_object)]
+    #[clap(long, default_value = "{}", value_parser = parse_json_object)]
     json_settings: serde_json::Map<String, serde_json::Value>,
     /// Specifies a JSON object of a plandomizer file on the command line.
     #[clap(long, default_value = "{}", conflicts_with("rsl"), value_parser = parse_json_object)]
@@ -512,7 +512,11 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
         RandoSetup::Rsl {
             github_user: args.github_user,
             repo: repo.into_owned(),
-            preset: args.preset,
+            preset: if args.json_settings.is_empty() {
+                args.preset.map(Either::Left)
+            } else {
+                Some(Either::Right(args.json_settings))
+            },
             seeds: if let Some(seed) = args.seed {
                 Seeds::Fixed(seed)
             } else if args.retry_failures {

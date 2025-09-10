@@ -7,7 +7,7 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-async-proto = { version = "0.26", features = ["bytes", "bytesize", "gix-hash", "serde_json"] }
+async-proto = { version = "0.26", features = ["bytes", "bytesize", "either", "gix-hash", "serde_json"] }
 bytes = "1.5.0"
 bytesize = "2.0.1"
 cargo_metadata = "0.21"

@@ -20,8 +20,10 @@ use {
         style::Print,
         terminal::{
             self,
+            BeginSynchronizedUpdate,
             Clear,
             ClearType,
+            EndSynchronizedUpdate,
         },
     },
     if_chain::if_chain,
@@ -98,6 +100,9 @@ impl Message<'_> {
             serde_json::to_writer(writer, &self)?;
             eprintln!();
         } else {
+            crossterm::execute!(writer,
+                BeginSynchronizedUpdate,
+            ).at_unknown()?;
             match self {
                 Self::Preparing(None) => crossterm::execute!(writer,
                     Print("preparing..."),
@@ -402,6 +407,9 @@ impl Message<'_> {
                     ).at_unknown()?;
                 },
             }
+            crossterm::execute!(writer,
+                EndSynchronizedUpdate,
+            ).at_unknown()?;
         }
         Ok(())
     }
