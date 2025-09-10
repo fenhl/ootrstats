@@ -141,6 +141,32 @@ impl Message<'_> {
                                     ).at_unknown()?;
                                 }
                             }
+                        } else if let Some(ref e) = worker.prev_error {
+                            let kind = if e.is_network_error() { "network error" } else { "error" };
+                            let e = e.to_string();
+                            if_chain! {
+                                if let Ok((width, _)) = terminal::size();
+                                let mut prefix_end = e.len().min(usize::from(width) - worker.name.len() - kind.len() - worker.msg.as_ref().map(|msg| msg.len() + 2).unwrap_or_default() - 8);
+                                if prefix_end + 3 < e.len() || e.contains('\n');
+                                then {
+                                    if let Some(idx) = e[..prefix_end].find('\n') {
+                                        prefix_end = idx;
+                                    } else {
+                                        while !e.is_char_boundary(prefix_end) {
+                                            prefix_end -= 1;
+                                        }
+                                    }
+                                    crossterm::execute!(writer,
+                                        Print(format_args!("\r\n{}: {kind}: {}[…]{}", worker.name, &e[..prefix_end], worker.msg.as_ref().map(|msg| format!(", {msg}")).unwrap_or_default())),
+                                        Clear(ClearType::UntilNewLine),
+                                    ).at_unknown()?;
+                                } else {
+                                    crossterm::execute!(writer,
+                                        Print(format_args!("\r\n{}: {kind}: {e}{}", worker.name, worker.msg.as_ref().map(|msg| format!(", {msg}")).unwrap_or_default())),
+                                        Clear(ClearType::UntilNewLine),
+                                    ).at_unknown()?;
+                                }
+                            }
                         } else {
                             let mut running = Vec::default();
                             let mut completed = 0u16;

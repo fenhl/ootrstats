@@ -217,6 +217,7 @@ pub(crate) struct State {
     pub(crate) name: Arc<str>,
     pub(crate) msg: Option<String>,
     pub(crate) error: Option<Error>,
+    pub(crate) prev_error: Option<Error>,
     pub(crate) ready: u8,
     #[serde(skip)]
     pub(crate) supervisor_tx: Option<mpsc::Sender<SupervisorMessage>>,
@@ -229,6 +230,7 @@ impl State {
         Self {
             msg: None,
             error: None,
+            prev_error: None,
             ready: 0,
             supervisor_tx: None,
             stopping: false,
@@ -238,7 +240,7 @@ impl State {
     }
 
     pub(crate) fn connect(&mut self, worker_tx: mpsc::Sender<(Arc<str>, Message)>, kind: Kind, rando_rev: gix::ObjectId, setup: &RandoSetup, output_mode: OutputMode, min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_points: Option<Vec<PathBuf>>, race: bool) -> JoinHandle<Result<(), Error>> {
-        self.error = None;
+        self.prev_error = self.error.take();
         let (supervisor_tx, supervisor_rx) = mpsc::channel(256);
         self.supervisor_tx = Some(supervisor_tx);
         tokio::spawn(kind.run(self.name.clone(), worker_tx, supervisor_rx, rando_rev, setup.clone(), output_mode, min_disk, min_disk_percent, min_disk_mount_points, race))

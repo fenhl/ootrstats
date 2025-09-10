@@ -775,6 +775,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                 worker.ready += ready;
                                 if worker.error.is_none() && worker.ready > 0 {
                                     worker.msg = None;
+                                    worker.prev_error = None;
                                 }
                             }
                             ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, compressed_rom, uncompressed_rom, rsl_plando } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
