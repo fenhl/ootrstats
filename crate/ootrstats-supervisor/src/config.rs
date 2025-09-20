@@ -54,7 +54,6 @@ pub(crate) enum WorkerKind {
         tls: bool,
         hostname: String,
         password: String,
-        base_rom_path: String,
         wsl_distro: Option<String>,
         #[serde(default)]
         priority_users: Vec<String>,

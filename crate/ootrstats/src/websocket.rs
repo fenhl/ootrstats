@@ -14,7 +14,6 @@ use {
 pub enum ClientMessage {
     Handshake {
         password: String,
-        base_rom_path: String,
         rando_rev: gix_hash::ObjectId,
         setup: RandoSetup,
         output_mode: OutputMode,
@@ -43,8 +42,6 @@ pub enum ServerMessage {
         rsl_instructions: Result<u64, Bytes>,
         spoiler_log: Bytes,
         patch: Option<(String, Bytes)>,
-        compressed_rom: Option<Bytes>,
-        uncompressed_rom: Option<Bytes>,
         rsl_plando: Option<Bytes>,
     },
     Failure {

@@ -219,14 +219,8 @@ struct Args {
     #[clap(long)]
     seed: Option<String>,
     /// Generate .zpf/.zpfz patch files.
-    #[clap(long, conflicts_with("rsl"))]
+    #[clap(long)]
     patch: bool,
-    /// Generate .z64 rom files.
-    #[clap(long, conflicts_with("rsl"))]
-    rom: bool,
-    /// Generate uncompressed .n64 rom files.
-    #[clap(long, conflicts_with("rsl"))]
-    uncompressed_rom: bool,
 
     // ootrstats settings
 
@@ -778,7 +772,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                     worker.prev_error = None;
                                 }
                             }
-                            ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, compressed_rom, uncompressed_rom, rsl_plando } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
+                            ootrstats::worker::Message::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, rsl_plando } => if let SeedState::Rolling { workers: ref mut worker_names } = seed_states[usize::from(seed_idx)] {
                                 let seed_dir = stats_dir.join(seed_idx.to_string());
                                 fs::create_dir_all(&seed_dir).await?;
                                 let stats_spoiler_log_path = seed_dir.join("spoiler.json");
@@ -845,74 +839,6 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                         Either::Right((ext, patch)) => {
                                             let stats_patch_path = seed_dir.join(format!("patch.{ext}"));
                                             fs::write(stats_patch_path, patch).await?;
-                                        }
-                                    }
-                                }
-                                if let Some(compressed_rom) = compressed_rom {
-                                    match compressed_rom {
-                                        Either::Left((wsl, compressed_rom_path)) => {
-                                            let stats_compressed_rom_path = seed_dir.join("rom.z64");
-                                            if let Some(wsl_distro) = wsl {
-                                                let mut cmd = Command::new(WSL);
-                                                if let Some(wsl_distro) = &wsl_distro {
-                                                    cmd.arg("--distribution");
-                                                    cmd.arg(wsl_distro);
-                                                }
-                                                cmd.arg("cat");
-                                                cmd.arg(&compressed_rom_path);
-                                                let compressed_rom = cmd.check("wsl cat").await?.stdout;
-                                                fs::write(stats_compressed_rom_path, compressed_rom).await?;
-                                                let mut cmd = Command::new(WSL);
-                                                if let Some(wsl_distro) = &wsl_distro {
-                                                    cmd.arg("--distribution");
-                                                    cmd.arg(wsl_distro);
-                                                }
-                                                cmd.arg("rm");
-                                                cmd.arg(compressed_rom_path);
-                                                cmd.check("wsl rm").await?;
-                                            } else {
-                                                let is_same_drive = {
-                                                    #[cfg(windows)] {
-                                                        compressed_rom_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
-                                                        == stats_compressed_rom_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
-                                                    }
-                                                    #[cfg(not(windows))] { true }
-                                                };
-                                                if is_same_drive {
-                                                    fs::rename(compressed_rom_path, stats_compressed_rom_path).await?;
-                                                } else {
-                                                    fs::copy(&compressed_rom_path, stats_compressed_rom_path).await?;
-                                                    fs::remove_file(compressed_rom_path).await?;
-                                                }
-                                            }
-                                        }
-                                        Either::Right(compressed_rom) => {
-                                            let stats_compressed_rom_path = seed_dir.join("rom.z64");
-                                            fs::write(stats_compressed_rom_path, compressed_rom).await?;
-                                        }
-                                    }
-                                }
-                                if let Some(uncompressed_rom) = uncompressed_rom {
-                                    match uncompressed_rom {
-                                        Either::Left(uncompressed_rom_path) => {
-                                            let stats_uncompressed_rom_path = seed_dir.join("uncompressed-rom.n64");
-                                            let is_same_drive = {
-                                                #[cfg(windows)] {
-                                                    uncompressed_rom_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
-                                                    == stats_uncompressed_rom_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
-                                                }
-                                                #[cfg(not(windows))] { true }
-                                            };
-                                            if is_same_drive {
-                                                fs::rename(uncompressed_rom_path, stats_uncompressed_rom_path).await?;
-                                            } else {
-                                                fs::copy(&uncompressed_rom_path, stats_uncompressed_rom_path).await?;
-                                                fs::remove_file(uncompressed_rom_path).await?;
-                                            }
-                                        }
-                                        Either::Right(uncompressed_rom) => {
-                                            let stats_uncompressed_rom_path = seed_dir.join("uncompressed-rom.n64");
-                                            fs::write(stats_uncompressed_rom_path, uncompressed_rom).await?;
                                         }
                                     }
                                 }
@@ -1085,14 +1011,9 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                             if worker.supervisor_tx.is_none() && !worker.stopped && pending_seeds.iter().any(|seed_idx| allowed_workers.get(seed_idx).is_none_or(|allowed_workers| allowed_workers.contains(&worker.name))) {
                                 let worker::Config { name, kind, min_disk, min_disk_percent, min_disk_mount_points, .. } = config.workers.iter().find(|config| config.name == worker.name).expect("unconfigured worker");
                                 worker_tasks.push(worker.connect(worker_tx.clone(), kind.clone(), rando_rev, &setup, if let Some(Subcommand::Bench { uncompressed, .. }) = args.subcommand {
-                                    if args.patch { unimplemented!("The `bench` subcommand currently cannot generate patch files") }
                                     OutputMode::Bench { uncompressed }
                                 } else {
-                                    OutputMode::Normal {
-                                        patch: args.patch,
-                                        uncompressed_rom: args.uncompressed_rom,
-                                        compressed_rom: args.rom,
-                                    }
+                                    OutputMode::Normal { patch: args.patch }
                                 }, *min_disk, *min_disk_percent, min_disk_mount_points.clone(), args.race).map(move |res| (name.clone(), res)));
                             }
                         }

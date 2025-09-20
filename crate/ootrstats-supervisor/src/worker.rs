@@ -139,7 +139,7 @@ impl Kind {
                     }
                 }
             }
-            Self::WebSocket { tls, hostname, password, base_rom_path, wsl_distro, priority_users, hide_reboot, hide_sleep } => {
+            Self::WebSocket { tls, hostname, password, wsl_distro, priority_users, hide_reboot, hide_sleep } => {
                 tx.send((name.clone(), Message::Init(format!("connecting WebSocket")))).await?;
                 let (sink, stream) = async_proto::websocket027(format!("{}://{hostname}/v{}", if tls { "wss" } else { "ws" }, Version::parse(env!("CARGO_PKG_VERSION"))?.major)).await?;
                 let mut sink = pin!(sink);
@@ -147,7 +147,7 @@ impl Kind {
                 tx.send((name.clone(), Message::Init(format!("handshaking")))).await?;
                 sink.send(websocket::ClientMessage::Handshake {
                     min_disk_mount_points: min_disk_mount_points.map(|mp| mp.into_iter().map(|p| p.into_os_string().into_string()).collect::<Result<_, _>>()).transpose()?,
-                    password, base_rom_path, wsl_distro, rando_rev, setup, output_mode, min_disk, min_disk_percent, priority_users, race, hide_reboot, hide_sleep,
+                    password, wsl_distro, rando_rev, setup, output_mode, min_disk, min_disk_percent, priority_users, race, hide_reboot, hide_sleep,
                 }).await?;
                 tx.send((name.clone(), Message::Init(format!("waiting for reply from worker")))).await?;
                 let mut ping_interval = interval(Duration::from_secs(30));
@@ -158,11 +158,9 @@ impl Kind {
                         res = timeout(Duration::from_secs(60), stream.next().then(|opt| if let Some(res) = opt { Either::Left(future::ready(res)) } else { Either::Right(future::pending()) })) => match res? {
                             Ok(websocket::ServerMessage::Init(msg)) => tx.send((name.clone(), Message::Init(msg))).await?,
                             Ok(websocket::ServerMessage::Ready(ready)) => tx.send((name.clone(), Message::Ready(ready))).await?,
-                            Ok(websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, compressed_rom, uncompressed_rom, rsl_plando }) => tx.send((name.clone(), Message::Success {
+                            Ok(websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, rsl_plando }) => tx.send((name.clone(), Message::Success {
                                 spoiler_log: Either::Right(spoiler_log),
                                 patch: patch.map(Either::Right),
-                                compressed_rom: compressed_rom.map(Either::Right),
-                                uncompressed_rom: uncompressed_rom.map(Either::Right),
                                 rsl_plando: rsl_plando.map(Either::Right),
                                 seed_idx, instructions, rsl_instructions,
                             })).await?,
@@ -184,11 +182,9 @@ impl Kind {
                                 match res {
                                     Ok(websocket::ServerMessage::Init(msg)) => tx.send((name.clone(), Message::Init(msg))).await?,
                                     Ok(websocket::ServerMessage::Ready(ready)) => tx.send((name.clone(), Message::Ready(ready))).await?,
-                                    Ok(websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, compressed_rom, uncompressed_rom, rsl_plando }) => tx.send((name.clone(), Message::Success {
+                                    Ok(websocket::ServerMessage::Success { seed_idx, instructions, rsl_instructions, spoiler_log, patch, rsl_plando }) => tx.send((name.clone(), Message::Success {
                                         spoiler_log: Either::Right(spoiler_log),
                                         patch: patch.map(Either::Right),
-                                        compressed_rom: compressed_rom.map(Either::Right),
-                                        uncompressed_rom: uncompressed_rom.map(Either::Right),
                                         rsl_plando: rsl_plando.map(Either::Right),
                                         seed_idx, instructions, rsl_instructions,
                                     })).await?,

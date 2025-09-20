@@ -156,8 +156,6 @@ pub enum Seeds {
 pub enum OutputMode {
     Normal {
         patch: bool,
-        compressed_rom: bool,
-        uncompressed_rom: bool,
     },
     Bench {
         uncompressed: bool,
@@ -172,9 +170,6 @@ pub struct RollOutput {
     pub log: Result<PathBuf, Bytes>,
     /// `(is_wsl, path)`
     pub patch: Option<(bool, PathBuf)>,
-    /// `(is_wsl, path)`
-    pub compressed_rom: Option<(bool, PathBuf)>,
-    pub uncompressed_rom: Option<PathBuf>,
     pub rsl_plando: Option<PathBuf>,
 }
 
@@ -256,9 +251,9 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
         Cow::Borrowed("check_version") => json!(true), // inverted Boolean, avoids spamming GitHub with randomizer update checks
         Cow::Borrowed("create_spoiler") => json!(true),
         Cow::Borrowed("create_cosmetics_log") => json!(matches!(output_mode, OutputMode::Bench { .. })),
-        Cow::Borrowed("create_patch_file") => json!(matches!(output_mode, OutputMode::Normal { patch: true, .. })),
-        Cow::Borrowed("create_uncompressed_rom") => json!(matches!(output_mode, OutputMode::Normal { uncompressed_rom: true, .. } | OutputMode::Bench { uncompressed: true })),
-        Cow::Borrowed("create_compressed_rom") => json!(matches!(output_mode, OutputMode::Normal { compressed_rom: true, .. } | OutputMode::Bench { uncompressed: false })),
+        Cow::Borrowed("create_patch_file") => json!(matches!(output_mode, OutputMode::Normal { patch: true, .. } | OutputMode::Bench { .. })),
+        Cow::Borrowed("create_uncompressed_rom") => json!(matches!(output_mode, OutputMode::Bench { .. })),
+        Cow::Borrowed("create_compressed_rom") => json!(matches!(output_mode, OutputMode::Bench { uncompressed: false })),
     ];
     if supports_unsalted_seeds && !matches!(seeds, Seeds::Random) {
         resolved_settings.insert(Cow::Borrowed("salt_seed"), json!(false));
@@ -424,25 +419,21 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
                 fs::remove_file(distribution_file_path).await?;
             }
         }
-        if !matches!(output_mode, OutputMode::Normal { uncompressed_rom: true, .. }) {
-            if let Some(uncompressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Saving Uncompressed ROM: ")) {
-                fs::remove_file(repo_path.join("Output").join(uncompressed_rom_path)).await.missing_ok()?;
-            }
+        if let Some(uncompressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Saving Uncompressed ROM: ")) {
+            fs::remove_file(repo_path.join("Output").join(uncompressed_rom_path)).await.missing_ok()?;
         }
-        if !matches!(output_mode, OutputMode::Normal { compressed_rom: true, .. }) {
-            if let Some(compressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created compressed ROM at: ")) {
-                if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench { .. }) {
-                    let mut cmd = Command::new(WSL);
-                    if let Some(wsl_distro) = wsl_distro {
-                        cmd.arg("--distribution");
-                        cmd.arg(wsl_distro);
-                    }
-                    cmd.arg("rm");
-                    cmd.arg(compressed_rom_path);
-                    cmd.check("wsl rm").await?;
-                } else {
-                    fs::remove_file(compressed_rom_path).await?;
+        if let Some(compressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created compressed ROM at: ")) {
+            if cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench { .. }) {
+                let mut cmd = Command::new(WSL);
+                if let Some(wsl_distro) = wsl_distro {
+                    cmd.arg("--distribution");
+                    cmd.arg(wsl_distro);
                 }
+                cmd.arg("rm");
+                cmd.arg(compressed_rom_path);
+                cmd.check("wsl rm").await?;
+            } else {
+                fs::remove_file(compressed_rom_path).await?;
             }
         }
         if let Some(cosmetics_log_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created cosmetic log at: ")) {
@@ -500,26 +491,6 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, use_rust_cli:
             }
         } else {
             None
-        },
-        compressed_rom: if_chain! {
-            if output.status.success();
-            if let Some(compressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Created compressed ROM at: "));
-            then {
-                Some((cfg!(target_os = "windows") && matches!(output_mode, OutputMode::Bench { .. }), PathBuf::from(compressed_rom_path)))
-            } else {
-                None
-            }
-        },
-        uncompressed_rom: if_chain! {
-            if output.status.success();
-            if let Some(uncompressed_rom_path) = stderr.iter().rev().find_map(|line| line.strip_prefix("Saving Uncompressed ROM: "));
-            let uncompressed_rom_path = repo_path.join("Output").join(uncompressed_rom_path);
-            if fs::exists(&uncompressed_rom_path).await?;
-            then {
-                Some(uncompressed_rom_path)
-            } else {
-                None
-            }
         },
         log: if output.status.success() {
             Ok(repo_path.join("Output").join(stderr.iter().rev().find_map(|line| line.strip_prefix("Created spoiler log at: ")).ok_or_else(|| RollError::SpoilerLogPath(output))?))

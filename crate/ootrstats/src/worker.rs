@@ -77,8 +77,6 @@ pub enum Message {
         rsl_instructions: Result<u64, Bytes>,
         spoiler_log: Either<PathBuf, Bytes>,
         patch: Option<Either<(Option<Option<String>>, PathBuf), (String, Bytes)>>,
-        compressed_rom: Option<Either<(Option<Option<String>>, PathBuf), Bytes>>,
-        uncompressed_rom: Option<Either<PathBuf, Bytes>>,
         rsl_plando: Option<Either<PathBuf, Bytes>>,
     },
     Failure {
@@ -450,15 +448,13 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
         let wsl_distro = wsl_distro.clone();
         tokio::spawn(async move {
             tx.send(match run_future.await? {
-                RollOutput { instructions, rsl_instructions, log: Ok(spoiler_log_path), patch, compressed_rom, uncompressed_rom, rsl_plando } => Message::Success {
+                RollOutput { instructions, rsl_instructions, log: Ok(spoiler_log_path), patch, rsl_plando } => Message::Success {
                     spoiler_log: Either::Left(spoiler_log_path),
                     patch: patch.map(|(is_wsl, patch)| Either::Left((is_wsl.then(|| wsl_distro.clone()), patch))),
-                    compressed_rom: compressed_rom.map(|(is_wsl, compressed_rom)| Either::Left((is_wsl.then(|| wsl_distro.clone()), compressed_rom))),
-                    uncompressed_rom: uncompressed_rom.map(Either::Left),
                     rsl_plando: rsl_plando.map(Either::Left),
                     seed_idx, instructions, rsl_instructions,
                 },
-                RollOutput { instructions, rsl_instructions, log: Err(error_log), patch: _, compressed_rom: _, uncompressed_rom: _, rsl_plando } => Message::Failure {
+                RollOutput { instructions, rsl_instructions, log: Err(error_log), patch: _, rsl_plando } => Message::Failure {
                     rsl_plando: rsl_plando.map(Either::Left),
                     seed_idx, instructions, rsl_instructions, error_log,
                 },

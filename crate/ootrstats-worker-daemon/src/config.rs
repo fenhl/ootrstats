@@ -1,7 +1,10 @@
 use {
-    std::net::{
-        IpAddr,
-        Ipv4Addr,
+    std::{
+        net::{
+            IpAddr,
+            Ipv4Addr,
+        },
+        path::PathBuf,
     },
     serde::Deserialize,
     wheel::fs,
@@ -16,6 +19,7 @@ fn make_default_address() -> IpAddr {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Config {
+    pub(crate) base_rom_path: PathBuf,
     pub(crate) password: String,
     #[serde(default = "make_default_address")]
     pub(crate) address: IpAddr,
