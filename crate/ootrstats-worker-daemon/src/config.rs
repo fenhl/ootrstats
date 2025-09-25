@@ -23,6 +23,8 @@ pub(crate) struct Config {
     pub(crate) password: String,
     #[serde(default = "make_default_address")]
     pub(crate) address: IpAddr,
+    #[serde(default)] // default to using all cores
+    pub(crate) cores: i8,
 }
 
 #[derive(Debug, thiserror::Error)]
