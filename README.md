@@ -91,9 +91,9 @@ And the following optional entries:
 
 # Usage
 
-On the command line, run the `ootrstats-supervisor` command, followed by any options you would like to change from their defaults, followed by an optional subcommand. If no subcommand is given, the supervisor will simply generate the spoiler/error logs, place them in the [`statsDir`](#configuration), and display the path where they were placed.
+On the command line, run the `ootrstats` command, followed by any options you would like to change from their defaults, followed by an optional subcommand. If no subcommand is given, the supervisor will simply generate the spoiler/error logs, place them in the [`statsDir`](#configuration), and display the path where they were placed.
 
-On Windows, it is recommended to use PowerShell to run `ootrstats-supervisor`, as the legacy Windows command prompt (`cmd`) may interpret options incorrectly.
+On Windows, it is recommended to use PowerShell to run `ootrstats`, as the legacy Windows command prompt (`cmd`) may interpret options incorrectly.
 
 The supervisor can be interrupted cleanly using <kbd>C</kbd> or <kbd>D</kbd>. If this is used, the supervisor will wait for seeds currently being rolled to finish before exiting, but will no longer start rolling any new seeds.
 

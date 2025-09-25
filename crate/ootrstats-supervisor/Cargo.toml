@@ -6,6 +6,10 @@ edition.workspace = true
 [lints]
 workspace = true
 
+[[bin]]
+name = "ootrstats"
+path = "src/main.rs"
+
 [dependencies]
 async-proto = { version = "0.26", features = ["tokio-tungstenite027"] }
 bytes = { version = "1.5.0", features = ["serde"] }
