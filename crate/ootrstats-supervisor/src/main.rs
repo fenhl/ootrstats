@@ -207,8 +207,11 @@ struct Args {
     #[clap(long, conflicts_with("rsl"), conflicts_with("preset"), conflicts_with("settings"))]
     draft: Option<PathBuf>,
     /// Specifies a JSON object of settings on the command line that will override the given preset or settings string.
-    #[clap(long, default_value = "{}", value_parser = parse_json_object)]
+    #[clap(long, default_value = "{}", value_parser = parse_json_object, conflicts_with("json_settings_file"))]
     json_settings: serde_json::Map<String, serde_json::Value>,
+    /// Specifies a JSON file of settings that will override the given preset or settings string.
+    #[clap(long, value_parser = parse_json_object, conflicts_with("json_settings"))]
+    json_settings_file: Option<PathBuf>,
     /// Specifies a JSON object of a plandomizer file on the command line.
     #[clap(long, default_value = "{}", conflicts_with("rsl"), value_parser = parse_json_object)]
     plando: serde_json::Map<String, serde_json::Value>,
@@ -520,6 +523,8 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             repo: repo.into_owned(),
             preset: if args.json_settings.is_empty() {
                 args.preset.map(Either::Left)
+            } else if let Some(json_settings_file) = args.json_settings_file {
+                Some(Either::Right(fs::read_json(json_settings_file).await?))
             } else {
                 Some(Either::Right(args.json_settings))
             },
@@ -545,7 +550,11 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             } else {
                 RandoSettings::Default
             },
-            json_settings: args.json_settings,
+            json_settings: if let Some(json_settings_file) = args.json_settings_file {
+                fs::read_json(json_settings_file).await?
+            } else {
+                args.json_settings
+            },
             plando: args.plando,
             world_counts: args.world_counts,
             seeds: if let Some(seed) = args.seed {
