@@ -210,7 +210,7 @@ struct Args {
     #[clap(long, default_value = "{}", value_parser = parse_json_object)]
     json_settings: serde_json::Map<String, serde_json::Value>,
     /// Specifies a JSON file of settings that will override the given preset or settings string.
-    #[clap(long, value_parser = parse_json_object)]
+    #[clap(long)]
     json_settings_file: Option<PathBuf>,
     /// Specifies a JSON object of a plandomizer file on the command line.
     #[clap(long, default_value = "{}", conflicts_with("rsl"), value_parser = parse_json_object)]
@@ -555,8 +555,8 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                 RandoSettings::Default
             },
             json_settings: {
-                let mut settings = if let Some(json_settings_file) = args.json_settings_file {
-                    fs::read_json(json_settings_file).await?
+                let mut settings = if let Some(settings_file) = args.json_settings_file {
+                    fs::read_json(settings_file).await?
                 } else {
                     serde_json::Map::default()
                 };
