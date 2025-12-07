@@ -207,10 +207,10 @@ struct Args {
     #[clap(long, conflicts_with("rsl"), conflicts_with("preset"), conflicts_with("settings"))]
     draft: Option<PathBuf>,
     /// Specifies a JSON object of settings on the command line that will override the given preset or settings string.
-    #[clap(long, default_value = "{}", value_parser = parse_json_object, conflicts_with("json_settings_file"))]
+    #[clap(long, default_value = "{}", value_parser = parse_json_object)]
     json_settings: serde_json::Map<String, serde_json::Value>,
     /// Specifies a JSON file of settings that will override the given preset or settings string.
-    #[clap(long, value_parser = parse_json_object, conflicts_with("json_settings"))]
+    #[clap(long, value_parser = parse_json_object)]
     json_settings_file: Option<PathBuf>,
     /// Specifies a JSON object of a plandomizer file on the command line.
     #[clap(long, default_value = "{}", conflicts_with("rsl"), value_parser = parse_json_object)]
@@ -521,12 +521,16 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
         RandoSetup::Rsl {
             github_user: args.github_user,
             repo: repo.into_owned(),
-            preset: if args.json_settings.is_empty() {
+            preset: if args.json_settings_file.is_none() && args.json_settings.is_empty() {
                 args.preset.map(Either::Left)
-            } else if let Some(json_settings_file) = args.json_settings_file {
-                Some(Either::Right(fs::read_json(json_settings_file).await?))
             } else {
-                Some(Either::Right(args.json_settings))
+                let mut settings = if let Some(settings_file) = args.json_settings_file {
+                    fs::read_json(settings_file).await?
+                } else {
+                    serde_json::Map::default()
+                };
+                settings.append(&mut args.json_settings);
+                Some(Either::Right(settings))
             },
             seeds: if let Some(seed) = args.seed {
                 Seeds::Fixed(seed)
@@ -550,10 +554,14 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             } else {
                 RandoSettings::Default
             },
-            json_settings: if let Some(json_settings_file) = args.json_settings_file {
-                fs::read_json(json_settings_file).await?
-            } else {
-                args.json_settings
+            json_settings: {
+                let mut settings = if let Some(json_settings_file) = args.json_settings_file {
+                    fs::read_json(json_settings_file).await?
+                } else {
+                    serde_json::Map::default()
+                };
+                settings.append(&mut args.json_settings);
+                settings
             },
             plando: args.plando,
             world_counts: args.world_counts,
