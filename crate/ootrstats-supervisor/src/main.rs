@@ -103,15 +103,15 @@ mod config;
 mod msg;
 mod worker;
 
-fn parse_traceback<'a>(worker: &Arc<str>, error_log: &'a str) -> Result<(&'a str, &'a str), Error> {
+fn parse_traceback<'a>(worker: &Arc<str>, seed_idx: SeedIdx, error_log: &'a str) -> Result<(&'a str, &'a str), Error> {
     //TODO account for additional output from macOS `time`
     let mut rev_lines = error_log.trim().lines().rev();
-    let mut msg = rev_lines.next().ok_or(Error::EmptyErrorLog)?;
+    let mut msg = rev_lines.next().ok_or_else(|| Error::EmptyErrorLog(seed_idx))?;
     let _ = rev_lines.next().ok_or_else(|| Error::MissingTraceback { worker: worker.clone(), error_log: error_log.to_owned(), missing_part: "skip" })?;
     let mut location = rev_lines.next().ok_or_else(|| Error::MissingTraceback { worker: worker.clone(), error_log: error_log.to_owned(), missing_part: "location" })?;
     if rev_lines.any(|line| line.contains("Performance counter stats")) {
-        let _ = rev_lines.next().ok_or(Error::EmptyErrorLog);
-        msg = rev_lines.next().ok_or(Error::EmptyErrorLog)?;
+        let _ = rev_lines.next().ok_or_else(|| Error::EmptyErrorLog(seed_idx));
+        msg = rev_lines.next().ok_or_else(|| Error::EmptyErrorLog(seed_idx))?;
         let _ = rev_lines.next().ok_or_else(|| Error::MissingTraceback { worker: worker.clone(), error_log: error_log.to_owned(), missing_part: "skip (perf)" })?;
         location = rev_lines.next().ok_or_else(|| Error::MissingTraceback { worker: worker.clone(), error_log: error_log.to_owned(), missing_part: "location (perf)" })?;
     }
@@ -292,9 +292,18 @@ enum Error {
         source: syn::Error,
     },
     #[error("empty error log")]
-    EmptyErrorLog,
+    EmptyErrorLog(SeedIdx),
+    #[error("failed to compile JSON query")]
+    JaqCompile,
+    #[error("failed to initialize JSON query parser")]
+    JaqDefs,
     #[error("failed to parse JSON query")]
-    Jaq,
+    JaqParse,
+    #[error("got error value from JSON query: {display}")]
+    JaqValue {
+        display: String,
+        debug: String,
+    },
     #[cfg(windows)]
     #[error("user folder not found")]
     MissingHomeDir,
@@ -330,8 +339,11 @@ impl IsNetworkError for Error {
             | Self::Utf8(_)
             | Self::Cancelled
             | Self::DraftParse { .. }
-            | Self::EmptyErrorLog
-            | Self::Jaq
+            | Self::EmptyErrorLog(_)
+            | Self::JaqCompile
+            | Self::JaqDefs
+            | Self::JaqParse
+            | Self::JaqValue { .. }
             | Self::MissingTraceback { .. }
             | Self::SuccessAndFailure
             | Self::TooManyWorlds
@@ -709,7 +721,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                         }
                         ReaderMessage::Failure { worker, seed_idx, instructions, rsl_instructions } => {
                             let error_log = Bytes::from(fs::read(stats_dir.join(seed_idx.to_string()).join("error.log")).await?);
-                            if args.retry_failures || parse_traceback(&worker, std::str::from_utf8(&error_log)?)?.1.contains("Cannot allocate memory") {
+                            if args.retry_failures || parse_traceback(&worker, seed_idx, std::str::from_utf8(&error_log)?)?.1.contains("Cannot allocate memory") {
                                 fs::remove_dir_all(stats_dir.join(seed_idx.to_string())).await?;
                                 retried_failures[usize::from(seed_idx)] += 1;
                                 seed_states[usize::from(seed_idx)] = SeedState::Pending;
@@ -919,7 +931,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                 let mut new_workers = Vec::from(worker_names.clone());
                                 let pos = new_workers.iter().position(|worker| *worker == name).expect("got failure from a worker that wasn't rolling that seed");
                                 new_workers.swap_remove(pos);
-                                if args.retry_failures || parse_traceback(&name, std::str::from_utf8(&error_log)?)?.1.contains("Cannot allocate memory") {
+                                if args.retry_failures || parse_traceback(&name, seed_idx, std::str::from_utf8(&error_log)?)?.1.contains("Cannot allocate memory") {
                                     fs::remove_dir_all(seed_dir).await.missing_ok()?;
                                     retried_failures[usize::from(seed_idx)] += 1;
                                     if let Some(new_workers) = NEVec::try_from_vec(new_workers) {
@@ -1157,22 +1169,22 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             defs.insert_natives(jaq_core::core());
             defs.insert_defs(jaq_std::std());
             if !defs.errs.is_empty() {
-                return Err(Error::Jaq)
+                return Err(Error::JaqDefs)
             }
             let (filter, errs) = jaq_parse::parse(&query, jaq_parse::main());
             if !errs.is_empty() {
-                return Err(Error::Jaq)
+                return Err(Error::JaqParse)
             }
             let filter = defs.compile(filter.unwrap());
             if !defs.errs.is_empty() {
-                return Err(Error::Jaq)
+                return Err(Error::JaqCompile)
             }
             let inputs = jaq_interpret::RcIter::new(iter::empty());
             let mut outputs = BTreeMap::<jaq_interpret::Val, usize>::default();
             for state in seed_states {
                 if let SeedState::Success { spoiler_log, .. } = state {
                     for value in jaq_interpret::FilterT::run(&filter, (jaq_interpret::Ctx::new([], &inputs), jaq_interpret::Val::from(spoiler_log))) {
-                        *outputs.entry(value.map_err(|_| Error::Jaq)?).or_default() += 1;
+                        *outputs.entry(value.map_err(|e| Error::JaqValue { display: e.to_string(), debug: format!("{e:?}") })?).or_default() += 1;
                     }
                 }
             }
@@ -1186,7 +1198,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             let mut counts = HashMap::<_, HashMap<_, (SeedIdx, usize)>>::default();
             for (seed_idx, state) in seed_states.iter().enumerate() {
                 if let SeedState::Failure { worker, error_log, .. } = state {
-                    let (location, msg) = parse_traceback(worker, std::str::from_utf8(error_log)?)?;
+                    let (location, msg) = parse_traceback(worker, seed_idx.try_into()?, std::str::from_utf8(error_log)?)?;
                     match counts.entry(location).or_default().entry(msg) {
                         hash_map::Entry::Occupied(mut entry) => entry.get_mut().1 += 1,
                         hash_map::Entry::Vacant(entry) => { entry.insert((seed_idx.try_into()?, 1)); }
