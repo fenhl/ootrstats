@@ -3937,6 +3937,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ootrstats-worker-windows-service-uninstaller"
+version = "25.1.0"
+dependencies = [
+ "windows-service",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

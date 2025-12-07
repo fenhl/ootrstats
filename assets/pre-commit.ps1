@@ -13,7 +13,7 @@ if (-not $?)
     throw 'Native Failure'
 }
 
-wsl -d ubuntu-m2 env -C /home/fenhl/wslgit/github.com/fenhl/ootrstats /home/fenhl/.cargo/bin/cargo check --workspace --exclude=ootrstats-worker-windows-service --exclude=ootrstats-worker-windows-service-installer
+wsl -d ubuntu-m2 env -C /home/fenhl/wslgit/github.com/fenhl/ootrstats /home/fenhl/.cargo/bin/cargo check --workspace --exclude=ootrstats-worker-windows-service --exclude=ootrstats-worker-windows-service-installer --exclude=ootrstats-worker-windows-service-uninstaller
 if (-not $?)
 {
     throw 'Native Failure'
