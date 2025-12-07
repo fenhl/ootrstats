@@ -24,14 +24,8 @@
                 src = ./.;
                 cargoBuildFlags = "--package=ootrstats-worker-daemon";
                 cargoLock = {
+                    allowBuiltinFetchGit = true; # allows omitting cargoLock.outputHashes
                     lockFile = ./Cargo.lock;
-                    outputHashes = {
-                        "decompress-3.0.1" = "sha256-g1B6DcUcs5bhMGuBwSy/V1jg6Cwkc5MmLi9Vvl5naKg=";
-                        "log-lock-0.2.5" = "sha256-YuS4YzhVDI6kclnad4LCaiUf2/jPesI9ECaR+cS8Ua0=";
-                        "ootr-utils-0.6.3" = "sha256-RzqUlguQmYYkiHs/5UKf3eQEcIh4k5mVGGwRwqjqbso=";
-                        "rocket-util-0.2.15" = "sha256-j/kxIwbiBlzWIRl0CfGep1GiRvbq8MfeZse0CxntD/E=";
-                        "wheel-0.15.0" = "sha256-VUB7MZR/wzJifztgmey88G9/L00+yC8xghieCwMlacU=";
-                    };
                 };
             };
         });
