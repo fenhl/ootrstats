@@ -40,7 +40,8 @@ use {
         },
     },
 };
-#[cfg(target_os = "macos")] use xdg::BaseDirectories;
+#[cfg(all(target_os = "macos", not(feature = "nixos")))] use xdg::BaseDirectories;
+#[cfg(all(target_os = "macos", feature = "nixos"))] use xdg as _;
 
 mod draft;
 pub mod websocket;
@@ -233,15 +234,18 @@ async fn python() -> Result<PathBuf, RollError> {
             }
         }
         #[cfg(target_os = "macos")] {
-            let venv = BaseDirectories::new().place_data_file("ootrstats/venv").at_unknown()?;
-            if !fs::exists(&venv).await? {
-                let system_python = {
-                    #[cfg(target_arch = "aarch64")] { "/opt/homebrew/bin/python3" }
-                    #[cfg(target_arch = "x86_64")] { "/usr/local/bin/python3" }
-                };
-                Command::new(system_python).arg("-m").arg("venv").arg(&venv).check("python -m venv").await?;
+            #[cfg(feature = "nixos")] { PathBuf::from("python3") }
+            #[cfg(not(feature = "nixos"))] {
+                let venv = BaseDirectories::new().place_data_file("ootrstats/venv").at_unknown()?;
+                if !fs::exists(&venv).await? {
+                    let system_python = {
+                        #[cfg(target_arch = "aarch64")] { "/opt/homebrew/bin/python3" }
+                        #[cfg(target_arch = "x86_64")] { "/usr/local/bin/python3" }
+                    };
+                    Command::new(system_python).arg("-m").arg("venv").arg(&venv).check("python -m venv").await?;
+                }
+                venv.join("bin").join("python")
             }
-            venv.join("bin").join("python")
         }
     })
 }

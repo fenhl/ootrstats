@@ -3834,17 +3834,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ootrstats-deploy"
-version = "25.1.0"
-dependencies = [
- "clap",
- "ootrstats-supervisor",
- "thiserror 2.0.17",
- "tokio",
- "wheel",
-]
-
-[[package]]
 name = "ootrstats-macros"
 version = "25.1.0"
 dependencies = [

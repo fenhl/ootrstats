@@ -6,6 +6,9 @@ edition.workspace = true
 [lints]
 workspace = true
 
+[features]
+nixos = []
+
 [dependencies]
 async-proto = { version = "0.26", features = ["bytes", "bytesize", "either", "gix-hash", "serde_json"] }
 bytes = "1.5.0"

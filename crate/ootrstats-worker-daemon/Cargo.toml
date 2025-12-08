@@ -6,6 +6,9 @@ edition.workspace = true
 [lints]
 workspace = true
 
+[features]
+nixos = ["ootrstats/nixos"]
+
 [dependencies]
 async-proto = { version = "0.26", features = ["tokio-tungstenite021"] }
 constant_time_eq = "0.4.0"

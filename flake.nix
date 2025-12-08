@@ -19,14 +19,17 @@
             manifest = (pkgs.lib.importTOML ./Cargo.toml).workspace.package;
         in {
             default = pkgs.rustPlatform.buildRustPackage {
-                pname = "ootrstats-worker-daemon";
-                version = manifest.version;
-                src = ./.;
-                cargoBuildFlags = "--package=ootrstats-worker-daemon";
+                buildAndTestSubdir = "crate/ootrstats-worker-daemon";
+                buildFeatures = [
+                    "nixos"
+                ];
                 cargoLock = {
                     allowBuiltinFetchGit = true; # allows omitting cargoLock.outputHashes
                     lockFile = ./Cargo.lock;
                 };
+                pname = "ootrstats-worker-daemon";
+                src = ./.;
+                version = manifest.version;
             };
         });
     };
