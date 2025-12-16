@@ -28,7 +28,7 @@
 
 # Configuration
 
-`ootrstats` requires a configuration file, which should be a [JSON](https://json.org/) object located at `$XDG_CONFIG_DIRS/ootrstats.json` on Unix, or `%APPDATA%\Fenhl\ootrstats\config\config.json` on Windows. For quick setup, you can use the following file (replacing the `baseRomPath` value with the actual path to your base rom); see below for customization options.
+`ootrstats` requires a configuration file, which should be a [JSON](https://json.org/) object located at `$XDG_CONFIG_DIRS/ootrstats.json` on Unix, or `%APPDATA%\Fenhl\ootrstats\config\config.json` on Windows. (`%APPDATA%` defaults to `AppData\Roaming` in your user folder. Create any folders on this path that don't exist.) For quick setup, you can use the following file (replacing the `baseRomPath` value with the actual path to your base rom); see below for customization options.
 
 ```json
 {
