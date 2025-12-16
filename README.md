@@ -83,7 +83,7 @@ And the following optional entries:
 A worker that listens to WebSocket connections from the supervisor. To set up, do the following on the worker computer:
 
 1. Install Rust
-2. Run `cargo install --git=https://github.com/fenhl/ootrstats --branch=main ootrstats-worker-daemon`
+2. Run `cargo install --git=https://github.com/fenhl/ootrstats ootrstats-worker-daemon`
 3. Create a JSON file at `$XDG_CONFIG_DIRS/ootrstats-worker-daemon.json` on Unix or `%APPDATA%\Fenhl\ootrstats\config\worker-daemon.json` on Windows, containing a JSON object with the following entries:
     * `baseRomPath` (required): An absolute path to the vanilla OoT rom on the worker computer. See [the randomizer's documentation](https://github.com/OoTRandomizer/OoT-Randomizer#installation) for details.
     * `password` (required): A password string that the supervisor will use to connect to this worker.
