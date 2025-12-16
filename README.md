@@ -58,7 +58,7 @@ A worker is a computer that rolls seeds. Each worker configuration is a JSON obj
 * `name`: A string which will be displayed on the progress display on the command line, as well as in error messages.
 * `kind`: One of the section headers listed below.
 
-And the following optional entry:
+And the following optional entries:
 
 * `bench`: If `false`, this worker is skipped when the `bench` subcommand is used. The default is `true`.
 * `minDisk`: The worker will not start rolling new seeds while the available disk space is less than this amount. Set to `"0 B"` to disable this check. The default is `"5 GiB"`.
