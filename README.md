@@ -12,7 +12,7 @@
 4. In the command line, run the following command. Depending on your computer, this may take a while; you can [configure ootrstats](#configuration) while it's running.
 
     ```
-    cargo install --git=https://github.com/fenhl/ootrstats --branch=main ootrstats-supervisor
+    cargo install --git=https://github.com/fenhl/ootrstats ootrstats-supervisor
     ```
 
 # Updating
