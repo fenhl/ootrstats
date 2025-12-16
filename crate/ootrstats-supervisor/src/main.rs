@@ -279,8 +279,16 @@ enum Subcommand {
 #[derive(Debug, thiserror::Error)]
 enum Error {
     #[error(transparent)] Config(#[from] config::Error),
+    #[error(transparent)] GitCheckout(#[from] gix::clone::checkout::main_worktree::Error),
+    #[error(transparent)] GitClone(#[from] gix::clone::Error),
+    #[error(transparent)] GitCloneFetch(#[from] gix::clone::fetch::Error),
+    #[error(transparent)] GitConnect(#[from] gix::remote::connect::Error),
+    #[error(transparent)] GitFetch(#[from] gix::remote::fetch::Error),
+    #[error(transparent)] GitFindRemote(#[from] gix::remote::find::existing::Error),
     #[error(transparent)] GitHeadId(#[from] gix::reference::head_id::Error),
     #[error(transparent)] GitOpen(#[from] gix::open::Error),
+    #[error(transparent)] GitPrepareFetch(#[from] gix::remote::fetch::prepare::Error),
+    #[error(transparent)] GitValidateRefName(#[from] gix::validate::reference::name::Error),
     #[error(transparent)] Json(#[from] serde_json::Error),
     #[error(transparent)] Task(#[from] JoinError),
     #[error(transparent)] TryFromInt(#[from] std::num::TryFromIntError),
@@ -316,6 +324,8 @@ enum Error {
         error_log: String,
         missing_part: &'static str,
     },
+    #[error("no default remote configured for randomizer repo")]
+    NoDefaultRemote,
     #[error("found both spoiler and error logs for a seed")]
     SuccessAndFailure,
     #[error("at most 255 seeds may be generated with the --world-counts option")]
@@ -333,8 +343,16 @@ impl IsNetworkError for Error {
     fn is_network_error(&self) -> bool {
         match self {
             | Self::Config(_)
+            | Self::GitCheckout(_)
+            | Self::GitClone(_)
+            | Self::GitCloneFetch(_)
+            | Self::GitConnect(_)
+            | Self::GitFetch(_)
+            | Self::GitFindRemote(_)
             | Self::GitHeadId(_)
             | Self::GitOpen(_)
+            | Self::GitPrepareFetch(_)
+            | Self::GitValidateRefName(_)
             | Self::Json(_)
             | Self::Task(_)
             | Self::TryFromInt(_)
@@ -348,6 +366,7 @@ impl IsNetworkError for Error {
             | Self::JaqParse
             | Self::JaqValue { .. }
             | Self::MissingTraceback { .. }
+            | Self::NoDefaultRemote
             | Self::SuccessAndFailure
             | Self::TooManyWorlds
             | Self::WorkerNotFound
@@ -474,24 +493,26 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
         };
         let dir = dir_parent.join(dir_name);
         if fs::exists(&dir).await? {
-            Command::new("git")
-                .arg("pull")
-                .current_dir(&dir)
-                .check("git pull").await?;
+            let repo = gix::open(&dir)?;
+            repo.find_default_remote(gix::remote::Direction::Fetch).ok_or(Error::NoDefaultRemote)??
+                .connect(gix::remote::Direction::Fetch)?
+                .prepare_fetch(gix::progress::Discard /*TODO show progress on command line? */, Default::default())?
+                .with_shallow(gix::remote::fetch::Shallow::DepthAtRemote(NonZero::<u32>::MIN))
+                .receive(gix::progress::Discard /*TODO show progress on command line? */, &gix::interrupt::IS_INTERRUPTED)?;
+            Command::new("git").arg("reset").arg("--hard").arg("origin/HEAD").current_dir(dir).check("git reset").await?; //TODO use gix, blocked on https://github.com/GitoxideLabs/gitoxide/issues/301
+            repo
         } else {
             fs::create_dir_all(&dir_parent).await?;
-            let mut cmd = Command::new("git");
-            cmd.arg("clone");
-            cmd.arg("--depth=1");
-            cmd.arg(format!("https://github.com/{}/{repo}.git", args.github_user));
+            let mut clone = gix::prepare_clone(format!("https://github.com/{}/{repo}.git", args.github_user), dir)?
+                .with_shallow(gix::remote::fetch::Shallow::DepthAtRemote(NonZero::<u32>::MIN));
             if let Some(ref branch) = args.branch {
-                cmd.arg("--branch");
-                cmd.arg(branch);
+                clone = clone.with_ref_name(Some(branch))?;
             }
-            cmd.arg(dir_name);
-            cmd.current_dir(dir_parent).check("git clone").await?;
-        }
-        gix::open(dir)?.head_id()?.detach()
+            clone
+                .fetch_then_checkout(gix::progress::Discard /*TODO show progress on command line? */, &gix::interrupt::IS_INTERRUPTED)?.0
+                .main_worktree(gix::progress::Discard /*TODO show progress on command line? */, &gix::interrupt::IS_INTERRUPTED)?
+                .0
+        }.head_id()?.detach()
     };
     let baseline_rando_rev = 'baseline_rando_rev: {
         if let Some(rev) = args.baseline_rev {
