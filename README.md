@@ -27,7 +27,21 @@
 
 # Configuration
 
-`ootrstats` requires a configuration file, which should be a [JSON](https://json.org/) object located at `$XDG_CONFIG_DIRS/ootrstats.json` on Unix, or `%APPDATA%\Fenhl\ootrstats\config\config.json` on Windows. It takes the following required entry:
+`ootrstats` requires a configuration file, which should be a [JSON](https://json.org/) object located at `$XDG_CONFIG_DIRS/ootrstats.json` on Unix, or `%APPDATA%\Fenhl\ootrstats\config\config.json` on Windows. For quick setup, you can use the following file (replacing the `baseRomPath` value with the actual path to your base rom); see below for customization options.
+
+```json
+{
+    "workers": [
+        {
+            "name": "local worker",
+            "kind": "local",
+            "baseRomPath": "/path/to/your/base/rom.z64"
+        }
+    ]
+}
+```
+
+The config file has the following required entry:
 
 * `workers`: An array of [worker configurations](#workers). You should specify at least one worker so seeds can be rolled. While ootrstats tries to make full use of all workers in the list, the order of the list serves as a priority (workers defined earlier in the list are preferred) in tiebreaker situations, such as when rolling fewer seeds than there are workers.
 
