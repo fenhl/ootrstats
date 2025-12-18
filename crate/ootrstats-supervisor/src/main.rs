@@ -180,7 +180,7 @@ fn parse_json_object(arg: &str) -> Result<serde_json::Map<String, serde_json::Va
 }
 
 #[derive(Clone, clap::Parser)]
-#[clap(version)]
+#[clap(version, bin_name("ootrstats"))]
 struct Args {
     // randomizer settings
 
