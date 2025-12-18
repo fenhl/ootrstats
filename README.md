@@ -15,6 +15,38 @@
     cargo install --git=https://github.com/fenhl/ootrstats ootrstats-supervisor
     ```
 
+## Tab completion
+
+**Bash**
+```bash
+echo "source <(COMPLETE=bash ootrstats)" >> ~/.bashrc
+```
+
+**Elvish**
+```elvish
+echo "eval (E:COMPLETE=elvish ootrstats | slurp)" >> ~/.elvish/rc.elv
+```
+
+**Fish**
+```fish
+echo "COMPLETE=fish ootrstats | source" >> ~/.config/fish/config.fish
+```
+
+**Powershell**
+```powershell
+echo '$env:COMPLETE = "powershell"; ootrstats | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE' >> $PROFILE
+```
+Note that to execute scripts in PowerShell on Windows, including [`$PROFILE`][$Profile],
+the [execution policy][ExecutionPolicies] needs to be set to `RemoteSigned` at minimum.
+
+[$Profile]: https://learn.microsoft.com/en-us/powershell/scripting/learn/shell/creating-profiles
+[ExecutionPolicies]: https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies
+
+**Zsh**
+```zsh
+echo "source <(COMPLETE=zsh ootrstats)" >> ~/.zshrc
+```
+
 # Updating
 
 1. Install the updater:

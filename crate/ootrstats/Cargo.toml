@@ -15,7 +15,7 @@ bytes = "1.5.0"
 bytesize = "2.0.1"
 cargo_metadata = "0.23"
 collect-mac = "0.1.0"
-decompress = { git = "https://github.com/fenhl/OoT_Decompressor", branch = "riir" }
+decompress = { git = "https://github.com/fenhl/OoT_Decompressor" }
 directories = "6"
 either = "1.10.0"
 futures = "0.3.30"
@@ -33,7 +33,7 @@ systemstat = "0.2.5"
 tempfile = "3.20.0"
 thiserror = "2"
 tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }
-wheel = { git = "https://github.com/fenhl/wheel", branch = "main" }
+wheel = { git = "https://github.com/fenhl/wheel" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 xdg = "3"

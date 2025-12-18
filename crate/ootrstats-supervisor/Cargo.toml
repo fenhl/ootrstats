@@ -29,7 +29,7 @@ jaq-std = "1.4.0"
 lazy-regex = "3.1.0"
 mimalloc = "0.1.43"
 nonempty-collections = { version = "1", features = ["serde"] }
-ootr-utils = { git = "https://github.com/midoshouse/rust-ootr-utils", branch = "main" }
+ootr-utils = { git = "https://github.com/midoshouse/rust-ootr-utils" }
 ootrstats = { path = "../ootrstats" }
 proc-macro2 = { version = "1.0.85", default-features = false, features = ["span-locations"] }
 rustls = { version = "0.23.19", default-features = false, features = ["ring"] }
@@ -41,7 +41,7 @@ syn = { version = "2.0.66", default-features = false, features = ["parsing"] }
 thiserror = "2"
 tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["rustls-tls-webpki-roots"] }
-wheel = { git = "https://github.com/fenhl/wheel", branch = "main", features = ["async-proto", "serde", "serde_json", "tungstenite028"] }
+wheel = { git = "https://github.com/fenhl/wheel", features = ["async-proto", "serde", "serde_json", "tungstenite028"] }
 
 [target."cfg(windows)".dependencies]
 directories = "6"
