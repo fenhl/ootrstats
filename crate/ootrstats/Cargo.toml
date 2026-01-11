@@ -19,7 +19,7 @@ decompress = { git = "https://github.com/fenhl/OoT_Decompressor" }
 directories = "6"
 either = "1.10.0"
 futures = "0.3.30"
-gix-hash = "0.20"
+gix-hash = "0.21"
 if_chain = "1.0.2"
 itertools = "0.14"
 lazy-regex = "3.1.0"

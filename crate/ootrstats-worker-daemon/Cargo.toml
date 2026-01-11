@@ -24,7 +24,7 @@ rocket_ws = "0.1.1"
 serde = { version = "1.0.197", features = ["derive"] }
 thiserror = "2"
 tokio = { version = "1.36.0", features = ["macros", "parking_lot", "process", "sync", "time"] }
-wheel = { git = "https://github.com/fenhl/wheel", features = ["rocket", "serde", "serde_json"] }
+wheel = { git = "https://github.com/fenhl/wheel", features = ["rocket", "serde_json"] }
 
 [target."cfg(windows)".dependencies]
 directories = "6"

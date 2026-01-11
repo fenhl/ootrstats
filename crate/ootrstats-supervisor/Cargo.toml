@@ -19,7 +19,7 @@ clap = { version = "4.5.1", features = ["derive"] }
 crossterm = { version = "0.29", features = ["event-stream"] }
 either = "1.10.0"
 futures = "0.3.30"
-gix = { version = "0.75", features = ["blocking-http-transport-reqwest-rust-tls-trust-dns"] }
+gix = { version = "0.77", features = ["blocking-http-transport-reqwest-rust-tls-trust-dns"] }
 if_chain = "1.0.2"
 itertools = "0.14"
 jaq-core = "1.4.0"
@@ -41,7 +41,7 @@ syn = { version = "2.0.66", default-features = false, features = ["parsing"] }
 thiserror = "2"
 tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["rustls-tls-webpki-roots"] }
-wheel = { git = "https://github.com/fenhl/wheel", features = ["async-proto", "serde", "serde_json", "tungstenite028"] }
+wheel = { git = "https://github.com/fenhl/wheel", features = ["async-proto", "serde_json", "tungstenite028"] }
 
 [target."cfg(windows)".dependencies]
 directories = "6"
