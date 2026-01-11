@@ -183,7 +183,7 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
     let mut use_rust_cli = false;
     let mut supports_unsalted_seeds = false;
     let mut creates_log_by_default = true;
-    let (rando_github_user, rando_repo_name, rando_git_rev, mut rando_repo_path, plando_tempfile) = match setup {
+    let (rando_github_user, rando_repo_name, rando_git_rev, mut rando_repo_path, uncompressed_base_rom_tempfile, plando_tempfile) = match setup {
         RandoSetup::Normal { ref github_user, ref repo, ref plando, .. } => {
             tx.send(Message::Init(format!("cloning randomizer: determining repo path"))).await?;
             (
@@ -191,6 +191,17 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
                 Cow::Borrowed(&**repo),
                 git_rev,
                 gitdir().await?.join("github.com").join(github_user).join(repo).join("rev").join(git_rev.to_string()),
+                {
+                    tx.send(Message::Init(format!("decompressing base rom"))).await?;
+                    let tempfile = tempfile::Builder::new().prefix("oot_").suffix(".n64").tempfile().at_unknown()?;
+                    let mut base_rom = fs::read(&base_rom_path).await?;
+                    tokio::fs::File::from_std(tempfile.reopen().at(&tempfile)?).write_all(&if base_rom.len() == 0x0400_0000 {
+                        base_rom
+                    } else {
+                        decompress::decompress(&mut base_rom)?
+                    }).await.at(&tempfile)?;
+                    Some(tempfile.into_temp_path())
+                },
                 if plando.is_empty() {
                     None
                 } else {
@@ -249,7 +260,7 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
                 .check(python.display().to_string()).await?
                 .stdout
             )?;
-            (Cow::Owned(rando_github_user), Cow::Owned(rando_repo_name), randomizer_commit.parse()?, repo_path.join("randomizer"), None)
+            (Cow::Owned(rando_github_user), Cow::Owned(rando_repo_name), randomizer_commit.parse()?, repo_path.join("randomizer"), None, None)
         }
     };
     tx.send(Message::Init(format!("checking if randomizer repo exists"))).await?;
@@ -264,10 +275,6 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
         Command::new("git").arg("fetch").arg("origin").arg(rando_git_rev.to_string()).arg("--depth=1").current_dir(&rando_repo_path).check("git fetch").await?;
         tx.send(Message::Init(format!("cloning randomizer: resetting"))).await?;
         Command::new("git").arg("reset").arg("--hard").arg("FETCH_HEAD").current_dir(&rando_repo_path).check("git reset").await?;
-    }
-    if !fs::exists(rando_repo_path.join("ZOOTDEC.z64")).await? {
-        tx.send(Message::Init(format!("decompressing base rom"))).await?;
-        fs::write(rando_repo_path.join("ZOOTDEC.z64"), decompress::decompress(&mut fs::read(&base_rom_path).await?)?).await?;
     }
     let cargo_manifest_path = rando_repo_path.join("Cargo.toml");
     if fs::exists(&cargo_manifest_path).await? {
@@ -432,8 +439,9 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
                 let seeds = seeds.clone();
                 let settings = settings.clone();
                 let json_settings = json_settings.clone();
+                let uncompressed_base_rom_path = uncompressed_base_rom_tempfile.as_ref().expect("missing uncompressed base rom").to_path_buf();
                 let plando = plando_tempfile.as_ref().map(|tempfile| tempfile.to_path_buf());
-                Either::Left(async move { crate::run_rando(wsl_distro.as_deref(), &repo_path, use_rust_cli, supports_unsalted_seeds, creates_log_by_default, seeds, &settings, &json_settings, plando.as_deref(), world_counts, seed_idx, output_mode).await })
+                Either::Left(async move { crate::run_rando(wsl_distro.as_deref(), &repo_path, &uncompressed_base_rom_path, use_rust_cli, supports_unsalted_seeds, creates_log_by_default, seeds, &settings, &json_settings, plando.as_deref(), world_counts, seed_idx, output_mode).await })
             }
             RandoSetup::Rsl { ref preset, ref seeds, .. } => {
                 let wsl_distro = wsl_distro.clone();
@@ -541,6 +549,10 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
         }
     }
     #[cfg(windows)] priority_user_login_checker.abort();
+    if let Some(tempfile) = uncompressed_base_rom_tempfile {
+        let temp_path = tempfile.to_path_buf();
+        tempfile.close().at(temp_path)?;
+    }
     if let Some(tempfile) = plando_tempfile {
         let temp_path = tempfile.to_path_buf();
         tempfile.close().at(temp_path)?;
