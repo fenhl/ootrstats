@@ -10,6 +10,9 @@ workspace = true
 name = "ootrstats"
 path = "src/main.rs"
 
+[features]
+nixos = ["ootrstats/nixos"]
+
 [dependencies]
 async-proto = { version = "0.26", features = ["tokio-tungstenite028"] }
 bytes = { version = "1.5.0", features = ["serde"] }

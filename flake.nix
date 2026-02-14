@@ -17,8 +17,22 @@
     in {
         packages = forEachSupportedSystem ({ pkgs, ... }: let
             manifest = (pkgs.lib.importTOML ./Cargo.toml).workspace.package;
-        in {
-            default = pkgs.rustPlatform.buildRustPackage {
+        in rec {
+            default = worker-daemon; #TODO default to supervisor to match Cargo.toml
+            supervisor = pkgs.rustPlatform.buildRustPackage {
+                buildAndTestSubdir = "crate/ootrstats-supervisor";
+                buildFeatures = [
+                    "nixos"
+                ];
+                cargoLock = {
+                    allowBuiltinFetchGit = true; # allows omitting cargoLock.outputHashes
+                    lockFile = ./Cargo.lock;
+                };
+                pname = "ootrstats";
+                src = ./.;
+                version = manifest.version;
+            };
+            worker-daemon = pkgs.rustPlatform.buildRustPackage {
                 buildAndTestSubdir = "crate/ootrstats-worker-daemon";
                 buildFeatures = [
                     "nixos"
