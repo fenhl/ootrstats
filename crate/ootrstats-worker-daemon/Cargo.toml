@@ -2,6 +2,7 @@
 name = "ootrstats-worker-daemon"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [lints]
 workspace = true
@@ -11,19 +12,19 @@ nixos = ["ootrstats/nixos"]
 
 [dependencies]
 async-proto = { version = "0.26", features = ["tokio-tungstenite021"] }
-constant_time_eq = "0.4.0"
-either = "1.10.0"
-futures = "0.3.30"
-itertools = "0.14.0"
+constant_time_eq = "0.4"
+either = "1"
+futures = "0.3"
+itertools = "0.14"
 log-lock = { git = "https://github.com/fenhl/log-lock" }
-mimalloc = "0.1.43"
+mimalloc = "0.1"
 ootrstats = { path = "../ootrstats" }
 ootrstats-macros = { path = "../ootrstats-macros" }
-rocket = "0.5.0"
-rocket_ws = "0.1.1"
-serde = { version = "1.0.197", features = ["derive"] }
+rocket = "0.5"
+rocket_ws = "0.1"
+serde = { version = "1", features = ["derive"] }
 thiserror = "2"
-tokio = { version = "1.36.0", features = ["macros", "parking_lot", "process", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "parking_lot", "process", "sync", "time"] }
 wheel = { git = "https://github.com/fenhl/wheel", features = ["rocket", "serde_json"] }
 
 [target."cfg(windows)".dependencies]

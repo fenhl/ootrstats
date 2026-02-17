@@ -2,10 +2,11 @@
 name = "ootrstats-worker-windows-service-installer"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
-directories = "6.0.0"
+directories = "6"
 windows-service = "0.8"

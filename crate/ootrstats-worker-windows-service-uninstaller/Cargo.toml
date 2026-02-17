@@ -2,10 +2,11 @@
 name = "ootrstats-worker-windows-service-uninstaller"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
 windows-service = "0.8"
-windows-sys = { version = "0.61.2", features = ["Win32"] }
+windows-sys = { version = "0.61", features = ["Win32"] }

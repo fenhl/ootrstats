@@ -2,6 +2,7 @@
 name = "ootrstats-supervisor"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [lints]
 workspace = true
@@ -15,34 +16,34 @@ nixos = ["ootrstats/nixos"]
 
 [dependencies]
 async-proto = { version = "0.26", features = ["tokio-tungstenite028"] }
-bytes = { version = "1.5.0", features = ["serde"] }
-bytesize = { version = "2.0.1", features = ["serde"] }
-chrono = { version = "0.4.34", default-features = false, features = ["clock", "std"] }
-clap = { version = "4.5.1", features = ["derive"] }
+bytes = { version = "1", features = ["serde"] }
+bytesize = { version = "2", features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
 crossterm = { version = "0.29", features = ["event-stream"] }
-either = "1.10.0"
-futures = "0.3.30"
-gix = { version = "0.77", features = ["blocking-http-transport-reqwest-rust-tls-trust-dns"] }
-if_chain = "1.0.2"
+either = "1"
+futures = "0.3"
+gix = { version = "0.79", features = ["blocking-http-transport-reqwest-rust-tls-trust-dns"] }
+if_chain = "1"
 itertools = "0.14"
-jaq-core = "1.4.0"
-jaq-interpret = "1.4.0"
-jaq-parse = "1.0.2"
-jaq-std = "1.4.0"
-lazy-regex = "3.1.0"
-mimalloc = "0.1.43"
+jaq-core = "1"
+jaq-interpret = "1"
+jaq-parse = "1"
+jaq-std = "1"
+lazy-regex = "3"
+mimalloc = "0.1"
 nonempty-collections = { version = "1", features = ["serde"] }
 ootr-utils = { git = "https://github.com/midoshouse/rust-ootr-utils" }
 ootrstats = { path = "../ootrstats" }
-proc-macro2 = { version = "1.0.85", default-features = false, features = ["span-locations"] }
-rustls = { version = "0.23.19", default-features = false, features = ["ring"] }
-semver = "1.0.22"
-serde = { version = "1.0.197", features = ["derive", "rc"] }
+proc-macro2 = { version = "1", default-features = false, features = ["span-locations"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+semver = "1"
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { package = "serde_json_path_to_error", version = "0.1" }
-serde_with = "3.9.0"
-syn = { version = "2.0.66", default-features = false, features = ["parsing"] }
+serde_with = "3"
+syn = { version = "2", default-features = false, features = ["parsing"] }
 thiserror = "2"
-tokio = { version = "1.36.0", features = ["macros", "process", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "process", "sync", "time"] }
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["rustls-tls-webpki-roots"] }
 wheel = { git = "https://github.com/fenhl/wheel", features = ["async-proto", "serde_json", "tungstenite028"] }
 

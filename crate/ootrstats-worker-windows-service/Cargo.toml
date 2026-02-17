@@ -2,13 +2,14 @@
 name = "ootrstats-worker-windows-service"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [lints]
 workspace = true
 
 [dependencies]
-mimalloc = "0.1.43"
+mimalloc = "0.1"
 ootrstats-worker-daemon = { path = "../ootrstats-worker-daemon" }
-rocket = "0.5.1"
-thiserror = "2.0.11"
+rocket = "0.5"
+thiserror = "2"
 windows-service = "0.8"

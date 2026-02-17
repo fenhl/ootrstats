@@ -2,6 +2,7 @@
 name = "ootrstats-macros"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [lints]
 workspace = true
@@ -10,6 +11,6 @@ workspace = true
 proc-macro = true
 
 [dependencies]
-proc-macro2 = "1.0.93"
-quote = "1.0.38"
-semver = "1.0.25"
+proc-macro2 = "1"
+quote = "1"
+semver = "1"
