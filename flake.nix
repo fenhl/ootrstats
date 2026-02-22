@@ -18,7 +18,7 @@
         packages = forEachSupportedSystem ({ pkgs, ... }: let
             manifest = (pkgs.lib.importTOML ./Cargo.toml).workspace.package;
         in rec {
-            default = worker-daemon; #TODO default to supervisor to match Cargo.toml
+            default = supervisor;
             supervisor = pkgs.rustPlatform.buildRustPackage {
                 buildAndTestSubdir = "crate/ootrstats-supervisor";
                 buildFeatures = [
