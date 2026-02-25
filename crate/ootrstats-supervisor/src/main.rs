@@ -104,13 +104,14 @@ mod msg;
 mod worker;
 
 fn parse_traceback<'a>(worker: &Arc<str>, seed_idx: SeedIdx, error_log: &'a str) -> Result<(&'a str, &'a str), Error> {
-    //TODO account for additional output from macOS `time`
     let mut rev_lines = error_log.trim().lines().rev();
     let mut msg = rev_lines.next().ok_or_else(|| Error::EmptyErrorLog(seed_idx))?;
     let _ = rev_lines.next().ok_or_else(|| Error::MissingTraceback { worker: worker.clone(), error_log: error_log.to_owned(), missing_part: "skip" })?;
     let mut location = rev_lines.next().ok_or_else(|| Error::MissingTraceback { worker: worker.clone(), error_log: error_log.to_owned(), missing_part: "location" })?;
-    if rev_lines.any(|line| line.contains("Performance counter stats")) {
-        let _ = rev_lines.next().ok_or_else(|| Error::EmptyErrorLog(seed_idx));
+    if let Some(skip) = rev_lines.find_map(|line| if line.contains("Performance counter stats") { Some(true) } else if regex_is_match!(r"[0-9.]+ real +[0-9.]+ user +[0-9.]+ sys", line) { Some(false) } else { None }) {
+        if skip {
+            let _ = rev_lines.next().ok_or_else(|| Error::EmptyErrorLog(seed_idx));
+        }
         msg = rev_lines.next().ok_or_else(|| Error::EmptyErrorLog(seed_idx))?;
         let _ = rev_lines.next().ok_or_else(|| Error::MissingTraceback { worker: worker.clone(), error_log: error_log.to_owned(), missing_part: "skip (perf)" })?;
         location = rev_lines.next().ok_or_else(|| Error::MissingTraceback { worker: worker.clone(), error_log: error_log.to_owned(), missing_part: "location (perf)" })?;
