@@ -16,6 +16,7 @@ bytes = "1"
 bytesize = "2"
 cargo_metadata = "0.23"
 collect-mac = "0.1"
+cross-path = "0.0.1"
 decompress = { git = "https://github.com/fenhl/OoT_Decompressor" }
 directories = "6"
 either = "1"

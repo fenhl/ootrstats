@@ -9,7 +9,6 @@ use {
         },
         io::prelude::*,
         path::{
-            self,
             Path,
             PathBuf,
         },
@@ -18,6 +17,7 @@ use {
     async_proto::Protocol,
     bytes::Bytes,
     collect_mac::collect,
+    cross_path::CrossPath,
     directories::{
         BaseDirs,
         UserDirs,
@@ -177,6 +177,7 @@ pub struct RollOutput {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RollError {
+    #[error(transparent)] CrossPath(#[from] cross_path::PathError),
     #[error(transparent)] Draft(#[from] draft::ResolveError),
     #[error(transparent)] EnvJoinPaths(#[from] env::JoinPathsError),
     #[error(transparent)] Json(#[from] serde_json::Error),
@@ -251,24 +252,13 @@ async fn python() -> Result<PathBuf, RollError> {
     })
 }
 
-fn path_to_wsl(path: &Path) -> PathBuf {
-    path.components().map(|component| match component {
-        path::Component::Prefix(prefix) => match prefix.kind() {
-            path::Prefix::VerbatimDisk(letter) | path::Prefix::Disk(letter) => Cow::Owned(Path::new(&path::Component::RootDir).join("mnt").join(String::from(char::from(letter).to_ascii_lowercase()))),
-            _ => Cow::Borrowed(Path::new(prefix.as_os_str())),
-        },
-        path::Component::RootDir => Cow::Borrowed(Path::new(path::Component::CurDir.as_os_str())),
-        component => Cow::Borrowed(Path::new(component.as_os_str())),
-    }).collect()
-}
-
 pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, uncompressed_base_rom_path: &Path, use_rust_cli: bool, supports_unsalted_seeds: bool, creates_log_by_default: bool, seeds: Seeds, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, plando: Option<&Path>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let mut resolved_settings = collect![as HashMap<_, _>:
-        Cow::Borrowed("rom") => json!(if let OutputMode::Bench { .. } = output_mode {
-            Cow::Owned(path_to_wsl(uncompressed_base_rom_path))
+        Cow::Borrowed("rom") => if let OutputMode::Bench { .. } = output_mode {
+            json!(CrossPath::from(uncompressed_base_rom_path).to_unix()?)
         } else {
-            Cow::Borrowed(uncompressed_base_rom_path)
-        }),
+            json!(uncompressed_base_rom_path)
+        },
         Cow::Borrowed("check_version") => json!(true), // inverted Boolean, avoids spamming GitHub with randomizer update checks
         Cow::Borrowed("create_spoiler") => json!(true),
         Cow::Borrowed("create_cosmetics_log") => json!(matches!(output_mode, OutputMode::Bench { .. })),
