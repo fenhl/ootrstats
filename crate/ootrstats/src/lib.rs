@@ -257,6 +257,7 @@ fn path_to_wsl(path: &Path) -> PathBuf {
             path::Prefix::VerbatimDisk(letter) | path::Prefix::Disk(letter) => Cow::Owned(Path::new(&path::Component::RootDir).join("mnt").join(String::from(char::from(letter).to_ascii_lowercase()))),
             _ => Cow::Borrowed(Path::new(prefix.as_os_str())),
         },
+        path::Component::RootDir => Cow::Borrowed(Path::new(path::Component::CurDir.as_os_str())),
         component => Cow::Borrowed(Path::new(component.as_os_str())),
     }).collect()
 }
