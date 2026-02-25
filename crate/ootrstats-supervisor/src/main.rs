@@ -1282,6 +1282,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
 
 #[wheel::main(custom_exit)]
 async fn main(args: Args) -> Result<(), Error> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
     if !args.json_messages {
         enable_raw_mode().at_unknown()?;
     }
