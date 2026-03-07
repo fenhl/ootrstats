@@ -21,7 +21,10 @@ use {
     },
     itertools::Itertools as _,
     log_lock::*,
-    rocket::State,
+    rocket::{
+        Rocket,
+        State,
+    },
     rocket_ws::WebSocket,
     tokio::{
         select,
@@ -293,13 +296,7 @@ pub enum MainError {
     #[error(transparent)] Rocket(#[from] rocket::Error),
 }
 
-pub async fn main() -> Result<(), MainError> {
-    let default_panic_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        let _ = wheel::night_report_sync("/net/ootrstats/error", Some("thread panic"));
-        default_panic_hook(info)
-    }));
-    //TODO on Windows, use the `windows-service` crate to run as a service?
+pub async fn rocket() -> Result<Rocket<rocket::Ignite>, MainError> {
     let config = Config::load().await?;
     rocket::custom(rocket::Config {
         address: config.address,
@@ -312,6 +309,6 @@ pub async fn main() -> Result<(), MainError> {
     .manage(config.base_rom_path)
     .manage(config.password)
     .manage(config.cores)
-    .launch().await?;
-    Ok(())
+    .ignite().await
+    .map_err(MainError::from)
 }

@@ -4155,6 +4155,7 @@ name = "ootrstats-worker-windows-service-installer"
 version = "25.1.0"
 dependencies = [
  "directories",
+ "mimalloc",
  "windows-service",
 ]
 
