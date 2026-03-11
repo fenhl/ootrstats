@@ -2,6 +2,7 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use {
+    std::ffi::OsStr,
     directories::UserDirs,
     windows_service::{
         service::*,
@@ -28,5 +29,6 @@ fn main() -> windows_service::Result<()> {
     };
     let service = service_manager.create_service(&service_info, ServiceAccess::CHANGE_CONFIG)?;
     service.set_description("Ocarina of Time Randomizer stats worker")?;
+    service.start::<&'static OsStr>(&[])?;
     Ok(())
 }
