@@ -281,10 +281,13 @@ fn index(base_rom_path: &State<PathBuf>, correct_password: &State<String>, cores
         }
         match work_result {
             Ok(()) => {}
-            Err(e) => lock!(sink = sink; websocket::ServerMessage::Error {
-                display: e.to_string(),
-                debug: format!("{e:?}"),
-            }.write_ws021(&mut *sink).await).map_err(io::Error::from)?,
+            Err(e) => {
+                println!("{e} ({e:?})");
+                lock!(sink = sink; websocket::ServerMessage::Error {
+                    display: e.to_string(),
+                    debug: format!("{e:?}"),
+                }.write_ws021(&mut *sink).await).map_err(io::Error::from)?;
+            }
         }
         Ok(())
     }))
