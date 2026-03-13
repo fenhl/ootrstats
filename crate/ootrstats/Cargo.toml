@@ -26,7 +26,7 @@ if_chain = "1"
 itertools = "0.14"
 lazy-regex = "3"
 parking_lot = "0.12"
-rand = "0.9"
+rand = "0.10"
 rustc-stable-hash = "0.1"
 semver = "1"
 serde_json = { package = "serde_json_path_to_error", version = "0.1" }
