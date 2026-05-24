@@ -37,5 +37,6 @@ thiserror = "2"
 tokio = { version = "1", features = ["macros", "process", "sync", "time"] }
 wheel = { git = "https://github.com/fenhl/wheel" }
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target."cfg(unix)".dependencies]
+cachedir = "0.3"
 xdg = "3"

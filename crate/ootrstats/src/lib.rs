@@ -41,8 +41,7 @@ use {
         },
     },
 };
-#[cfg(all(target_os = "macos", not(feature = "nixos")))] use xdg::BaseDirectories;
-#[cfg(all(target_os = "macos", feature = "nixos"))] use xdg as _;
+#[cfg(unix)] use xdg::BaseDirectories;
 
 mod draft;
 pub mod websocket;
@@ -213,6 +212,13 @@ pub async fn gitdir() -> wheel::Result<Cow<'static, Path>> {
     })
 }
 
+#[cfg(unix)]
+pub fn cache_dir() -> tokio::io::Result<PathBuf> {
+    let dir = BaseDirectories::new().create_cache_directory("ootrstats")?;
+    cachedir::ensure_tag(&dir)?;
+    Ok(dir)
+}
+
 async fn python() -> Result<PathBuf, RollError> {
     Ok({
         #[cfg(windows)] {
@@ -238,7 +244,7 @@ async fn python() -> Result<PathBuf, RollError> {
         #[cfg(target_os = "macos")] {
             #[cfg(feature = "nixos")] { PathBuf::from("python3") }
             #[cfg(not(feature = "nixos"))] {
-                let venv = BaseDirectories::new().place_data_file("ootrstats/venv").at_unknown()?;
+                let venv = cache_dir().at_unknown()?.join("venv");
                 if !fs::exists(&venv).await? {
                     let system_python = {
                         #[cfg(target_arch = "aarch64")] { "/opt/homebrew/bin/python3" }

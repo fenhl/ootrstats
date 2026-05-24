@@ -97,7 +97,6 @@ use {
     },
 };
 #[cfg(windows)] use directories::ProjectDirs;
-#[cfg(unix)] use xdg::BaseDirectories;
 
 mod config;
 mod msg;
@@ -608,7 +607,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
     } else {
         #[cfg(windows)] let project_dirs = ProjectDirs::from("net", "Fenhl", "ootrstats").ok_or(Error::MissingHomeDir)?;
         #[cfg(windows)] { project_dirs.data_dir().to_owned() }
-        #[cfg(unix)] { BaseDirectories::new().place_data_file("ootrstats").at_unknown()? }
+        #[cfg(unix)] { ootrstats::cache_dir().at_unknown()? }
     };
     let stats_dir = stats_root.join(setup.stats_dir(rando_rev));
     let baseline_stats_dir = baseline_rando_rev.map(|rando_rev| stats_root.join(setup.stats_dir(rando_rev)));

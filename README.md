@@ -81,7 +81,7 @@ The config file has the following required entry:
 And the following optional entries:
 
 * `log`: If `true`, the supervisor will create a text file named `ootrstats.log` in the working directory with debug info. The default is `false`.
-* `statsDir`: A path to a directory where the statistics will be stored. Defaults to `$XDG_DATA_DIRS/ootrstats` on Unix, or `%APPDATA%\Fenhl\ootrstats\data` on Windows.
+* `statsDir`: A path to a directory where the statistics will be stored. Defaults to `$XDG_CACHE_HOME/ootrstats` on Unix, or `%APPDATA%\Fenhl\ootrstats\data` on Windows.
 
 ## Workers
 
