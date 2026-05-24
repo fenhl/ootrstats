@@ -391,7 +391,7 @@ impl wheel::CustomExit for Error {
             while !debug.is_char_boundary(suffix_start) {
                 suffix_start += 1;
             }
-            debug = format!("{} […] {}", &debug[..prefix_end], &debug[suffix_start..]);
+            debug = format!("{}[…]{}", &debug[..prefix_end], &debug[suffix_start..]);
         }
         eprintln!("\r");
         match self {
@@ -407,6 +407,13 @@ impl wheel::CustomExit for Error {
                     eprintln!("{cmd_name}: roll error in worker {worker}: failed to parse `perf` output\r");
                     eprintln!("stderr:\r");
                     eprintln!("{}\r", String::from_utf8_lossy(&stderr).lines().filter(|line| !regex_is_match!("^[0-9]+ files remaining$", line)).format("\r\n"));
+                }
+                Ok((worker, worker::Error::Wheel(wheel::Error::CommandExit { name, output }))) => {
+                    eprintln!("{cmd_name}: error in worker {worker}: command `{name}` exited with {}\r", output.status);
+                    eprintln!("stdout:\r");
+                    eprintln!("{}\r", String::from_utf8_lossy(&output.stdout).lines().format("\r\n"));
+                    eprintln!("stderr:\r");
+                    eprintln!("{}\r", String::from_utf8_lossy(&output.stderr).lines().format("\r\n"));
                 }
                 Ok((worker, source)) => {
                     eprintln!("{cmd_name}: {} in worker {worker}: {source}\r", if source.is_network_error() { "network error" } else { "error" });
@@ -427,7 +434,7 @@ impl wheel::CustomExit for Error {
                             while !debug.is_char_boundary(suffix_start) {
                                 suffix_start += 1;
                             }
-                            debug = format!("{} […] {}", &debug[..prefix_end], &debug[suffix_start..]);
+                            debug = format!("{}[…]{}", &debug[..prefix_end], &debug[suffix_start..]);
                         }
                         eprintln!("debug info: {debug}\r");
                     }

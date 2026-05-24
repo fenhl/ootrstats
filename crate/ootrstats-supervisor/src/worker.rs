@@ -1,6 +1,8 @@
 use {
     std::{
         ffi::OsString,
+        iter,
+        net::IpAddr,
         path::PathBuf,
         pin::{
             Pin,
@@ -24,22 +26,40 @@ use {
         },
     },
     if_chain::if_chain,
+    itertools::Itertools as _,
+    linode_rs::LinodeApi,
     nonempty_collections::nev,
+    rand::{
+        distr::{
+            Alphanumeric,
+            SampleString as _,
+        },
+        rng,
+    },
     semver::Version,
     serde::Serialize,
     serde_with::SerializeDisplay,
     tokio::{
+        process::Command,
         select,
         sync::mpsc,
         task::JoinHandle,
         time::{
             MissedTickBehavior,
             interval,
+            sleep,
             timeout,
         },
     },
     tokio_tungstenite::tungstenite,
-    wheel::traits::IsNetworkError,
+    wheel::{
+        fs::File,
+        traits::{
+            AsyncCommandOutputExt as _,
+            IoResultExt as _,
+            IsNetworkError,
+        },
+    },
     ootrstats::{
         OutputMode,
         RandoSetup,
@@ -51,6 +71,11 @@ use {
         },
     },
     crate::SeedState,
+};
+#[cfg(windows)] use ootrstats::WSL;
+#[cfg(not(windows))] use {
+    futures::stream::TryStreamExt as _,
+    wheel::fs,
 };
 
 pub(crate) type Config = crate::config::Worker;
@@ -71,12 +96,31 @@ fn display_websocket_error(e: &tungstenite::Error) -> String {
 #[derive(Debug, thiserror::Error, SerializeDisplay)]
 pub(crate) enum Error {
     #[error(transparent)] Elapsed(#[from] tokio::time::error::Elapsed),
+    #[error(transparent)] Linode(#[from] linode_rs::LinodeError),
     #[error(transparent)] Local(#[from] ootrstats::worker::Error),
     #[error(transparent)] Read(#[from] async_proto::ReadError),
+    #[error(transparent)] Reqwest(#[from] reqwest::Error),
     #[error(transparent)] Semver(#[from] semver::Error),
     #[error(transparent)] Send(#[from] mpsc::error::SendError<(Arc<str>, Message)>),
     #[error("{}", display_websocket_error(.0))] WebSocket(#[from] tungstenite::Error),
+    #[error(transparent)] Wheel(#[from] wheel::Error),
     #[error(transparent)] Write(#[from] async_proto::WriteError),
+    #[error("{source} ({addr})")]
+    AddrParse {
+        source: std::net::AddrParseError,
+        addr: String,
+    },
+    #[error("IPv6 address did not contain slash")]
+    AddrSplit,
+    #[error("failed to identify linode configuration")]
+    IdentifyConfig,
+    #[error("failed to identify linode disks")]
+    IdentifyDisks,
+    #[error("failed to upload linode image: {0}")]
+    LinodeUploadImage(linode_rs::LinodeError),
+    #[cfg(not(windows))]
+    #[error("Linode image not found in Nix build output")]
+    MissingLinodeImage,
     #[error("non-UTF-8 string")]
     OsString(OsString),
     #[error("worker has stopped listening to commands")]
@@ -99,16 +143,25 @@ impl From<OsString> for Error {
 impl IsNetworkError for Error {
     fn is_network_error(&self) -> bool {
         match self {
+            | Self::LinodeUploadImage(_) // retrying image upload seems to create extra images
             | Self::Local(_)
             | Self::Semver(_)
             | Self::Send(_)
+            | Self::AddrParse { .. }
+            | Self::AddrSplit
+            | Self::IdentifyConfig
+            | Self::IdentifyDisks
             | Self::OsString(_)
             | Self::Receive { .. }
             | Self::Remote { .. }
                 => false,
+            #[cfg(not(windows))] Self::MissingLinodeImage => false,
             Self::Elapsed(_) => true,
+            Self::Linode(e) => e.is_network_error(),
             Self::Read(e) => e.is_network_error(),
+            Self::Reqwest(e) => e.is_network_error(),
             Self::WebSocket(e) => e.is_network_error() || if let tungstenite::Error::Http(response) = e { response.status() == tungstenite::http::StatusCode::NOT_FOUND } else { false },
+            Self::Wheel(e) => e.is_network_error(),
             Self::Write(e) => e.is_network_error(),
         }
     }
@@ -141,7 +194,7 @@ impl Kind {
             }
             Self::WebSocket { tls, hostname, password, wsl_distro, priority_users, hide_reboot, hide_sleep } => {
                 tx.send((name.clone(), Message::Init(format!("connecting WebSocket")))).await?;
-                let (sink, stream) = async_proto::websocket028(format!("{}://{hostname}/v{}", if tls { "wss" } else { "ws" }, Version::parse(env!("CARGO_PKG_VERSION"))?.major)).await?;
+                let (sink, stream) = async_proto::websocket029(format!("{}://{hostname}/v{}", if tls { "wss" } else { "ws" }, Version::parse(env!("CARGO_PKG_VERSION"))?.major)).await?;
                 let mut sink = pin!(sink);
                 let mut stream = Box::pin(stream.fuse()) as Pin<Box<dyn FusedStream<Item = _> + Send>>;
                 tx.send((name.clone(), Message::Init(format!("handshaking")))).await?;
@@ -170,7 +223,7 @@ impl Kind {
                             })).await?,
                             Ok(websocket::ServerMessage::Error { display, debug }) => return Err(Error::Remote { debug, display }),
                             Ok(websocket::ServerMessage::Ping) => {}
-                            Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite028(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => stream = Box::pin(stream::empty()),
+                            Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite029(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => stream = Box::pin(stream::empty()),
                             Err(e) => return Err(e.into()),
                         },
                         res = rx.recv() => if let Some(msg) = res {
@@ -194,7 +247,7 @@ impl Kind {
                                     })).await?,
                                     Ok(websocket::ServerMessage::Error { display, debug }) => return Err(Error::Remote { debug, display }),
                                     Ok(websocket::ServerMessage::Ping) => {}
-                                    Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite028(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => break,
+                                    Err(async_proto::ReadError { kind: async_proto::ReadErrorKind::Tungstenite029(tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)), .. }) => break,
                                     Err(e) => return Err(e.into()),
                                 }
                             }
@@ -202,6 +255,102 @@ impl Kind {
                         },
                     }
                 }
+            }
+            Self::Linode { api_token, image_region, label, linode_region, plan, #[cfg_attr(not(windows), allow(unused))] wsl_distro } => {
+                let http_client = reqwest::Client::builder()
+                    .user_agent(concat!("ootrstats/", env!("CARGO_PKG_VERSION"), " (https://github.com/fenhl/ootrstats)"))
+                    .use_rustls_tls()
+                    .https_only(true)
+                    .build()?;
+                let api = LinodeApi::new(api_token);
+                let ip_addrs;
+                let instance_id = {
+                    tx.send((name.clone(), Message::Init(format!("building linode image")))).await?;
+                    let temp_dir = tempfile::tempdir().at_unknown()?;
+                    let mut cmd = {
+                        #[cfg(windows)] {
+                            let mut cmd = Command::new(WSL);
+                            if let Some(wsl_distro) = &wsl_distro {
+                                cmd.arg("--distribution");
+                                cmd.arg(wsl_distro);
+                            }
+                            cmd.arg("nixos-rebuild");
+                            cmd
+                        }
+                        #[cfg(not(windows))] { Command::new("nixos-rebuild") }
+                    };
+                    cmd.arg("build-image");
+                    cmd.arg("--image-variant=linode");
+                    cmd.arg("--flake=github:fenhl/ootrstats#bootstrap");
+                    cmd.current_dir(&temp_dir);
+                    cmd.check("nixos-rebuild").await?;
+                    let image = {
+                        #[cfg(windows)] {
+                            let mut cmd = Command::new(WSL);
+                            if let Some(wsl_distro) = wsl_distro {
+                                cmd.arg("--distribution");
+                                cmd.arg(wsl_distro);
+                            }
+                            cmd.arg("sh");
+                            cmd.arg("-c");
+                            cmd.arg("cp result/nixos-image-linode-*.img.gz nixos-linode.img.gz");
+                            cmd.current_dir(&temp_dir);
+                            cmd.check("wsl cp").await?;
+                            temp_dir.path().join("nixos-linode.img.gz")
+                        }
+                        #[cfg(not(windows))] {
+                            pin!(fs::read_dir(temp_dir.path().join("result"))
+                                .try_filter(|entry| {
+                                    let filename = entry.file_name();
+                                    async move {
+                                        let Ok(filename) = filename.into_string() else { return false };
+                                        filename.starts_with("nixos-image-linode-") && filename.ends_with(".img.gz")
+                                    }
+                                }))
+                                .try_next().await?
+                                .ok_or(Error::MissingLinodeImage)?
+                                .path()
+                        }
+                    };
+                    tx.send((name.clone(), Message::Init(format!("uploading linode image")))).await?;
+                    let image_id = api.upload_image_async(&http_client, false, None, "ootrstats", &image_region, &[], File::open(image).await?.into_inner()).await.map_err(Error::LinodeUploadImage)?;
+                    let temp_path = temp_dir.path().to_owned();
+                    temp_dir.close().at(temp_path)?;
+                    tx.send((name.clone(), Message::Init(format!("creating linode")))).await?;
+                    let instance = loop {
+                        let root_pass = Alphanumeric.sample_string(&mut rng(), 16); // never used but required by Linode API
+                        match api.create_instance(&linode_region, &plan).booted(false).image(&image_id).label(&label).root_pass(&root_pass).run_async(&http_client).await {
+                            Ok(instance) => break instance,
+                            Err(linode_rs::LinodeError::Api { result: linode_rs::LinodeApiError { errors }, .. }) if errors.iter().all(|e| e.reason == "Image is not available yet. Please try again.") => sleep(Duration::from_secs(5)).await,
+                            Err(e) => return Err(e.into()),
+                        }
+                    };
+                    api.delete_image_async(&http_client, &image_id).await?;
+                    let disks = api.list_disks_async(&http_client, instance.id).await?;
+                    let (swap, main_disk) = disks.into_iter().partition::<Vec<_>, _>(|disk| matches!(disk.filesystem, linode_rs::FileSystem::Swap));
+                    let swap = swap.into_iter().exactly_one().map_err(|_| Error::IdentifyDisks)?;
+                    if swap.size < 1024 {
+                        let main_disk = main_disk.into_iter().exactly_one().map_err(|_| Error::IdentifyDisks)?;
+                        api.resize_disk_async(&http_client, instance.id, main_disk.id, main_disk.size + swap.size - 1024).await?;
+                        api.resize_disk_async(&http_client, instance.id, swap.id, 1024).await?;
+                    }
+                    let config = api.list_configs_async(&http_client, instance.id).await?.into_iter().exactly_one().map_err(|_| Error::IdentifyConfig)?;
+                    api.edit_config_async(&http_client, instance.id, config.id, None, Some("linode/grub2"), None, None, Some(linode_rs::ConfigHelpers {
+                        devtmpfs_automount: false,
+                        distro: false,
+                        modules_dep: false,
+                        network: None,
+                        updatedb_disabled: false,
+                    })).await?;
+                    api.boot_instance_async(&http_client, instance.id, None).await?;
+                    ip_addrs = iter::once(instance.ipv6.split_once('/').ok_or(Error::AddrSplit)?.0.parse::<IpAddr>().map_err(|source| Error::AddrParse { source, addr: instance.ipv6 }))
+                        .chain(instance.ipv4.into_iter().map(|addr| addr.parse().map_err(|source| Error::AddrParse { source, addr })))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    instance.id
+                };
+                tx.send((name.clone(), Message::Init(format!("setup done, linode ID: {instance_id}, IP addresses: {ip_addrs:?}")))).await?; //DEBUG
+                //TODO connect to the worker via WebSocket
+                api.delete_instance_async(&http_client, instance_id).await?;
             }
         }
         Ok(())

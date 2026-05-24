@@ -99,6 +99,25 @@ And the following optional entries:
 
 Depending on the `kind`, there are additional entries:
 
+### `linode`
+
+> [!WARNING]
+> Using this worker will create a linode and an image on your Linode account. Please familiarize yourself with Linode's pricing before using it. While the worker will attempt to delete them before the end of a run, you should always verify the deletion yourself to avoid unexpected charges.
+
+A worker that runs on a newly created [Linode](https://www.linode.com/) compute instance.
+
+Note that using this worker requires running the supervisor on NixOS (or on Windows with NixOS available via WSL). It takes the following additional required entries:
+
+* `apiToken`: Your [Linode API token](https://cloud.linode.com/profile/tokens). The token needs read/write access to images and linodes.
+* `plan`: The linode type ID to create, see `linode-cli linodes types` for a list. A Dedicated CPU plan is recommended.
+
+And the following optional entries:
+
+* `imageRegion`: The Linode region where the image will be created, see `linode-cli regions list` for a list. Ensure the selected region supports uploading images when customizing this. Defaults to `fr-par`.
+* `label`: The name under which the linode will appear in Akamai Cloud Manager. Defaults to `ootrstats`.
+* `linodeRegion`: The Linode region where the linode will be created, see `linode-cli regions list` for a list. Defaults to `eu-central`.
+* `wslDistro`: The [WSL](https://learn.microsoft.com/windows/wsl/about) distribution name to use to build the linode image if the supervisor is running on Windows. Defaults to the distribution configured as the default in WSL.
+
 ### `local`
 
 A worker that runs on the same computer as the supervisor program. It takes the following additional required entry:

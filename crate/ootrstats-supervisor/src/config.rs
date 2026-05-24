@@ -38,6 +38,10 @@ pub struct Worker {
     pub(crate) min_disk_mount_points: Option<Vec<PathBuf>>,
 }
 
+fn default_image_region() -> String { format!("fr-par") }
+fn default_linode_label() -> String { format!("ootrstats") }
+fn default_linode_region() -> String { format!("eu-central") }
+
 #[derive(Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(crate) enum WorkerKind {
@@ -61,6 +65,18 @@ pub(crate) enum WorkerKind {
         hide_reboot: bool,
         #[serde(default)]
         hide_sleep: bool,
+    },
+    #[serde(rename_all = "camelCase")]
+    Linode {
+        api_token: String,
+        #[serde(default = "default_image_region")]
+        image_region: String,
+        #[serde(default = "default_linode_label")]
+        label: String,
+        #[serde(default = "default_linode_region")]
+        linode_region: String,
+        plan: String,
+        wsl_distro: Option<String>,
     },
 }
 
