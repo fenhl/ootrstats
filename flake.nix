@@ -61,6 +61,8 @@
         in rec {
             default = supervisor;
             supervisor = pkgs.rustPlatform.buildRustPackage {
+                pname = "ootrstats";
+                version = manifest.version;
                 buildAndTestSubdir = "crate/ootrstats-supervisor";
                 buildFeatures = [
                     "nixos"
@@ -69,11 +71,25 @@
                     allowBuiltinFetchGit = true; # allows omitting cargoLock.outputHashes
                     lockFile = ./Cargo.lock;
                 };
-                pname = "ootrstats";
+                nativeBuildInputs = with pkgs; [
+                    makeWrapper # required for wrapProgram in postFixup hook
+                ];
+                postFixup = ''
+                    wrapProgram $out/bin/ootrstats --prefix PATH : ${pkgs.lib.makeBinPath (with pkgs; [
+                        cargo # required to build OoTR riir branch
+                        clang # required to fix the error “linker `cc` not found” while building OoTR riir branch
+                        git #TODO replace usage of the git CLI in ootrstats with gix
+                        perf
+                        (python3.withPackages (python-pkgs: [
+                            python-pkgs.requests # required for the RSL script
+                        ]))
+                    ])}
+                '';
                 src = ./.;
-                version = manifest.version;
             };
             worker-daemon = pkgs.rustPlatform.buildRustPackage {
+                pname = "ootrstats-worker-daemon";
+                version = manifest.version;
                 buildAndTestSubdir = "crate/ootrstats-worker-daemon";
                 buildFeatures = [
                     "nixos"
@@ -82,9 +98,21 @@
                     allowBuiltinFetchGit = true; # allows omitting cargoLock.outputHashes
                     lockFile = ./Cargo.lock;
                 };
-                pname = "ootrstats-worker-daemon";
+                nativeBuildInputs = with pkgs; [
+                    makeWrapper # required for wrapProgram in postFixup hook
+                ];
+                postFixup = ''
+                    wrapProgram $out/bin/ootrstats-worker-daemon --prefix PATH : ${pkgs.lib.makeBinPath (with pkgs; [
+                        cargo # required to build OoTR riir branch
+                        clang # required to fix the error “linker `cc` not found” while building OoTR riir branch
+                        git #TODO replace usage of the git CLI in ootrstats with gix
+                        perf
+                        (python3.withPackages (python-pkgs: [
+                            python-pkgs.requests # required for the RSL script
+                        ]))
+                    ])}
+                '';
                 src = ./.;
-                version = manifest.version;
             };
         });
     };

@@ -1,6 +1,7 @@
 [workspace]
 members = ["crate/*"]
 default-members = ["crate/ootrstats-supervisor"]
+exclude = ["crate/ootrstats-deploy"]
 resolver = "2"
 
 [workspace.package]
