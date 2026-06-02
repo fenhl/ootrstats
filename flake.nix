@@ -79,11 +79,10 @@
                         cargo # required to build OoTR riir branch
                         clang # required to fix the error “linker `cc` not found” while building OoTR riir branch
                         git #TODO replace usage of the git CLI in ootrstats with gix
-                        perf
                         (python3.withPackages (python-pkgs: [
                             python-pkgs.requests # required for the RSL script
                         ]))
-                    ])}
+                    ] ++ pkgs.lib.optional stdenv.hostPlatform.isLinux perf)}
                 '';
                 src = ./.;
             };
@@ -106,11 +105,10 @@
                         cargo # required to build OoTR riir branch
                         clang # required to fix the error “linker `cc` not found” while building OoTR riir branch
                         git #TODO replace usage of the git CLI in ootrstats with gix
-                        perf
                         (python3.withPackages (python-pkgs: [
                             python-pkgs.requests # required for the RSL script
                         ]))
-                    ])}
+                    ] ++ pkgs.lib.optional stdenv.hostPlatform.isLinux perf)}
                 '';
                 src = ./.;
             };
