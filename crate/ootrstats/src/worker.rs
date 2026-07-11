@@ -3,10 +3,7 @@ use {
         borrow::Cow,
         collections::HashMap,
         env,
-        num::{
-            NonZeroU8,
-            NonZeroUsize,
-        },
+        num::NonZero,
         path::PathBuf,
         sync::Arc,
         time::Duration,
@@ -100,8 +97,11 @@ pub enum Error {
     #[error(transparent)] CargoMetadata(#[from] cargo_metadata::Error),
     #[error(transparent)] Decompress(#[from] decompress::Error),
     #[error(transparent)] EnvJoinPaths(#[from] env::JoinPathsError),
+    #[error(transparent)] GitCheckout(#[from] gix::clone::checkout::main_worktree::Error),
+    #[error(transparent)] GitClone(#[from] gix::clone::Error),
+    #[error(transparent)] GitCloneFetch(#[from] gix::clone::fetch::Error),
     #[error(transparent)] Json(#[from] serde_json::Error),
-    #[error(transparent)] ParseGitHash(#[from] gix_hash::decode::Error),
+    #[error(transparent)] ParseGitHash(#[from] gix::hash::decode::Error),
     #[cfg(unix)] #[error(transparent)] ParseInt(#[from] std::num::ParseIntError),
     #[error(transparent)] Roll(#[from] crate::RollError),
     #[error(transparent)] Semver(#[from] semver::Error),
@@ -178,19 +178,20 @@ async fn wait_ready(min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_po
     Ok(if wait > Duration::default() { Some((wait, message)) } else { None })
 }
 
-pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, git_rev: gix_hash::ObjectId, setup: RandoSetup, output_mode: OutputMode, min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_points: Option<&[PathBuf]>, priority_users: &[String], #[cfg_attr(not(windows), allow(unused))] race: bool) -> Result<(), Error> {
+pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiver<SupervisorMessage>, base_rom_path: PathBuf, cores: i8, wsl_distro: Option<String>, git_rev: gix::ObjectId, setup: RandoSetup, output_mode: OutputMode, min_disk: ByteSize, min_disk_percent: f64, min_disk_mount_points: Option<&[PathBuf]>, priority_users: &[String], #[cfg_attr(not(windows), allow(unused))] race: bool) -> Result<(), Error> {
     let mut rsl_version = None;
     let mut use_rust_cli = false;
     let mut supports_unsalted_seeds = false;
     let mut creates_log_by_default = true;
-    let (rando_github_user, rando_repo_name, rando_git_rev, mut rando_repo_path, uncompressed_base_rom_tempfile, plando_tempfile) = match setup {
+    let (rando_github_user, rando_repo_name, rando_git_rev, rando_repo_parent, rando_repo_dir_name, uncompressed_base_rom_tempfile, plando_tempfile) = match setup {
         RandoSetup::Normal { ref github_user, ref repo, ref plando, .. } => {
             tx.send(Message::Init(format!("cloning randomizer: determining repo path"))).await?;
             (
                 Cow::Borrowed(&**github_user),
                 Cow::Borrowed(&**repo),
                 git_rev,
-                gitdir().await?.join("github.com").join(github_user).join(repo).join("rev").join(git_rev.to_string()),
+                gitdir().await?.join("github.com").join(github_user).join(repo).join("rev"),
+                git_rev.to_string(),
                 {
                     tx.send(Message::Init(format!("decompressing base rom"))).await?;
                     let tempfile = tempfile::Builder::new().prefix("oot_").suffix(".n64").tempfile().at_unknown()?;
@@ -213,19 +214,17 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
         }
         RandoSetup::Rsl { ref github_user, ref repo, .. } => {
             tx.send(Message::Init(format!("cloning random settings script: determining repo path"))).await?;
-            let repo_path = gitdir().await?.join("github.com").join(github_user).join(repo).join("rev").join(git_rev.to_string());
+            let repo_parent = gitdir().await?.join("github.com").join(github_user).join(repo).join("rev");
+            let repo_path = repo_parent.join(git_rev.to_string());
             tx.send(Message::Init(format!("checking if RSL repo exists"))).await?;
             if !fs::exists(&repo_path).await? {
                 tx.send(Message::Init(format!("creating RSL repo path"))).await?;
-                fs::create_dir_all(&repo_path).await?;
-                tx.send(Message::Init(format!("cloning random settings script: initializing repo"))).await?;
-                Command::new("git").arg("init").current_dir(&repo_path).check("git init").await?;
-                tx.send(Message::Init(format!("cloning random settings script: adding remote"))).await?;
-                Command::new("git").arg("remote").arg("add").arg("origin").arg(format!("https://github.com/{github_user}/{repo}.git")).current_dir(&repo_path).check("git remote add").await?;
-                tx.send(Message::Init(format!("cloning random settings script: fetching"))).await?;
-                Command::new("git").arg("fetch").arg("origin").arg(git_rev.to_string()).arg("--depth=1").current_dir(&repo_path).check("git fetch").await?;
-                tx.send(Message::Init(format!("cloning random settings script: resetting"))).await?;
-                Command::new("git").arg("reset").arg("--hard").arg("FETCH_HEAD").current_dir(&repo_path).check("git reset").await?;
+                fs::create_dir_all(&repo_parent).await?;
+                tx.send(Message::Init(format!("cloning random settings script"))).await?;
+                gix::prepare_clone(format!("https://github.com/{github_user}/{repo}.git"), &repo_path)?
+                    .with_shallow(gix::remote::fetch::Shallow::DepthAtRemote(NonZero::<u32>::MIN))
+                    .fetch_then_checkout(gix::progress::Discard /*TODO show progress on command line? */, &gix::interrupt::IS_INTERRUPTED)?.0
+                    .main_worktree(gix::progress::Discard /*TODO show progress on command line? */, &gix::interrupt::IS_INTERRUPTED)?;
             }
             tx.send(Message::Init(format!("copying base rom to RSL repo"))).await?;
             let rsl_data_dir = repo_path.join("data");
@@ -260,10 +259,11 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
                 .check(python.display().to_string()).await?
                 .stdout
             )?;
-            (Cow::Owned(rando_github_user), Cow::Owned(rando_repo_name), randomizer_commit.parse()?, repo_path.join("randomizer"), None, None)
+            (Cow::Owned(rando_github_user), Cow::Owned(rando_repo_name), randomizer_commit.parse()?, repo_path, format!("randomizer"), None, None)
         }
     };
     tx.send(Message::Init(format!("checking if randomizer repo exists"))).await?;
+    let rando_repo_path = rando_repo_parent.join(rando_repo_dir_name);
     if !fs::exists(&rando_repo_path).await? {
         tx.send(Message::Init(format!("creating randomizer repo path"))).await?;
         fs::create_dir_all(&rando_repo_path).await?;
@@ -378,10 +378,7 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
     }
     let repo_path = match setup {
         RandoSetup::Normal { .. } => rando_repo_path,
-        RandoSetup::Rsl { .. } => {
-            assert!(rando_repo_path.pop(), "rando_repo_path was root even though it was defined as subdirectory of repo_path");
-            rando_repo_path
-        }
+        RandoSetup::Rsl { .. } => rando_repo_parent,
     };
     let mut msg_buf = Vec::default();
     'wait_ready: while let Some((duration, reason)) = wait_ready(min_disk, min_disk_percent, min_disk_mount_points, priority_users).await? {
@@ -399,13 +396,13 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
         }
     }
     let (RandoSetup::Normal { seeds, .. } | RandoSetup::Rsl { seeds, .. }) = &setup;
-    tx.send(Message::Ready(NonZeroU8::try_from(u8::try_from(if let crate::Seeds::Fixed(_) = seeds {
+    tx.send(Message::Ready(NonZero::<u8>::try_from(u8::try_from(if let crate::Seeds::Fixed(_) = seeds {
         1
     } else if cores <= 0 {
-        std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN).get().try_into().unwrap_or(i8::MAX) + cores
+        std::thread::available_parallelism().unwrap_or(NonZero::<usize>::MIN).get().try_into().unwrap_or(i8::MAX) + cores
     } else {
         cores
-    }).unwrap_or(1)).unwrap_or(NonZeroU8::MIN).get())).await?;
+    }).unwrap_or(1)).unwrap_or(NonZero::<u8>::MIN).get())).await?;
     let mut rando_tasks = FuturesUnordered::default();
     let abort_handles = Arc::<RwLock<HashMap<_, Vec<tokio::task::AbortHandle>>>>::default();
     #[cfg(windows)] let priority_user_login_checker = if race && !priority_users.is_empty() {

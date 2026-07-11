@@ -26,7 +26,9 @@ use {
     if_chain::if_chain,
     itertools::Itertools as _,
     lazy_regex::regex_captures,
+    reqwest as _, // crate features required to configure gix
     rustc_stable_hash::StableSipHasher128,
+    rustls as _, // crate features required to configure reqwest
     semver::Version,
     serde_json::json,
     tokio::{
@@ -72,7 +74,7 @@ pub enum RandoSetup {
 }
 
 impl RandoSetup {
-    pub fn stats_dir(&self, rando_rev: gix_hash::ObjectId) -> PathBuf {
+    pub fn stats_dir(&self, rando_rev: gix::ObjectId) -> PathBuf {
         match self {
             Self::Normal { github_user, repo, settings, json_settings, plando, world_counts, seeds } => {
                 let mut path = Path::new("rando")

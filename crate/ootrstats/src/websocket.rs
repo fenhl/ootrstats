@@ -14,7 +14,7 @@ use {
 pub enum ClientMessage {
     Handshake {
         password: String,
-        rando_rev: gix_hash::ObjectId,
+        rando_rev: gix::ObjectId,
         setup: RandoSetup,
         output_mode: OutputMode,
         min_disk: ByteSize,

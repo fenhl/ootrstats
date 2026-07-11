@@ -379,7 +379,7 @@ impl IsNetworkError for Error {
 }
 
 impl wheel::CustomExit for Error {
-    fn exit(self, cmd_name: &'static str) -> ! {
+    fn exit(self, cmd_name: &'static str) {
         let mut debug = format!("{self:?}");
         if debug.len() > 2000 && stderr().is_terminal() {
             let mut prefix_end = 1000;

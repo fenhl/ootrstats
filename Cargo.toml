@@ -2,12 +2,12 @@
 members = ["crate/*"]
 default-members = ["crate/ootrstats-supervisor"]
 exclude = ["crate/ootrstats-deploy"]
-resolver = "2"
+resolver = "3"
 
 [workspace.package]
 version = "25.1.0"
 edition = "2021"
-rust-version = "1.91" # nixpkgs stable
+rust-version = "1.95" # nixpkgs stable
 
 [workspace.lints.rust]
 rust_2018_idioms = "deny"
