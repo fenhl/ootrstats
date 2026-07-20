@@ -72,6 +72,7 @@
                     lockFile = ./Cargo.lock;
                 };
                 nativeBuildInputs = with pkgs; [
+                    installShellFiles # required for `installShellCompletion` in postInstall hook
                     makeWrapper # required for wrapProgram in postFixup hook
                 ];
                 postFixup = ''
@@ -83,6 +84,14 @@
                             python-pkgs.requests # required for the RSL script
                         ]))
                     ] ++ pkgs.lib.optional stdenv.hostPlatform.isLinux perf)}
+                '';
+                postInstall = let
+                    ootrstats = "${pkgs.stdenv.hostPlatform.emulator pkgs.buildPackages} $out/bin/ootrstats";
+                in pkgs.lib.optionalString (pkgs.stdenv.hostPlatform.emulatorAvailable pkgs.buildPackages) ''
+                    installShellCompletion --cmd ootrstats \
+                        --bash <(COMPLETE=bash ${ootrstats}) \
+                        --fish <(COMPLETE=fish ${ootrstats}) \
+                        --zsh <(COMPLETE=zsh ${ootrstats})
                 '';
                 src = ./.;
             };
