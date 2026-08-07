@@ -29,6 +29,7 @@ fn main() -> windows_service::Result<()> {
     };
     let service = service_manager.create_service(&service_info, ServiceAccess::CHANGE_CONFIG)?;
     service.set_description("Ocarina of Time Randomizer stats worker")?;
+    let service = service_manager.open_service("ootrstats_worker", ServiceAccess::START)?;
     service.start::<&'static OsStr>(&[])?;
     Ok(())
 }
