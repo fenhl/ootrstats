@@ -1,20 +1,8 @@
 {
-    inputs.nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/*.tar.gz";
-    outputs = attrs: let
-        supportedSystems = [
-            "aarch64-darwin"
-            "aarch64-linux"
-            "x86_64-darwin"
-            "x86_64-linux"
-        ];
-        forEachSupportedSystem = f: attrs.nixpkgs.lib.genAttrs supportedSystems (system: f {
-            pkgs = import attrs.nixpkgs {
-                inherit system;
-            };
-        });
-    in {
+    inputs.flake.url = "github:fenhl/flake";
+    outputs = attrs: attrs.flake.lib {
         nixosConfigurations = {
-            bootstrap = attrs.nixpkgs.lib.nixosSystem {
+            bootstrap = { lib, ... }: lib.nixosSystem {
                 modules = [
                     ({ modulesPath, pkgs, ... }: {
                         environment = {
@@ -39,7 +27,7 @@
                 ];
                 specialArgs = attrs;
             };
-            ootrstats = attrs.nixpkgs.lib.nixosSystem {
+            ootrstats = { lib, ... }: lib.nixosSystem {
                 modules = [
                     ({ modulesPath, pkgs, ... }: {
                         environment.systemPackages = [
@@ -56,13 +44,12 @@
                 specialArgs = attrs;
             };
         };
-        packages = forEachSupportedSystem ({ pkgs, ... }: let
-            manifest = (pkgs.lib.importTOML ./Cargo.toml).workspace.package;
-        in rec {
-            default = supervisor;
-            supervisor = pkgs.rustPlatform.buildRustPackage {
+        packages = {
+            default = { pkgs, ... }: let
+                manifest = (pkgs.lib.importTOML ./Cargo.toml).workspace.package;
+            in pkgs.rustPlatform.buildRustPackage {
+                inherit (manifest) version;
                 pname = "ootrstats";
-                version = manifest.version;
                 buildAndTestSubdir = "crate/ootrstats-supervisor";
                 buildFeatures = [
                     "nixos"
@@ -95,9 +82,11 @@
                 '';
                 src = ./.;
             };
-            worker-daemon = pkgs.rustPlatform.buildRustPackage {
+            worker-daemon = { pkgs, ... }: let
+                manifest = (pkgs.lib.importTOML ./Cargo.toml).workspace.package;
+            in pkgs.rustPlatform.buildRustPackage {
+                inherit (manifest) version;
                 pname = "ootrstats-worker-daemon";
-                version = manifest.version;
                 buildAndTestSubdir = "crate/ootrstats-worker-daemon";
                 buildFeatures = [
                     "nixos"
@@ -121,6 +110,6 @@
                 '';
                 src = ./.;
             };
-        });
+        };
     };
 }
