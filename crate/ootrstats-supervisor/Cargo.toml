@@ -15,7 +15,7 @@ path = "src/main.rs"
 nixos = ["ootrstats/nixos"]
 
 [dependencies]
-async-proto = { version = "0.26", features = ["tokio-tungstenite029"] }
+async-proto = { version = "0.26", features = ["tokio-tungstenite030"] }
 bytes = { version = "1", features = ["serde"] }
 bytesize = { version = "2", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -23,9 +23,9 @@ clap = { version = "4", features = ["derive"] }
 crossterm = { version = "0.29", features = ["event-stream"] }
 either = "1"
 futures = "0.3"
-gix = { version = "0.83", features = ["blocking-http-transport-reqwest-rust-tls-trust-dns"] }
+gix = { version = "0.86", features = ["blocking-http-transport-reqwest-rust-tls-trust-dns"] }
 if_chain = "1"
-itertools = "0.14"
+itertools = "0.15"
 jaq-core = "3"
 jaq-json = { version = "2", features = ["serde"] }
 jaq-std = "3"
@@ -48,8 +48,8 @@ syn = { version = "2", default-features = false, features = ["parsing"] }
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "process", "sync", "time"] }
-tokio-tungstenite = { version = "0.29", default-features = false, features = ["rustls-tls-webpki-roots"] }
-wheel = { git = "https://github.com/fenhl/wheel", features = ["async-proto", "serde_json", "tungstenite029"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["rustls-tls-webpki-roots"] }
+wheel = { git = "https://github.com/fenhl/wheel", features = ["async-proto", "serde_json", "tungstenite030"] }
 
 [target."cfg(windows)".dependencies]
 directories = "6"
