@@ -26,10 +26,9 @@ futures = "0.3"
 gix = { version = "0.83", features = ["blocking-http-transport-reqwest-rust-tls-trust-dns"] }
 if_chain = "1"
 itertools = "0.14"
-jaq-core = "1"
-jaq-interpret = "1"
-jaq-parse = "1"
-jaq-std = "1"
+jaq-core = "3"
+jaq-json = { version = "2", features = ["serde"] }
+jaq-std = "3"
 lazy-regex = "3"
 linode-rs = { git = "https://gitlab.com/fenhl/linode" }
 mimalloc = "0.1"
@@ -43,6 +42,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 semver = "1"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { package = "serde_json_path_to_error", version = "0.1" }
+serde_json_inner = { package = "serde_json", version = "1" }
 serde_with = "3"
 syn = { version = "2", default-features = false, features = ["parsing"] }
 tempfile = "3"

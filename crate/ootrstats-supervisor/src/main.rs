@@ -306,15 +306,10 @@ enum Error {
     EmptyErrorLog(SeedIdx),
     #[error("failed to compile JSON query")]
     JaqCompile,
-    #[error("failed to initialize JSON query parser")]
-    JaqDefs,
-    #[error("failed to parse JSON query")]
-    JaqParse,
-    #[error("got error value from JSON query: {display}")]
-    JaqValue {
-        display: String,
-        debug: String,
-    },
+    #[error("failed to load JSON query")]
+    JaqLoad,
+    #[error("failed to run JSON query")]
+    JaqRun,
     #[cfg(windows)]
     #[error("user folder not found")]
     MissingHomeDir,
@@ -362,9 +357,8 @@ impl IsNetworkError for Error {
             | Self::DraftParse { .. }
             | Self::EmptyErrorLog(_)
             | Self::JaqCompile
-            | Self::JaqDefs
-            | Self::JaqParse
-            | Self::JaqValue { .. }
+            | Self::JaqLoad
+            | Self::JaqRun
             | Self::MissingTraceback { .. }
             | Self::NoDefaultRemote
             | Self::SuccessAndFailure
@@ -1210,33 +1204,28 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
             }
         }
         Some(Subcommand::Categorize { query }) => {
-            let mut defs = jaq_interpret::ParseCtx::new(Vec::default());
-            defs.insert_natives(jaq_core::core());
-            defs.insert_defs(jaq_std::std());
-            if !defs.errs.is_empty() {
-                return Err(Error::JaqDefs)
-            }
-            let (filter, errs) = jaq_parse::parse(&query, jaq_parse::main());
-            if !errs.is_empty() {
-                return Err(Error::JaqParse)
-            }
-            let filter = defs.compile(filter.unwrap());
-            if !defs.errs.is_empty() {
-                return Err(Error::JaqCompile)
-            }
-            let inputs = jaq_interpret::RcIter::new(iter::empty());
-            let mut outputs = BTreeMap::<jaq_interpret::Val, usize>::default();
+            let defs = jaq_core::defs().chain(jaq_std::defs()).chain(jaq_json::defs());
+            let funs = jaq_core::funs().chain(jaq_std::funs()).chain(jaq_json::funs());
+            let loader = jaq_core::load::Loader::new(defs);
+            let arena = jaq_core::load::Arena::default();
+            let program = jaq_core::load::File { code: &*query, path: () };
+            let modules = loader.load(&arena, program).map_err(|_| Error::JaqLoad)?;
+            let filter = jaq_core::Compiler::default()
+                .with_funs(funs)
+                .compile(modules).map_err(|_| Error::JaqCompile)?;
+            let ctx = jaq_core::Ctx::<jaq_core::data::JustLut<jaq_json::Val>>::new(&filter.lut, jaq_core::Vars::new([]));
+            let mut outputs = BTreeMap::<jaq_json::Val, usize>::default();
             for state in seed_states {
                 if let SeedState::Success { spoiler_log, .. } = state {
-                    for value in jaq_interpret::FilterT::run(&filter, (jaq_interpret::Ctx::new([], &inputs), jaq_interpret::Val::from(spoiler_log))) {
-                        *outputs.entry(value.map_err(|e| Error::JaqValue { display: e.to_string(), debug: format!("{e:?}") })?).or_default() += 1;
+                    for value in filter.id.run((ctx.clone(), serde_json::from_value(spoiler_log)?)).map(jaq_core::unwrap_valr) {
+                        *outputs.entry(value.map_err(|_| Error::JaqRun)?).or_default() += 1;
                     }
                 }
             }
             let mut outputs = outputs.into_iter().collect_vec();
             outputs.sort_by(|(_, count1), (_, count2)| count2.cmp(count1));
             for (output, count) in outputs {
-                Message::Category { output: output.into(), count }.print(args.json_messages, &mut stdout)?;
+                Message::Category { output, count }.print(args.json_messages, &mut stdout)?;
             }
         }
         Some(Subcommand::Failures) => {

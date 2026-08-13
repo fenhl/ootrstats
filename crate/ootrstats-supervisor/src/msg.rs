@@ -29,8 +29,11 @@ use {
     if_chain::if_chain,
     itertools::Itertools as _,
     nonempty_collections::NEVec,
-    serde::Serialize,
-    serde_json::Value as Json,
+    serde::{
+        Serialize,
+        Serializer,
+        ser::Error as _,
+    },
     tokio::time::Instant,
     wheel::traits::{
         IoResultExt as _,
@@ -43,6 +46,34 @@ use {
         worker,
     },
 };
+
+fn serialize_jaq_json<S: Serializer>(v: &jaq_json::Val, serializer: S) -> Result<S::Ok, S::Error> {
+    #[derive(Debug, thiserror::Error)]
+    enum JaqToSerdeError {
+        #[error(transparent)] Json(#[from] serde_json_inner::Error),
+        #[error(transparent)] Utf8(#[from] std::str::Utf8Error),
+        #[error("got a jaq object with a non-string key")]
+        KeyType,
+    }
+
+    fn jaq_to_serde(v: &jaq_json::Val) -> Result<serde_json::Value, JaqToSerdeError> {
+        Ok(match v {
+            jaq_json::Val::Null => serde_json::Value::Null,
+            jaq_json::Val::Bool(b) => (*b).into(),
+            jaq_json::Val::Num(jaq_json::Num::Int(n)) => (*n).into(),
+            jaq_json::Val::Num(jaq_json::Num::Float(f)) => (*f).into(),
+            jaq_json::Val::Num(n) => serde_json::Value::Number(n.to_string().parse()?),
+            jaq_json::Val::BStr(s) | jaq_json::Val::TStr(s) => std::str::from_utf8(s)?.into(),
+            jaq_json::Val::Arr(a) => a.iter().map(jaq_to_serde).try_collect()?,
+            jaq_json::Val::Obj(o) => o.iter().map(|(k, v)| Ok((match k {
+                jaq_json::Val::BStr(s) | jaq_json::Val::TStr(s) => std::str::from_utf8(s)?.to_owned(),
+                _ => return Err(JaqToSerdeError::KeyType),
+            }, jaq_to_serde(v)?))).try_collect()?,
+        })
+    }
+
+    jaq_to_serde(v).map_err(S::Error::custom)?.serialize(serializer)
+}
 
 #[derive(Serialize)]
 pub(crate) enum Message<'a> {
@@ -80,7 +111,8 @@ pub(crate) enum Message<'a> {
     },
     Category {
         count: usize,
-        output: Json,
+        #[serde(serialize_with = "serialize_jaq_json")]
+        output: jaq_json::Val,
     },
     FailuresHeader {
         failures: u16,
