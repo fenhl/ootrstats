@@ -60,6 +60,8 @@ fn service_main(_: Vec<OsString>) {
     if let Err(e) = rocket::async_main(run_service()) {
         if let Some(home_dir) = std::env::home_dir() {
             let _ = std::fs::write(home_dir.join("ootrstats-worker-windows-service-error.txt"), format!("error in ootrstats-worker-windows-service::run_service (version {}): {e} ({e:?})", env!("CARGO_PKG_VERSION")));
+        } else {
+            let _ = std::fs::write(home_dir.join("C:/ootrstats-worker-windows-service-error.txt"), format!("error in ootrstats-worker-windows-service::run_service (version {}): {e} ({e:?})", env!("CARGO_PKG_VERSION")));
         }
         panic!("error in ootrstats-worker-windows-service::run_service (version {}): {e} ({e:?})", env!("CARGO_PKG_VERSION"))
     }
