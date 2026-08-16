@@ -508,7 +508,7 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                 .prepare_fetch(gix::progress::Discard /*TODO show progress on command line? */, Default::default())?
                 .with_shallow(gix::remote::fetch::Shallow::DepthAtRemote(NonZero::<u32>::MIN))
                 .receive(gix::progress::Discard /*TODO show progress on command line? */, &gix::interrupt::IS_INTERRUPTED)?;
-            Command::new("git").arg("reset").arg("--hard").arg("origin/HEAD").current_dir(dir).check("git reset").await?; //TODO use gix, blocked on https://github.com/GitoxideLabs/gitoxide/issues/301
+            Command::new("git").arg("reset").arg("--hard").arg(format!("origin/{}", args.branch.as_deref().unwrap_or("HEAD"))).current_dir(dir).check("git reset").await?; //TODO use gix, blocked on https://github.com/GitoxideLabs/gitoxide/issues/301
             repo
         } else {
             fs::create_dir_all(&dir_parent).await?;

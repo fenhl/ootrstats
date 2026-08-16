@@ -1,6 +1,14 @@
 {
     inputs.flake.url = "github:fenhl/flake";
     outputs = attrs: attrs.flake.lib {
+        devShells.default = { pkgs, ... }: {
+            packages = with pkgs; [
+                cargo
+                (python314.withPackages (python-pkgs: [ #TODO(NixOS 26.11) replace python314 with python3
+                    python-pkgs.requests # required for the RSL script
+                ]))
+            ];
+        };
         nixosConfigurations = {
             bootstrap = { lib, ... }: lib.nixosSystem {
                 modules = [
@@ -67,7 +75,7 @@
                         cargo # required to build OoTR riir branch
                         clang # required to fix the error “linker `cc` not found” while building OoTR riir branch
                         git #TODO replace usage of the git CLI in ootrstats with gix
-                        (python3.withPackages (python-pkgs: [
+                        (python314.withPackages (python-pkgs: [ #TODO(NixOS 26.11) replace python314 with python3
                             python-pkgs.requests # required for the RSL script
                         ]))
                     ] ++ pkgs.lib.optional stdenv.hostPlatform.isLinux perf)}
@@ -103,7 +111,7 @@
                         cargo # required to build OoTR riir branch
                         clang # required to fix the error “linker `cc` not found” while building OoTR riir branch
                         git #TODO replace usage of the git CLI in ootrstats with gix
-                        (python3.withPackages (python-pkgs: [
+                        (python314.withPackages (python-pkgs: [ #TODO(NixOS 26.11) replace python314 with python3
                             python-pkgs.requests # required for the RSL script
                         ]))
                     ] ++ pkgs.lib.optional stdenv.hostPlatform.isLinux perf)}
