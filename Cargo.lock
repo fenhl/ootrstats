@@ -3559,7 +3559,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats"
-version = "25.1.0"
+version = "25.2.0"
 dependencies = [
  "async-proto",
  "bytes",
@@ -3594,7 +3594,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-macros"
-version = "25.1.0"
+version = "25.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3603,7 +3603,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-supervisor"
-version = "25.1.0"
+version = "25.2.0"
 dependencies = [
  "async-proto",
  "bytes",
@@ -3646,7 +3646,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-daemon"
-version = "25.1.0"
+version = "25.2.0"
 dependencies = [
  "async-proto",
  "constant_time_eq",
@@ -3671,7 +3671,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-windows-service"
-version = "25.1.0"
+version = "25.2.0"
 dependencies = [
  "mimalloc",
  "ootrstats-worker-daemon",
@@ -3682,7 +3682,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-windows-service-installer"
-version = "25.1.0"
+version = "25.2.0"
 dependencies = [
  "directories",
  "mimalloc",
@@ -3691,7 +3691,7 @@ dependencies = [
 
 [[package]]
 name = "ootrstats-worker-windows-service-uninstaller"
-version = "25.1.0"
+version = "25.2.0"
 dependencies = [
  "windows-service",
  "windows-sys 0.61.2",

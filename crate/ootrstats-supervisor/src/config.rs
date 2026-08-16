@@ -10,7 +10,7 @@ use {
 #[cfg(windows)] use directories::ProjectDirs;
 #[cfg(unix)] use xdg::BaseDirectories;
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
     #[serde(default)]
@@ -24,7 +24,7 @@ fn make_neg_one() -> i8 { -1 }
 fn make_five() -> f64 { 5.0 }
 fn make_true() -> bool { true }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Worker {
     pub name: Arc<str>,
     #[serde(flatten)]

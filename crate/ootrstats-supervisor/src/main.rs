@@ -62,6 +62,7 @@ use {
     serde::{
         Deserialize,
         Serialize,
+        de::DeserializeOwned,
     },
     tokio::{
         io::AsyncWriteExt as _,
@@ -175,7 +176,7 @@ enum SeedState {
     },
 }
 
-fn parse_json_object(arg: &str) -> Result<serde_json::Map<String, serde_json::Value>, serde_json::Error> {
+fn parse_json<T: DeserializeOwned>(arg: &str) -> Result<T, serde_json::Error> {
     serde_json::from_str(arg)
 }
 
@@ -207,13 +208,13 @@ struct Args {
     #[clap(long, conflicts_with("rsl"), conflicts_with("preset"), conflicts_with("settings"))]
     draft: Option<PathBuf>,
     /// Specifies a JSON object of settings on the command line that will override the given preset or settings string.
-    #[clap(long, default_value = "{}", value_parser = parse_json_object)]
+    #[clap(long, default_value = "{}", value_parser = parse_json::<serde_json::Map<String, serde_json::Value>>)]
     json_settings: serde_json::Map<String, serde_json::Value>,
     /// Specifies a JSON file of settings that will override the given preset or settings string.
     #[clap(long)]
     json_settings_file: Option<PathBuf>,
     /// Specifies a JSON object of a plandomizer file on the command line.
-    #[clap(long, default_value = "{}", conflicts_with("rsl"), value_parser = parse_json_object)]
+    #[clap(long, default_value = "{}", conflicts_with("rsl"), value_parser = parse_json::<serde_json::Map<String, serde_json::Value>>)]
     plando: serde_json::Map<String, serde_json::Value>,
     /// Generate seeds with varying world counts.
     #[clap(long, conflicts_with("rsl"))]
@@ -227,6 +228,9 @@ struct Args {
 
     // ootrstats settings
 
+    /// Specifies the ootrstats configuration as a JSON object on the command line that will be used instead of reading the configuration from a file.
+    #[clap(long, value_parser = parse_json::<Config>)]
+    config: Option<Config>,
     /// Sample size — how many seeds to roll.
     #[clap(short, long, default_value = "16384", default_value_if("world_counts", "true", Some("255")))]
     num_seeds: NonZero<SeedIdx>,
@@ -456,7 +460,11 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
     let mut stdout = stdout();
     let mut stderr = stderr();
     Message::Preparing(label).print(args.json_messages, &mut stderr)?;
-    let mut config = Config::load().await?;
+    let mut config = if let Some(config) = args.config {
+        config
+    } else {
+        Config::load().await?
+    };
     let mut log_file = if config.log {
         Some(File::create("ootrstats.log").await?)
     } else {
