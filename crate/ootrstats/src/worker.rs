@@ -94,12 +94,14 @@ pub enum SupervisorMessage {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error(transparent)] Any(Box<dyn std::error::Error + Send>),
     #[error(transparent)] CargoMetadata(#[from] cargo_metadata::Error),
     #[error(transparent)] Decompress(#[from] decompress::Error),
     #[error(transparent)] EnvJoinPaths(#[from] env::JoinPathsError),
     #[error(transparent)] GitCheckout(#[from] gix::clone::checkout::main_worktree::Error),
     #[error(transparent)] GitClone(#[from] gix::clone::Error),
     #[error(transparent)] GitCloneFetch(#[from] gix::clone::fetch::Error),
+    #[error(transparent)] GitInit(#[from] gix::init::Error),
     #[error(transparent)] Json(#[from] serde_json::Error),
     #[error(transparent)] ParseGitHash(#[from] gix::hash::decode::Error),
     #[cfg(unix)] #[error(transparent)] ParseInt(#[from] std::num::ParseIntError),
@@ -214,17 +216,19 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
         }
         RandoSetup::Rsl { ref github_user, ref repo, .. } => {
             tx.send(Message::Init(format!("cloning random settings script: determining repo path"))).await?;
-            let repo_parent = gitdir().await?.join("github.com").join(github_user).join(repo).join("rev");
-            let repo_path = repo_parent.join(git_rev.to_string());
+            let repo_path = gitdir().await?.join("github.com").join(github_user).join(repo).join("rev").join(git_rev.to_string());
             tx.send(Message::Init(format!("checking if RSL repo exists"))).await?;
             if !fs::exists(&repo_path).await? {
                 tx.send(Message::Init(format!("creating RSL repo path"))).await?;
-                fs::create_dir_all(&repo_parent).await?;
-                tx.send(Message::Init(format!("cloning random settings script"))).await?;
-                gix::prepare_clone(format!("https://github.com/{github_user}/{repo}.git"), &repo_path)?
-                    .with_shallow(gix::remote::fetch::Shallow::DepthAtRemote(NonZero::<u32>::MIN))
-                    .fetch_then_checkout(gix::progress::Discard /*TODO show progress on command line? */, &gix::interrupt::IS_INTERRUPTED)?.0
-                    .main_worktree(gix::progress::Discard /*TODO show progress on command line? */, &gix::interrupt::IS_INTERRUPTED)?;
+                fs::create_dir_all(&repo_path).await?;
+                tx.send(Message::Init(format!("cloning random settings script: initializing repo"))).await?;
+                gix::init(&repo_path)?;
+                tx.send(Message::Init(format!("cloning random settings script: adding remote"))).await?;
+                Command::new("git").arg("remote").arg("add").arg("origin").arg(format!("https://github.com/{github_user}/{repo}.git")).current_dir(&repo_path).check("git remote add").await?; //TODO gix::Remote::save_as_to doesn't seem to do anything
+                tx.send(Message::Init(format!("cloning random settings script: fetching"))).await?;
+                Command::new("git").arg("fetch").arg("origin").arg(git_rev.to_string()).arg("--depth=1").current_dir(&repo_path).check("git fetch").await?; //TODO how to fetch with specified rev in gix?
+                tx.send(Message::Init(format!("cloning random settings script: resetting"))).await?;
+                Command::new("git").arg("reset").arg("--hard").arg("FETCH_HEAD").current_dir(&repo_path).check("git reset").await?; //TODO use gix, blocked on https://github.com/GitoxideLabs/gitoxide/issues/301
             }
             tx.send(Message::Init(format!("copying base rom to RSL repo"))).await?;
             let rsl_data_dir = repo_path.join("data");
