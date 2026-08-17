@@ -836,21 +836,14 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                 fs::create_dir_all(&seed_dir).await?;
                                 let stats_spoiler_log_path = seed_dir.join("spoiler.json");
                                 match spoiler_log {
-                                    Either::Left(ref spoiler_log_path) => {
-                                        let is_same_drive = {
-                                            #[cfg(windows)] {
-                                                spoiler_log_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
-                                                == stats_spoiler_log_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
-                                            }
-                                            #[cfg(not(windows))] { true }
-                                        };
-                                        if is_same_drive {
-                                            fs::rename(spoiler_log_path, stats_spoiler_log_path).await?;
-                                        } else {
+                                    Either::Left(ref spoiler_log_path) => match fs::rename(spoiler_log_path, &stats_spoiler_log_path).await {
+                                        Ok(()) => {}
+                                        Err(wheel::Error::Io { inner, .. }) if inner.kind() == io::ErrorKind::CrossesDevices => {
                                             fs::copy(spoiler_log_path, stats_spoiler_log_path).await?;
                                             fs::remove_file(spoiler_log_path).await?;
                                         }
-                                    }
+                                        Err(e) => return Err(e.into()),
+                                    },
                                     Either::Right(ref spoiler_log) => fs::write(stats_spoiler_log_path, spoiler_log).await?,
                                 }
                                 if let Some(patch) = patch {
@@ -880,18 +873,13 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                                 cmd.arg(patch_path);
                                                 cmd.check("wsl rm").await?;
                                             } else {
-                                                let is_same_drive = {
-                                                    #[cfg(windows)] {
-                                                        patch_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
-                                                        == stats_patch_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                                match fs::rename(&patch_path, &stats_patch_path).await {
+                                                    Ok(()) => {}
+                                                    Err(wheel::Error::Io { inner, .. }) if inner.kind() == io::ErrorKind::CrossesDevices => {
+                                                        fs::copy(&patch_path, stats_patch_path).await?;
+                                                        fs::remove_file(patch_path).await?;
                                                     }
-                                                    #[cfg(not(windows))] { true }
-                                                };
-                                                if is_same_drive {
-                                                    fs::rename(patch_path, stats_patch_path).await?;
-                                                } else {
-                                                    fs::copy(&patch_path, stats_patch_path).await?;
-                                                    fs::remove_file(patch_path).await?;
+                                                    Err(e) => return Err(e.into()),
                                                 }
                                             }
                                         }
@@ -905,18 +893,13 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                     match rsl_plando {
                                         Either::Left(rsl_plando_path) => {
                                             let stats_rsl_plando_path = seed_dir.join("random_settings.json");
-                                            let is_same_drive = {
-                                                #[cfg(windows)] {
-                                                    rsl_plando_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
-                                                    == stats_rsl_plando_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                            match fs::rename(&rsl_plando_path, &stats_rsl_plando_path).await {
+                                                Ok(()) => {}
+                                                Err(wheel::Error::Io { inner, .. }) if inner.kind() == io::ErrorKind::CrossesDevices => {
+                                                    fs::copy(&rsl_plando_path, stats_rsl_plando_path).await?;
+                                                    fs::remove_file(rsl_plando_path).await?;
                                                 }
-                                                #[cfg(not(windows))] { true }
-                                            };
-                                            if is_same_drive {
-                                                fs::rename(rsl_plando_path, stats_rsl_plando_path).await?;
-                                            } else {
-                                                fs::copy(&rsl_plando_path, stats_rsl_plando_path).await?;
-                                                fs::remove_file(rsl_plando_path).await?;
+                                                Err(e) => return Err(e.into()),
                                             }
                                         }
                                         Either::Right(rsl_plando) => {
@@ -994,18 +977,13 @@ async fn cli(label: Option<&'static str>, mut args: Args) -> Result<bool, Error>
                                         match rsl_plando {
                                             Either::Left(rsl_plando_path) => {
                                                 let stats_rsl_plando_path = seed_dir.join("random_settings.json");
-                                                let is_same_drive = {
-                                                    #[cfg(windows)] {
-                                                        rsl_plando_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
-                                                        == stats_rsl_plando_path.components().find_map(|component| if let std::path::Component::Prefix(prefix) = component { Some(prefix) } else { None })
+                                                match fs::rename(&rsl_plando_path, &stats_rsl_plando_path).await {
+                                                    Ok(()) => {}
+                                                    Err(wheel::Error::Io { inner, .. }) if inner.kind() == io::ErrorKind::CrossesDevices => {
+                                                        fs::copy(&rsl_plando_path, stats_rsl_plando_path).await?;
+                                                        fs::remove_file(rsl_plando_path).await?;
                                                     }
-                                                    #[cfg(not(windows))] { true }
-                                                };
-                                                if is_same_drive {
-                                                    fs::rename(rsl_plando_path, stats_rsl_plando_path).await?;
-                                                } else {
-                                                    fs::copy(&rsl_plando_path, stats_rsl_plando_path).await?;
-                                                    fs::remove_file(rsl_plando_path).await?;
+                                                    Err(e) => return Err(e.into()),
                                                 }
                                             }
                                             Either::Right(rsl_plando) => {
