@@ -60,7 +60,12 @@ echo "source <(COMPLETE=zsh ootrstats)" >> ~/.zshrc
 
 # Configuration
 
-`ootrstats` requires a configuration file, which should be a [JSON](https://json.org/) object located at `$XDG_CONFIG_DIRS/ootrstats.json` on Unix, or `%APPDATA%\Fenhl\ootrstats\config\config.json` on Windows. (`%APPDATA%` defaults to `AppData\Roaming` in your user folder. Create any folders on this path that don't exist.) For quick setup, you can use the following file (replacing the `baseRomPath` value with the actual path to your base rom); see below for customization options.
+`ootrstats` requires a configuration file, which should be a [JSON](https://json.org/) object located at:
+
+* On Windows, `%APPDATA%\Fenhl\ootrstats\config\config.json` (`%APPDATA%` defaults to `AppData\Roaming` in your user folder. Create any folders on this path that don't exist.)
+* On macOS/Linux, `$XDG_CONFIG_HOME/ootrstats.json` or `$XDG_CONFIG_DIRS/ootrstats.json` (`$XDG_CONFIG_HOME` defaults to `.config` in your user folder, and `$XDG_CONFIG_DIRS` defaults to `/etc/xdg` at the file system root. See [the XDG base directory specification](https://specifications.freedesktop.org/basedir/latest/) for details.)
+
+For quick setup, you can use the following file (replacing the `baseRomPath` value with the actual path to your base rom); see below for customization options.
 
 ```json
 {
@@ -81,7 +86,7 @@ The config file has the following required entry:
 And the following optional entries:
 
 * `log`: If `true`, the supervisor will create a text file named `ootrstats.log` in the working directory with debug info. The default is `false`.
-* `statsDir`: A path to a directory where the statistics will be stored. Defaults to `$XDG_CACHE_HOME/ootrstats` on Unix, or `%APPDATA%\Fenhl\ootrstats\data` on Windows.
+* `statsDir`: A path to a directory where the statistics will be stored. Defaults to `$XDG_CACHE_HOME/ootrstats` on macOS/Linux, or `%APPDATA%\Fenhl\ootrstats\data` on Windows.
 
 ## Workers
 
@@ -135,7 +140,7 @@ A worker that listens to WebSocket connections from the supervisor. To set up, d
 
 1. Install Rust
 2. Run `cargo install --git=https://github.com/fenhl/ootrstats ootrstats-worker-daemon`
-3. Create a JSON file at `$XDG_CONFIG_DIRS/ootrstats-worker-daemon.json` on Unix or `%APPDATA%\Fenhl\ootrstats\config\worker-daemon.json` on Windows, containing a JSON object with the following entries:
+3. Create a JSON file at `$XDG_CONFIG_DIRS/ootrstats-worker-daemon.json` on macOS/Linux or `%APPDATA%\Fenhl\ootrstats\config\worker-daemon.json` on Windows, containing a JSON object with the following entries:
     * `baseRomPath` (required): An absolute path to the vanilla OoT rom on the worker computer. See [the randomizer's documentation](https://github.com/OoTRandomizer/OoT-Randomizer#installation) for details.
     * `password` (required): A password string that the supervisor will use to connect to this worker.
     * `address` (optional): The IP address on which the worker daemon will listen. Defaults to `127.0.0.1`, meaning only local connections will be accepted and you will need a reverse proxy like nginx. Change to `0.0.0.0` to accept connections from anywhere.
