@@ -248,10 +248,13 @@ async fn python() -> Result<PathBuf, RollError> {
             #[cfg(not(feature = "nixos"))] {
                 let venv = cache_dir().at_unknown()?.join("venv");
                 if !fs::exists(&venv).await? {
-                    let system_python = {
+                    let mut system_python = {
                         #[cfg(target_arch = "aarch64")] { "/opt/homebrew/bin/python3" }
                         #[cfg(target_arch = "x86_64")] { "/usr/local/bin/python3" }
                     };
+                    if !fs::exists(system_python).await? {
+                        system_python = "/usr/bin/python3";
+                    }
                     Command::new(system_python).arg("-m").arg("venv").arg(&venv).check("python -m venv").await?;
                 }
                 venv.join("bin").join("python")
