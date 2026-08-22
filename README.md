@@ -2,6 +2,39 @@
 
 # Installation
 
+On macOS, there are two ways to install ootrstats. The Nix method is less error-prone but requires root permissions.
+
+## With Nix (on macOS or NixOS)
+
+1. Install Nix:
+    * On macOS, follow the “Prerequisites” and “Getting started” sections of the [nix-darwin](https://github.com/nix-darwin/nix-darwin#readme) readme.
+    * On NixOS, ensure flakes are enabled.
+2. Add the following to your system flake:
+    ```nix
+    {
+        inputs.ootrstats = {
+            url = "github:fenhl/ootrstats";
+            inputs.flake.inputs.nixpkgs.follows = "nixpkgs"; # optional, ensures ootrstats uses the same nixpkgs as the rest of the system
+        };
+        outputs = attrs: {
+            nixosConfigurations.default = attrs.nixpkgs.lib.nixosSystem { # replace `default` with your hostname
+                modules = [
+                    ({ pkgs, ... }: {
+                        environment.systemPackages = [
+                            attrs.ootrstats.packages.${pkgs.stdenv.hostPlatform.system}.default
+                        ];
+                    })
+                ];
+            };
+        };
+    }
+    ```
+3. Apply the changes:
+    * On macOS, run `sudo darwin-rebuild switch`
+    * On NixOS, run `sudo nixos-rebuild switch`
+
+## Without Nix (on Windows, macOS, or non-NixOS Linux)
+
 1. Install Rust:
     * On Windows, download and run [rustup-init.exe](https://win.rustup.rs/) and follow its instructions. If asked to install Visual C++ prerequisites, use the “Quick install via the Visual Studio Community installer” option. You can uncheck the option to launch Visual Studio when done.
     * On other platforms, please see [the Rust website](https://www.rust-lang.org/tools/install) for instructions.
@@ -15,7 +48,7 @@
     cargo install --git=https://github.com/fenhl/ootrstats ootrstats-supervisor
     ```
 
-## Tab completion
+### Tab completion
 
 **Bash**
 ```bash
@@ -48,6 +81,13 @@ echo "source <(COMPLETE=zsh ootrstats)" >> ~/.zshrc
 ```
 
 # Updating
+
+## With Nix
+
+* On macOS, run `env -c /etc/nix-darwin nix flake update && sudo darwin-rebuild switch`
+* On NixOS, run `sudo env -c /etc/nixos nix flake update && sudo nixos-rebuild switch`
+
+## Without Nix
 
 1. Install the updater:
     ```sh
