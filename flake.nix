@@ -4,8 +4,9 @@
         devShells.default = { pkgs, ... }: {
             packages = with pkgs; [
                 cargo
-                (python314.withPackages (python-pkgs: [ #TODO(NixOS 26.11) replace python314 with python3
-                    python-pkgs.requests # required for the RSL script
+                (python314.withPackages (python-pkgs: with python-pkgs; [ #TODO(NixOS 26.11) replace python314 with python3
+                    numpy # required by the randomizer
+                    requests # required for the RSL script
                 ]))
             ];
         };
@@ -75,8 +76,9 @@
                         cargo # required to build OoTR riir branch
                         clang # required to fix the error “linker `cc` not found” while building OoTR riir branch
                         git #TODO replace usage of the git CLI in ootrstats with gix
-                        (python314.withPackages (python-pkgs: [ #TODO(NixOS 26.11) replace python314 with python3
-                            python-pkgs.requests # required for the RSL script
+                        (python314.withPackages (python-pkgs: with python-pkgs; [ #TODO(NixOS 26.11) replace python314 with python3
+                            numpy # required by the randomizer
+                            requests # required for the RSL script
                         ]))
                     ] ++ pkgs.lib.optional stdenv.hostPlatform.isLinux perf)}
                 '';
@@ -111,8 +113,9 @@
                         cargo # required to build OoTR riir branch
                         clang # required to fix the error “linker `cc` not found” while building OoTR riir branch
                         git #TODO replace usage of the git CLI in ootrstats with gix
-                        (python314.withPackages (python-pkgs: [ #TODO(NixOS 26.11) replace python314 with python3
-                            python-pkgs.requests # required for the RSL script
+                        (python314.withPackages (python-pkgs: with python-pkgs; [ #TODO(NixOS 26.11) replace python314 with python3
+                            numpy # required by the randomizer
+                            requests # required for the RSL script
                         ]))
                     ] ++ pkgs.lib.optional stdenv.hostPlatform.isLinux perf)}
                 '';
