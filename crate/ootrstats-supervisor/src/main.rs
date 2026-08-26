@@ -399,44 +399,48 @@ impl wheel::CustomExit for Error {
                 eprintln!("line {}, column {}\r", start.line, start.column);
                 eprintln!("debug info: {debug}\r");
             }
-            Self::Worker { worker_errors, .. } => match worker_errors.into_iter().exactly_one() {
-                Ok((worker, worker::Error::Local(ootrstats::worker::Error::Roll(ootrstats::RollError::PerfSyntax(stderr))))) => {
-                    eprintln!("{cmd_name}: roll error in worker {worker}: failed to parse `perf` output\r");
-                    eprintln!("stderr:\r");
-                    eprintln!("{}\r", String::from_utf8_lossy(&stderr).lines().filter(|line| !regex_is_match!("^[0-9]+ files remaining$", line)).format("\r\n"));
-                }
-                Ok((worker, worker::Error::Wheel(wheel::Error::CommandExit { name, output }))) => {
-                    eprintln!("{cmd_name}: error in worker {worker}: command `{name}` exited with {}\r", output.status);
-                    eprintln!("stdout:\r");
-                    eprintln!("{}\r", String::from_utf8_lossy(&output.stdout).lines().format("\r\n"));
-                    eprintln!("stderr:\r");
-                    eprintln!("{}\r", String::from_utf8_lossy(&output.stderr).lines().format("\r\n"));
-                }
-                Ok((worker, source)) => {
-                    eprintln!("{cmd_name}: {} in worker {worker}: {source}\r", if source.is_network_error() { "network error" } else { "error" });
-                    eprintln!("debug info: {debug}\r");
-                }
-                Err(errors) => {
-                    eprintln!("{cmd_name}: errors in workers:\r");
-                    for (worker, source) in errors {
-                        eprintln!("\r");
-                        eprintln!("{} in worker {worker}: {}\r", if source.is_network_error() { "network error" } else { "error" }, source.to_string().lines().format("\r\n"));
-                        let mut debug = format!("{source:?}");
-                        if debug.len() > 2000 && stderr().is_terminal() {
-                            let mut prefix_end = 1000;
-                            while !debug.is_char_boundary(prefix_end) {
-                                prefix_end -= 1;
-                            }
-                            let mut suffix_start = debug.len() - 1000;
-                            while !debug.is_char_boundary(suffix_start) {
-                                suffix_start += 1;
-                            }
-                            debug = format!("{}[…]{}", &debug[..prefix_end], &debug[suffix_start..]);
-                        }
+            Self::Worker { worker_errors, .. } => {
+                let is_network_error = worker_errors.iter().all(|(_, e)| e.is_network_error());
+                match worker_errors.into_iter().exactly_one() {
+                    Ok((worker, worker::Error::Local(ootrstats::worker::Error::Roll(ootrstats::RollError::PerfSyntax(stderr))))) => {
+                        eprintln!("{cmd_name}: roll error in worker {worker}: failed to parse `perf` output\r");
+                        eprintln!("stderr:\r");
+                        eprintln!("{}\r", String::from_utf8_lossy(&stderr).lines().filter(|line| !regex_is_match!("^[0-9]+ files remaining$", line)).format("\r\n"));
+                    }
+                    Ok((worker, worker::Error::Wheel(wheel::Error::CommandExit { name, output }))) => {
+                        eprintln!("{cmd_name}: error in worker {worker}: command `{name}` exited with {}\r", output.status);
+                        eprintln!("stdout:\r");
+                        eprintln!("{}\r", String::from_utf8_lossy(&output.stdout).lines().format("\r\n"));
+                        eprintln!("stderr:\r");
+                        eprintln!("{}\r", String::from_utf8_lossy(&output.stderr).lines().format("\r\n"));
+                    }
+                    Ok((worker, source)) => {
+                        eprintln!("{cmd_name}: {} in worker {worker}: {source}\r", if source.is_network_error() { "network error" } else { "error" });
                         eprintln!("debug info: {debug}\r");
                     }
+                    Err(errors) => {
+                        eprintln!("{cmd_name}: errors in workers:\r");
+                        for (worker, source) in errors {
+                            eprintln!("\r");
+                            eprintln!("{} in worker {worker}: {}\r", if source.is_network_error() { "network error" } else { "error" }, source.to_string().lines().format("\r\n"));
+                            let mut debug = format!("{source:?}");
+                            if debug.len() > 2000 && stderr().is_terminal() {
+                                let mut prefix_end = 1000;
+                                while !debug.is_char_boundary(prefix_end) {
+                                    prefix_end -= 1;
+                                }
+                                let mut suffix_start = debug.len() - 1000;
+                                while !debug.is_char_boundary(suffix_start) {
+                                    suffix_start += 1;
+                                }
+                                debug = format!("{}[…]{}", &debug[..prefix_end], &debug[suffix_start..]);
+                            }
+                            eprintln!("debug info: {debug}\r");
+                        }
+                    }
                 }
-            },
+                if is_network_error { std::process::exit(0) }
+            }
             _ => {
                 eprintln!("{cmd_name}: {self}\r");
                 eprintln!("debug info: {debug}\r");
