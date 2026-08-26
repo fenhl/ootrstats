@@ -185,6 +185,7 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
     let mut use_rust_cli = false;
     let mut supports_unsalted_seeds = false;
     let mut creates_log_by_default = true;
+    let mut uses_venv = false;
     let (rando_github_user, rando_repo_name, rando_git_rev, rando_repo_parent, rando_repo_dir_name, uncompressed_base_rom_tempfile, plando_tempfile) = match setup {
         RandoSetup::Normal { ref github_user, ref repo, ref plando, .. } => {
             tx.send(Message::Init(format!("cloning randomizer: determining repo path"))).await?;
@@ -341,6 +342,7 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
             use_rust_cli = package.version >= Version { major: 8, minor: 2, patch: 49, pre: "fenhl.1.riir.2".parse()?, build: semver::BuildMetadata::default() };
             supports_unsalted_seeds = package.version >= Version { major: 8, minor: 2, patch: 54, pre: "fenhl.2.riir.2".parse()?, build: semver::BuildMetadata::default() };
             creates_log_by_default = package.version < Version { major: 8, minor: 3, patch: 33, pre: "fenhl.1.riir.2".parse()?, build: semver::BuildMetadata::default() };
+            uses_venv = package.version >= Version::new(9, 1, 23);
         }
         if use_rust_cli {
             tx.send(Message::Init(format!("building Rust CLI"))).await?;
@@ -361,6 +363,7 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
                 .filter_map(|line| regex_captures!("^supplementary_version = ([0-9]+)$", line))
                 .find_map(|(_, supplementary_version)| supplementary_version.parse::<u8>().ok())
             {
+                uses_venv = base_version >= Version::new(9, 1, 23);
                 supports_unsalted_seeds = (base_version, supplementary_version) >= (Version::new(8, 2, 54), 2);
             }
         }
@@ -442,7 +445,7 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
                 let json_settings = json_settings.clone();
                 let uncompressed_base_rom_path = uncompressed_base_rom_tempfile.as_ref().expect("missing uncompressed base rom").to_path_buf();
                 let plando = plando_tempfile.as_ref().map(|tempfile| tempfile.to_path_buf());
-                Either::Left(async move { crate::run_rando(wsl_distro.as_deref(), &repo_path, &uncompressed_base_rom_path, use_rust_cli, supports_unsalted_seeds, creates_log_by_default, seeds, &settings, &json_settings, plando.as_deref(), world_counts, seed_idx, output_mode).await })
+                Either::Left(async move { crate::run_rando(wsl_distro.as_deref(), &repo_path, &uncompressed_base_rom_path, use_rust_cli, supports_unsalted_seeds, creates_log_by_default, uses_venv, seeds, &settings, &json_settings, plando.as_deref(), world_counts, seed_idx, output_mode).await })
             }
             RandoSetup::Rsl { ref preset, ref seeds, .. } => {
                 let wsl_distro = wsl_distro.clone();
@@ -450,7 +453,7 @@ pub async fn work(verbose: bool, tx: mpsc::Sender<Message>, mut rx: mpsc::Receiv
                 let rsl_version = rsl_version.clone().unwrap();
                 let seeds = seeds.clone();
                 let preset = preset.clone();
-                Either::Right(async move { crate::run_rsl(wsl_distro.as_deref(), &repo_path, &rsl_version, use_rust_cli, supports_unsalted_seeds, creates_log_by_default, seeds, preset.as_ref(), seed_idx, output_mode).await })
+                Either::Right(async move { crate::run_rsl(wsl_distro.as_deref(), &repo_path, &rsl_version, use_rust_cli, supports_unsalted_seeds, creates_log_by_default, uses_venv, seeds, preset.as_ref(), seed_idx, output_mode).await })
             }
         };
         let tx = tx.clone();

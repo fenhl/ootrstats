@@ -263,7 +263,7 @@ async fn python() -> Result<PathBuf, RollError> {
     })
 }
 
-pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, uncompressed_base_rom_path: &Path, use_rust_cli: bool, supports_unsalted_seeds: bool, creates_log_by_default: bool, seeds: Seeds, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, plando: Option<&Path>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
+pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, uncompressed_base_rom_path: &Path, use_rust_cli: bool, supports_unsalted_seeds: bool, creates_log_by_default: bool, #[cfg_attr(not(feature = "nixos"), allow(unused))] uses_venv: bool, seeds: Seeds, settings: &RandoSettings, json_settings: &serde_json::Map<String, serde_json::Value>, plando: Option<&Path>, world_counts: bool, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let mut resolved_settings = collect![as HashMap<_, _>:
         Cow::Borrowed("rom") => if let OutputMode::Bench { .. } = output_mode {
             json!(CrossPath::from(uncompressed_base_rom_path).to_unix()?)
@@ -337,6 +337,11 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, uncompressed_
         if creates_log_by_default {
             cmd.arg("--no-log");
         }
+        #[cfg(feature = "nixos")] {
+            if uses_venv {
+                cmd.arg("--no-venv");
+            }
+        }
         match settings {
             RandoSettings::Default => {}
             RandoSettings::Preset(preset) => {
@@ -394,6 +399,11 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, uncompressed_
         cmd.arg("import OoTRandomizer; OoTRandomizer.start()"); // called this way to allow mypyc optimization to work
         if creates_log_by_default {
             cmd.arg("--no_log");
+        }
+        #[cfg(feature = "nixos")] {
+            if uses_venv {
+                cmd.arg("--no-venv");
+            }
         }
         match settings {
             RandoSettings::Default => {}
@@ -524,7 +534,7 @@ pub async fn run_rando(wsl_distro: Option<&str>, repo_path: &Path, uncompressed_
     })
 }
 
-pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, rsl_version: &str, use_rust_cli: bool, supports_unsalted_seeds: bool, creates_log_by_default: bool, seeds: Seeds, preset: Option<&Either<String, serde_json::Map<String, serde_json::Value>>>, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
+pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_distro: Option<&str>, repo_path: &Path, rsl_version: &str, use_rust_cli: bool, supports_unsalted_seeds: bool, creates_log_by_default: bool, uses_venv: bool, seeds: Seeds, preset: Option<&Either<String, serde_json::Map<String, serde_json::Value>>>, seed_idx: SeedIdx, output_mode: OutputMode) -> Result<RollOutput, RollError> {
     let python = python().await?;
     #[cfg_attr(not(target_os = "windows"), allow(unused_mut))] let mut cmd_name = python.display().to_string();
     let (supports_plando_filename_base, supports_seed, supports_no_salt) = if let Some((_, major, minor, patch, supplementary)) = regex_captures!(r"^([0-9]+)\.([0-9]+)\.([0-9]+) Fenhl-([0-9]+)(?: riir-[0-9]+)?$", &rsl_version.trim()) {
@@ -625,7 +635,7 @@ pub async fn run_rsl(#[cfg_attr(not(target_os = "windows"), allow(unused))] wsl_
     if output.status.success() || output.status.code() == Some(3) {
         let stdout = BufRead::lines(&*output.stdout).try_collect::<_, Vec<_>, _>().at_command(cmd_name)?;
         let plando_filename = stdout.iter().rev().find_map(|line| line.strip_prefix("Plando File: ")).ok_or_else(|| RollError::SpoilerLogPath(output.clone()))?;
-        let mut roll_output = run_rando(wsl_distro, &repo_path.join("randomizer"), &repo_path.join("data").join("oot-ntscu-1.0.n64"), use_rust_cli, supports_unsalted_seeds, creates_log_by_default, seeds, &RandoSettings::Default, &serde_json::Map::default(), Some(Path::new(&format!("../data/{plando_filename}"))), false, seed_idx, output_mode).await?;
+        let mut roll_output = run_rando(wsl_distro, &repo_path.join("randomizer"), &repo_path.join("data").join("oot-ntscu-1.0.n64"), use_rust_cli, supports_unsalted_seeds, creates_log_by_default, uses_venv, seeds, &RandoSettings::Default, &serde_json::Map::default(), Some(Path::new(&format!("../data/{plando_filename}"))), false, seed_idx, output_mode).await?;
         roll_output.rsl_plando = Some(repo_path.join("data").join(plando_filename));
         roll_output.rsl_instructions = if let OutputMode::Bench { .. } = output_mode {
             #[cfg(any(target_os = "linux", target_os = "windows"))] {
