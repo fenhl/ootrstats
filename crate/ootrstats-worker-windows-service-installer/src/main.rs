@@ -13,7 +13,13 @@ use {
     },
 };
 
-fn main() -> windows_service::Result<()> {
+#[derive(Debug, thiserror::Error)]
+enum Error {
+    #[error(transparent)] EventLog(#[from] eventlog::Error),
+    #[error(transparent)] WindowsService(#[from] windows_service::Error),
+}
+
+fn main() -> Result<(), Error> {
     eventlog::register("ootrstats")?;
     let service_manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE)?;
     let service_info = ServiceInfo {

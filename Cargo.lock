@@ -3767,6 +3767,7 @@ dependencies = [
  "directories",
  "eventlog",
  "mimalloc",
+ "thiserror 2.0.20",
  "windows-service",
 ]
 
@@ -3775,6 +3776,7 @@ name = "ootrstats-worker-windows-service-uninstaller"
 version = "25.2.0"
 dependencies = [
  "eventlog",
+ "thiserror 2.0.20",
  "windows-service",
  "windows-sys 0.61.2",
 ]

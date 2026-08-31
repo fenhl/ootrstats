@@ -16,7 +16,13 @@ use {
     windows_sys::Win32::Foundation::ERROR_SERVICE_DOES_NOT_EXIST,
 };
 
-fn main() -> windows_service::Result<()> {
+#[derive(Debug, thiserror::Error)]
+enum Error {
+    #[error(transparent)] EventLog(#[from] eventlog::Error),
+    #[error(transparent)] WindowsService(#[from] windows_service::Error),
+}
+
+fn main() -> Result<(), Error> {
     let service_manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
     let service = service_manager.open_service("ootrstats_worker", ServiceAccess::QUERY_STATUS | ServiceAccess::STOP | ServiceAccess::DELETE)?;
     service.delete()?;
@@ -30,11 +36,11 @@ fn main() -> windows_service::Result<()> {
         if let Err(windows_service::Error::Winapi(e)) = service_manager.open_service("ootrstats_worker", ServiceAccess::QUERY_STATUS) {
             if e.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST as i32) {
                 println!("ootrstats_worker is deleted.");
-                return Ok(());
+                return Ok(())
             }
         }
         sleep(Duration::from_secs(1));
     }
-    eventlog::reregister("ootrstats")?;
+    eventlog::deregister("ootrstats")?;
     Ok(())
 }

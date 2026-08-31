@@ -9,5 +9,6 @@ workspace = true
 
 [dependencies]
 eventlog = "0.4"
+thiserror = "2"
 windows-service = "0.8"
 windows-sys = { version = "0.61", features = ["Win32"] }
