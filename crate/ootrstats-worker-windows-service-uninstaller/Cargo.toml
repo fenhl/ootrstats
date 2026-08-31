@@ -8,5 +8,6 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+eventlog = "0.4"
 windows-service = "0.8"
 windows-sys = { version = "0.61", features = ["Win32"] }

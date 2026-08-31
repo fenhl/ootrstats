@@ -35,5 +35,6 @@ fn main() -> windows_service::Result<()> {
         }
         sleep(Duration::from_secs(1));
     }
+    eventlog::reregister("ootrstats")?;
     Ok(())
 }

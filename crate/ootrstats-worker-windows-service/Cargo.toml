@@ -8,6 +8,8 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+eventlog = "0.4"
+log = "0.4"
 mimalloc = "0.1"
 ootrstats-worker-daemon = { path = "../ootrstats-worker-daemon" }
 rocket = "0.5"

@@ -57,12 +57,9 @@ async fn run_service() -> std::result::Result<(), Error> {
 }
 
 fn service_main(_: Vec<OsString>) {
+    eventlog::init("ootrstats", log::Level::Trace).unwrap();
     if let Err(e) = rocket::async_main(run_service()) {
-        if let Some(home_dir) = std::env::home_dir() {
-            let _ = std::fs::write(home_dir.join("ootrstats-worker-windows-service-error.txt"), format!("error in ootrstats-worker-windows-service::run_service (version {}): {e} ({e:?})", env!("CARGO_PKG_VERSION")));
-        } else {
-            let _ = std::fs::write("C:/ootrstats-worker-windows-service-error.txt", format!("error in ootrstats-worker-windows-service::run_service (version {}): {e} ({e:?})", env!("CARGO_PKG_VERSION")));
-        }
+        log::error!("error in ootrstats-worker-windows-service::run_service (version {}): {e} ({e:?})", env!("CARGO_PKG_VERSION"));
         panic!("error in ootrstats-worker-windows-service::run_service (version {}): {e} ({e:?})", env!("CARGO_PKG_VERSION"))
     }
 }

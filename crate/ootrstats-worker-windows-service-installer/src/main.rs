@@ -14,6 +14,7 @@ use {
 };
 
 fn main() -> windows_service::Result<()> {
+    eventlog::register("ootrstats")?;
     let service_manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE)?;
     let service_info = ServiceInfo {
         name: "ootrstats_worker".into(),

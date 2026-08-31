@@ -9,5 +9,6 @@ workspace = true
 
 [dependencies]
 directories = "6"
+eventlog = "0.4"
 mimalloc = "0.1"
 windows-service = "0.8"
