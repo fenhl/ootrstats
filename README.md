@@ -200,6 +200,7 @@ And the following optional entries:
 * `priorityUsers`: A list of usernames. The worker will not start rolling any new seeds while any of these users are signed in. Only supported by workers running on Windows.
 * `hideReboot`: Whether to hide the “Restart” option from the system UI while rolling seeds. Note that this does not prevent the worker from being rebooted by other means, e.g. the command line. The default is `false`. Only supported by workers running on Windows.
 * `hideSleep`: Whether to hide the “Sleep” option from the system UI while rolling seeds. Note that this does not prevent the worker from sleeping for other reasons, e.g. automatic timeout. The default is `false`. Only supported by workers running on Windows.
+* `wakeOnLanMacAddress`: The [MAC address](https://en.wikipedia.org/wiki/MAC_address) of the worker. If specified, the supervisor will attempt to use [Wake-on-LAN](https://en.wikipedia.org/wiki/Wake-on-LAN) to boot or wake the worker before connecting to it. In order for this to succeed, Wake-on-LAN must be correctly configured at the firmware level. Failures are typically silent.
 
 # Usage
 

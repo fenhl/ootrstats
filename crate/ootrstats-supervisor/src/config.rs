@@ -5,6 +5,10 @@ use {
     },
     bytesize::ByteSize,
     serde::Deserialize,
+    serde_with::{
+        DisplayFromStr,
+        serde_as,
+    },
     wheel::fs,
 };
 #[cfg(windows)] use directories::ProjectDirs;
@@ -42,6 +46,7 @@ fn default_image_region() -> String { format!("fr-par") }
 fn default_linode_label() -> String { format!("ootrstats") }
 fn default_linode_region() -> String { format!("eu-central") }
 
+#[serde_as]
 #[derive(Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(crate) enum WorkerKind {
@@ -65,6 +70,8 @@ pub(crate) enum WorkerKind {
         hide_reboot: bool,
         #[serde(default)]
         hide_sleep: bool,
+        #[serde_as(as = "Option<DisplayFromStr>")]
+        wake_on_lan_mac_address: Option<wol::MacAddr>,
     },
     #[serde(rename_all = "camelCase")]
     Linode {

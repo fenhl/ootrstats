@@ -192,7 +192,11 @@ impl Kind {
                     }
                 }
             }
-            Self::WebSocket { tls, hostname, password, wsl_distro, priority_users, hide_reboot, hide_sleep } => {
+            Self::WebSocket { tls, hostname, password, wsl_distro, priority_users, hide_reboot, hide_sleep, wake_on_lan_mac_address } => {
+                if let Some(mac) = wake_on_lan_mac_address {
+                    tx.send((name.clone(), Message::Init(format!("waking worker")))).await?;
+                    wol::send_wol(mac, None, None).at_unknown()?;
+                }
                 tx.send((name.clone(), Message::Init(format!("connecting WebSocket")))).await?;
                 let (sink, stream) = async_proto::websocket030(format!("{}://{hostname}/v{}", if tls { "wss" } else { "ws" }, Version::parse(env!("CARGO_PKG_VERSION"))?.major)).await?;
                 let mut sink = pin!(sink);
