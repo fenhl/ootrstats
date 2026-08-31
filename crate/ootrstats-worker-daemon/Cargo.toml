@@ -14,7 +14,7 @@ nixos = ["ootrstats/nixos"]
 
 [dependencies]
 async-proto = { version = "0.26", features = ["tokio-tungstenite021"] }
-constant_time_eq = "0.5"
+constant_time_eq = "0.6"
 either = "1"
 futures = "0.3"
 itertools = "0.15"
