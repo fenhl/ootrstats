@@ -283,15 +283,7 @@ enum Subcommand {
 #[derive(Debug, thiserror::Error)]
 enum Error {
     #[error(transparent)] Config(#[from] config::Error),
-    #[error(transparent)] GitCheckout(#[from] gix::clone::checkout::main_worktree::Error),
-    #[error(transparent)] GitClone(#[from] gix::clone::Error),
-    #[error(transparent)] GitCloneFetch(#[from] gix::clone::fetch::Error),
-    #[error(transparent)] GitConnect(#[from] gix::remote::connect::Error),
-    #[error(transparent)] GitFetch(#[from] gix::remote::fetch::Error),
-    #[error(transparent)] GitFindRemote(#[from] gix::remote::find::existing::Error),
-    #[error(transparent)] GitHeadId(#[from] gix::reference::head_id::Error),
-    #[error(transparent)] GitOpen(#[from] gix::open::Error),
-    #[error(transparent)] GitPrepareFetch(#[from] gix::remote::fetch::prepare::Error),
+    #[error(transparent)] Git(#[from] gix::Error),
     #[error(transparent)] GitValidateRefName(#[from] gix::validate::reference::name::Error),
     #[error(transparent)] Json(#[from] serde_json::Error),
     #[error(transparent)] Task(#[from] JoinError),
@@ -342,15 +334,7 @@ impl IsNetworkError for Error {
     fn is_network_error(&self) -> bool {
         match self {
             | Self::Config(_)
-            | Self::GitCheckout(_)
-            | Self::GitClone(_)
-            | Self::GitCloneFetch(_)
-            | Self::GitConnect(_)
-            | Self::GitFetch(_)
-            | Self::GitFindRemote(_)
-            | Self::GitHeadId(_)
-            | Self::GitOpen(_)
-            | Self::GitPrepareFetch(_)
+            | Self::Git(_)
             | Self::GitValidateRefName(_)
             | Self::Json(_)
             | Self::Task(_)
